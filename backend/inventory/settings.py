@@ -12,7 +12,7 @@ DEBUG = True
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
-    'https://inventory-tool-plage.onrender.com',  # Ajoute l’URL ngrok ici
+    'inventory-tool-plage.onrender.com',  # Ajoute l’URL ngrok ici
 ]
 
 INSTALLED_APPS = [
