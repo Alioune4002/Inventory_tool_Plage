@@ -25,8 +25,10 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+from django.http import JsonResponse
+
 def home(request):
-    return render(request, 'home.html')
+    return JsonResponse({"message": "Bienvenue sur l'API de Inventory Tool ! Utilisez /api/products/ pour accéder aux données."})
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
