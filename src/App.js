@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import jsQR from 'jsqr';
+import Quagga from 'quagga'; // Nouvelle bibliothèque pour le scan
 import './App.css';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
@@ -40,7 +40,6 @@ function App() {
   const barcodeInputRef = useRef(null);
   const formRef = useRef(null);
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
 
   const BASE_URL = process.env.NODE_ENV === 'production'
     ? 'https://inventory-tool-plage.onrender.com'
@@ -92,11 +91,9 @@ function App() {
 
   const startScanning = async () => {
     try {
-      console.log('Démarrage scanner...');
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('getUserMedia non supporté par ce navigateur');
       }
-      console.log('Demande accès caméra...');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -104,75 +101,74 @@ function App() {
           height: { ideal: 720 }
         }
       });
-      console.log('Stream obtenu:', stream);
       videoRef.current.srcObject = stream;
-      console.log('Lecture vidéo...');
       await videoRef.current.play();
-      console.log('Vidéo jouée');
-      scanFrame();
+
+      Quagga.init({
+        inputStream: {
+          type: 'LiveStream',
+          target: videoRef.current,
+          constraints: {
+            facingMode: 'environment',
+            width: { min: 640 },
+            height: { min: 480 }
+          }
+        },
+        decoder: {
+          readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader'] // Supporte plusieurs formats
+        }
+      }, (err) => {
+        if (err) {
+          console.error('Erreur initialisation Quagga:', err);
+          alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
+          setIsScanning(false);
+          return;
+        }
+        Quagga.start();
+      });
+
+      Quagga.onDetected((data) => {
+        console.log('Code-barres détecté:', data.codeResult.code);
+        setIsScanning(false);
+        handleBarcodeInput(data.codeResult.code);
+        try {
+          new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
+        } catch (err) {
+          console.error('Erreur lecture audio:', err);
+        }
+      });
     } catch (error) {
       console.error('Erreur démarrage scanner:', error);
-      alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS (URL doit être en https://), permissions caméra, et utilisez Chrome/Safari récent.`);
+      alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS, permissions caméra, et utilisez Chrome/Safari récent.`);
       setIsScanning(false);
     }
   };
 
   const stopScanning = () => {
     if (videoRef.current && videoRef.current.srcObject) {
-      console.log('Arrêt scanner...');
       videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
-  };
-
-  const scanFrame = () => {
-    if (!isScanning || !videoRef.current || videoRef.current.readyState !== 4) {
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQR(imageData.data, imageData.width, imageData.height, {
-      inversionAttempts: 'dontInvert'
-    });
-
-    if (code) {
-      console.log('Code-barres détecté:', code.data);
-      const scannedBarcode = code.data;
-      setIsScanning(false);
-      handleBarcodeInput(scannedBarcode);
-      try {
-        new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
-      } catch (err) {
-        console.error('Erreur lecture audio:', err);
-      }
-    } else {
-      requestAnimationFrame(scanFrame);
-    }
+    Quagga.stop();
   };
 
   const fetchProducts = () => {
-  axios.get(`${BASE_URL}/api/products/?month=${selectedMonth}`)
-    .then(res => {
-      console.log('Produits récupérés:', res.data);
-      if (Array.isArray(res.data)) {
-        setProducts(res.data);
-      } else {
-        console.error('La réponse API n’est pas un tableau:', res.data);
+    axios.get(`${BASE_URL}/api/products/?month=${selectedMonth}`)
+      .then(res => {
+        console.log('Produits récupérés:', res.data);
+        if (Array.isArray(res.data)) {
+          setProducts(res.data);
+        } else {
+          console.error('La réponse API n’est pas un tableau:', res.data);
+          setProducts([]);
+        }
+      })
+      .catch(err => {
+        console.error('Erreur fetch produits:', err.response ? err.response.data : err.message);
+        alert('Erreur de connexion au backend. Vérifiez que le serveur est en marche et accessible via ngrok.');
         setProducts([]);
-      }
-    })
-    .catch(err => {
-      console.error('Erreur fetch produits:', err.response ? err.response.data : err.message);
-      alert('Erreur de connexion au backend. Vérifiez que le serveur est en marche et accessible via ngrok.');
-      setProducts([]);
-    });
-};
+      });
+  };
 
   const fetchStats = () => {
     axios.get(`${BASE_URL}/api/inventory-stats/?month=${selectedMonth}`)
@@ -248,11 +244,9 @@ function App() {
     } else {
       const newForm = { ...form, [name]: value };
       if (name === 'category') {
-        // Si "Portants" ou "Articles de plage" est sélectionné, définir la TVA à 20 % par défaut
         if (value === 'portants' || value === 'articles_de_plage') {
           newForm.tva = '20';
         } else if (form.tva === '20') {
-          // Si on change de catégorie et que la TVA était 20 %, réinitialiser à 5.5 % sauf si la nouvelle catégorie est aussi "Portants" ou "Articles de plage"
           newForm.tva = '5.5';
         }
       }
@@ -266,7 +260,7 @@ function App() {
       category: product.category,
       purchase_price: product.purchase_price,
       selling_price: product.selling_price,
-      tva: product.tva || '5.5', // Utiliser la TVA enregistrée ou 5.5 % par défaut, sans forcer 20 %
+      tva: product.tva || '5.5',
       dlc: product.dlc || '',
       quantity: product.quantity,
       barcode: product.barcode || ''
@@ -357,7 +351,7 @@ function App() {
         category: category,
         purchase_price: purchasePrice,
         selling_price: '',
-        tva: category === 'portants' || category === 'articles_de_plage' ? '20' : tva, // Définir la TVA à 20 % pour ces catégories lors de l'ajout
+        tva: category === 'portants' || category === 'articles_de_plage' ? '20' : tva,
         dlc: '',
         quantity: '',
         barcode: scannedBarcode
@@ -406,11 +400,11 @@ function App() {
     }
   };
 
- const filteredProducts = Array.isArray(products) ? products.filter(product => {
-  const matchesCategory = selectedCategory ? product.category === selectedCategory : true;
-  const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
-  return matchesCategory && matchesSearch;
-}) : [];
+  const filteredProducts = Array.isArray(products) ? products.filter(product => {
+    const matchesCategory = selectedCategory ? product.category === selectedCategory : true;
+    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  }) : [];
 
   const categoriesForSelect = categories.map(cat => cat.value);
 
@@ -713,14 +707,13 @@ function App() {
       {isScanning && (
         <div className="scanner">
           <video ref={videoRef} style={{ width: '300px', height: '300px' }} />
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
         </div>
       )}
       {categoriesForSelect.map(category => (
         groupedProducts[category].length > 0 && (
           <div key={category}>
             <h2>{categories.find(cat => cat.value === category).label}</h2>
-            <table>
+            <table className="table-responsive">
               <thead>
                 <tr>
                   <th>Nom</th>
@@ -738,12 +731,12 @@ function App() {
               <tbody>
                 {groupedProducts[category].map(product => (
                   <tr key={product.id}>
-                    <td>{product.name}</td>
-                    <td>{categories.find(cat => cat.value === product.category).label}</td>
+                    <td title={product.name}>{product.name.length > 15 ? product.name.slice(0, 15) + '...' : product.name}</td>
+                    <td title={categories.find(cat => cat.value === product.category).label}>{categories.find(cat => cat.value === product.category).label.length > 15 ? categories.find(cat => cat.value === product.category).label.slice(0, 15) + '...' : categories.find(cat => cat.value === product.category).label}</td>
                     <td>{product.purchase_price} €</td>
                     <td>{product.selling_price} €</td>
                     <td>{product.tva || '-'}</td>
-                    <td>{product.dlc || '-'}</td>
+                    <td title={product.dlc}>{product.dlc && product.dlc.length > 10 ? product.dlc.slice(0, 10) + '...' : product.dlc || '-'}</td>
                     <td>{product.quantity}</td>
                     <td>{product.barcode || '-'}</td>
                     <td>{product.inventory_month}</td>
@@ -788,10 +781,9 @@ function App() {
           ))}
         </div>
       </div>
-        <footer style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px', color: '#999' }}>
-          By Alioune.              © 2025 Inventaire Épicerie La Plage.
-        </footer>
-      
+      <footer style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px', color: '#999' }}>
+        By Alioune.              © 2025 Inventaire Épicerie La Plage.
+      </footer>
     </div>
   );
 }

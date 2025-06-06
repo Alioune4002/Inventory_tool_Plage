@@ -125,8 +125,14 @@ button i {
   text-align: center;
 }
 
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+}
+
 table {
   width: 100%;
+  min-width: 800px;
   border-collapse: collapse;
   background-color: #fff;
   border-radius: 8px;
@@ -140,12 +146,19 @@ td {
   padding: 12px;
   text-align: center;
   border-bottom: 1px solid #eee;
+  white-space: nowrap;
 }
 
 th {
   background-color: #005566;
   color: #fff;
   font-weight: 600;
+}
+
+td {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 tr:hover {
@@ -201,6 +214,16 @@ tr:hover {
 
   .filter {
     flex-direction: column;
+  }
+
+  .table-responsive {
+    min-width: 100%;
+  }
+
+  th,
+  td {
+    padding: 8px;
+    font-size: 12px;
   }
 }
 
