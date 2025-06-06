@@ -46,14 +46,7 @@ function App() {
     : 'http://localhost:8000';
 
   useEffect(() => {
-    fetch('/prices.json')
-      .then(res => {
-        if (!res.ok) throw new Error('Erreur réseau prices.json');
-        return res.json();
-      })
-      .then(data => setPrices(data))
-      .catch(err => console.error('Erreur chargement prices.json:', err));
-
+    fetchPrices();
     fetchProducts();
     fetchStats();
     validateInventoryMonth(inventoryMonth);
@@ -70,6 +63,19 @@ function App() {
       stopScanning();
     }
   }, [isScanning]);
+
+  const fetchPrices = () => {
+    fetch('/prices.json')
+      .then(res => {
+        if (!res.ok) {
+          console.error('Erreur réseau prices.json:', res.status, res.statusText);
+          return null;
+        }
+        return res.json();
+      })
+      .then(data => data && setPrices(data))
+      .catch(err => console.error('Erreur chargement prices.json:', err));
+  };
 
   const validateInventoryMonth = (month) => {
     const selectedDate = new Date(month + '-01');
@@ -101,42 +107,46 @@ function App() {
           height: { ideal: 720 }
         }
       });
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
 
-      Quagga.init({
-        inputStream: {
-          type: 'LiveStream',
-          target: videoRef.current,
-          constraints: {
-            facingMode: 'environment',
-            width: { min: 640 },
-            height: { min: 480 }
+        Quagga.init({
+          inputStream: {
+            type: 'LiveStream',
+            target: videoRef.current,
+            constraints: {
+              facingMode: 'environment',
+              width: { min: 640 },
+              height: { min: 480 }
+            }
+          },
+          decoder: {
+            readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader']
           }
-        },
-        decoder: {
-          readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader'] // Supporte plusieurs formats
-        }
-      }, (err) => {
-        if (err) {
-          console.error('Erreur initialisation Quagga:', err);
-          alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
-          setIsScanning(false);
-          return;
-        }
-        Quagga.start();
-      });
+        }, (err) => {
+          if (err) {
+            console.error('Erreur initialisation Quagga:', err);
+            alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
+            setIsScanning(false);
+            return;
+          }
+          Quagga.start();
+        });
 
-      Quagga.onDetected((data) => {
-        console.log('Code-barres détecté:', data.codeResult.code);
-        setIsScanning(false);
-        handleBarcodeInput(data.codeResult.code);
-        try {
-          new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
-        } catch (err) {
-          console.error('Erreur lecture audio:', err);
-        }
-      });
+        Quagga.onDetected((data) => {
+          if (data && data.codeResult && data.codeResult.code) {
+            console.log('Code-barres détecté:', data.codeResult.code);
+            setIsScanning(false);
+            handleBarcodeInput(data.codeResult.code);
+            try {
+              new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
+            } catch (err) {
+              console.error('Erreur lecture audio:', err);
+            }
+          }
+        });
+      }
     } catch (error) {
       console.error('Erreur démarrage scanner:', error);
       alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS, permissions caméra, et utilisez Chrome/Safari récent.`);
@@ -149,7 +159,7 @@ function App() {
       videoRef.current.srcObject.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
-    Quagga.stop();
+    if (Quagga) Quagga.stop(); // Vérifie que Quagga est initialisé
   };
 
   const fetchProducts = () => {
