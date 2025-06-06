@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import Quagga from 'quagga'; // Nouvelle bibliothèque pour le scan
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import './App.css';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement);
@@ -28,7 +28,6 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [barcodeSearch, setBarcodeSearch] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const [isQuaggaInitialized, setIsQuaggaInitialized] = useState(false);
   const [prices, setPrices] = useState({});
   const [categories, setCategories] = useState([
     { value: 'sec', label: 'Sec' },
@@ -40,23 +39,25 @@ function App() {
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const barcodeInputRef = useRef(null);
   const formRef = useRef(null);
-  const videoRef = useRef(null);
+  const scannerInstanceRef = useRef(null);
 
-  const BASE_URL = process.env.NODE_ENV === 'production'
-    ? 'https://inventory-tool-plage.onrender.com'
-    : 'http://localhost:8000';
+  const BASE_URL = 'https://inventory-tool-plage.onrender.com';
 
   const fetchPrices = useCallback(() => {
     fetch('/prices.json')
       .then(res => {
         if (!res.ok) {
           console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
-          return {};
+          setPrices({});
+          return;
         }
         return res.json();
       })
       .then(data => setPrices(data || {}))
-      .catch(err => console.error('Erreur chargement prices.json:', err));
+      .catch(err => {
+        console.error('Erreur chargement prices.json:', err);
+        setPrices({});
+      });
   }, []);
 
   const validateInventoryMonth = useCallback((month) => {
@@ -90,7 +91,7 @@ function App() {
       })
       .catch(err => {
         console.error('Erreur fetch produits:', err.response ? err.response.data : err.message);
-        alert('Erreur de connexion au backend. Vérifiez que le serveur est en marche et accessible via ngrok.');
+        alert('Erreur de connexion au backend. Vérifiez que le serveur est en marche et accessible.');
         setProducts([]);
       });
   }, [selectedMonth, BASE_URL]);
@@ -111,98 +112,98 @@ function App() {
     validateInventoryMonth(inventoryMonth);
   }, [fetchPrices, fetchProducts, fetchStats, validateInventoryMonth, selectedMonth, inventoryMonth]);
 
-  const startScanning = useCallback(async () => {
-    if (!videoRef.current) {
-      console.error('Erreur : videoRef n\'est pas initialisé');
-      setIsScanning(false);
-      return;
+  const startScanning = useCallback(() => {
+    if (scannerInstanceRef.current) {
+      scannerInstanceRef.current.clear();
+      scannerInstanceRef.current = null;
     }
 
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('getUserMedia non supporté par ce navigateur');
+    const scanner = new Html5QrcodeScanner(
+      'reader',
+      { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128'] },
+      false
+    );
+
+    scanner.render(
+      (decodedText) => {
+        console.log('Code-barres détecté:', decodedText);
+        setIsScanning(false);
+        handleBarcodeInput(decodedText);
+        scanner.clear();
+        scannerInstanceRef.current = null;
+           try {
+             new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
+           } catch (err) {
+             console.error('Erreur lecture audio:', err);
+           }
+      },
+      (error) => {
+        console.warn('Erreur scan:', error);
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      });
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
+    );
 
-      Quagga.init({
-        inputStream: {
-          type: 'LiveStream',
-          target: videoRef.current,
-          constraints: {
-            facingMode: 'environment',
-            width: { min: 640 },
-            height: { min: 480 }
-          }
-        },
-        decoder: {
-          readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader']
-        }
-      }, (err) => {
-        if (err) {
-          console.error('Erreur initialisation Quagga:', err);
-          alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
-          setIsScanning(false);
-          return;
-        }
-        setIsQuaggaInitialized(true);
-        Quagga.start();
-      });
-
-      Quagga.onDetected((data) => {
-        if (data && data.codeResult && data.codeResult.code) {
-          console.log('Code-barres détecté:', data.codeResult.code);
-          setIsScanning(false);
-          handleBarcodeInput(data.codeResult.code);
-          try {
-            new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
-          } catch (err) {
-            console.error('Erreur lecture audio:', err);
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Erreur démarrage scanner:', error);
-      alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS, permissions caméra, et utilisez Chrome/Safari récent.`);
-      setIsScanning(false);
-    }
+    scannerInstanceRef.current = scanner;
   }, []);
 
   const stopScanning = useCallback(() => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
+    if (scannerInstanceRef.current) {
+      scannerInstanceRef.current.clear();
+      scannerInstanceRef.current = null;
     }
-    if (isQuaggaInitialized && typeof Quagga !== 'undefined' && Quagga) {
-      Quagga.stop();
-      setIsQuaggaInitialized(false);
+  }, []);
+
+  useEffect(() => {
+    if (isScanning) {
+      startScanning();
+    } else {
+      stopScanning();
     }
-  }, [isQuaggaInitialized]);
+  }, [isScanning, startScanning, stopScanning]);
 
   const handleScanToggle = () => {
-    if (isScanning) {
-      stopScanning();
-      setIsScanning(false);
-    } else {
-      setIsScanning(true);
-      startScanning();
-    }
+    setIsScanning(!isScanning);
     if (!isScanning) focusBarcodeInput();
   };
 
-  const handleSubmit = (e) => {
+  const openDB = () => {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('inventoryDB', 1);
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        if (!db.objectStoreNames.contains('pending-products')) {
+          db.createObjectStore('pending-products', { keyPath: 'id' });
+        }
+      };
+      request.onsuccess = (event) => {
+        const db = event.target.result;
+        resolve(db);
+      };
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  };
+
+  const saveProductLocally = async (product) => {
+    try {
+      const db = await openDB();
+      const tx = db.transaction('pending-products', 'readwrite');
+      const store = tx.objectStore('pending-products');
+      await store.put({ ...product, id: Date.now() });
+      await tx.complete;
+    } catch (error) {
+      console.error('Erreur sauvegarde locale:', error);
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const data = { ...form, inventory_month: inventoryMonth };
     if (!data.tva) delete data.tva;
     if (!data.dlc || data.category === 'non_perissable') delete data.dlc;
     if (!data.barcode) delete data.barcode;
+
+    await saveProductLocally(data);
 
     if (editId) {
       axios.put(`${BASE_URL}/api/products/${editId}/`, data)
@@ -211,6 +212,11 @@ function App() {
           fetchStats();
           resetForm();
           focusBarcodeInput();
+          if ('serviceWorker' in navigator && 'SyncManager' in window) {
+            navigator.serviceWorker.ready.then((registration) => {
+              registration.sync.register('sync-products');
+            });
+          }
         })
         .catch(err => {
           console.error('Erreur mise à jour produit:', err);
@@ -225,6 +231,11 @@ function App() {
           fetchStats();
           resetForm();
           focusBarcodeInput();
+          if ('serviceWorker' in navigator && 'SyncManager' in window) {
+            navigator.serviceWorker.ready.then((registration) => {
+              registration.sync.register('sync-products');
+            });
+          }
         })
         .catch(err => {
           console.error('Erreur ajout produit:', err);
@@ -381,12 +392,14 @@ function App() {
   };
 
   const handleBarcodeSearch = async (e) => {
-    if (e.key === 'Enter' && barcodeSearch) {
-      await handleBarcodeInput(barcodeSearch);
-      try {
-        new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
-      } catch (err) {
-        console.error('Erreur lecture audio:', err);
+    if (e.key === 'Enter' || e.type === 'click') {
+      if (barcodeSearch) {
+        await handleBarcodeInput(barcodeSearch);
+           try {
+             new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
+           } catch (err) {
+             console.error('Erreur lecture audio:', err);
+           }
       }
     }
   };
@@ -504,9 +517,14 @@ function App() {
     }
   };
 
+  const calculateMarginPercentage = (purchaseValue, sellingValue) => {
+    if (purchaseValue === 0) return 0;
+    return (((sellingValue - purchaseValue) / purchaseValue) * 100).toFixed(2);
+  };
+
   return (
     <div className="container">
-      <h1>Inventaire Épicerie</h1>
+      <h1>🏖️INVENTORIUM🌊EPICERIE🧺LA PLAGE🏖️</h1>
       <form ref={formRef} onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="name">Nom du produit</label>
@@ -703,73 +721,85 @@ function App() {
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
         />
-        <label>Code-barres : </label>
-        <input
-          ref={barcodeInputRef}
-          type="tel"
-          placeholder="Scanner ou entrer code-barres"
-          value={barcodeSearch}
-          onChange={e => setBarcodeSearch(e.target.value)}
-          onKeyPress={handleBarcodeSearch}
-          pattern="[0-9]*"
-          inputMode="numeric"
-          autoFocus
-        />
+        <div className="barcode-search">
+          <label>Code-barres : </label>
+          <input
+            ref={barcodeInputRef}
+            type="tel"
+            placeholder="Scanner ou entrer code-barres"
+            value={barcodeSearch}
+            onChange={e => setBarcodeSearch(e.target.value)}
+            onKeyPress={handleBarcodeSearch}
+            pattern="[0-9]*"
+            inputMode="numeric"
+            autoFocus
+            enterKeyHint="done"
+            onBlur={() => handleBarcodeSearch({ key: 'Enter' })}
+          />
+          <button onClick={handleBarcodeSearch}>
+            <i className="fas fa-check"></i> Valider
+          </button>
+        </div>
         <button onClick={handleScanToggle}>
           <i className="fas fa-camera"></i> {isScanning ? 'Arrêter Scan' : 'Scanner'}
         </button>
         <button onClick={handleExportExcel}>
           <i className="fas fa-file-excel"></i> Exporter Excel
         </button>
+        <button onClick={() => fetchProducts()}>
+          <i className="fas fa-sync"></i> Rafraîchir les données
+        </button>
       </div>
       {isScanning && (
         <div className="scanner">
-          <video ref={videoRef} style={{ width: '300px', height: '300px' }} />
+          <div id="reader" style={{ width: '300px', height: '300px' }} />
         </div>
       )}
       {categoriesForSelect.map(category => (
         groupedProducts[category].length > 0 && (
-          <div key={category}>
+          <div key={category} className="products-section">
             <h2>{categories.find(cat => cat.value === category).label}</h2>
-            <table className="table-responsive">
-              <thead>
-                <tr>
-                  <th>Nom</th>
-                  <th>Catégorie</th>
-                  <th>Prix d'achat</th>
-                  <th>Prix de vente</th>
-                  <th>TVA (%)</th>
-                  <th>DLC</th>
-                  <th>Quantité</th>
-                  <th>Code-barres</th>
-                  <th>Mois</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groupedProducts[category].map(product => (
-                  <tr key={product.id}>
-                    <td title={product.name}>{product.name.length > 15 ? product.name.slice(0, 15) + '...' : product.name}</td>
-                    <td title={categories.find(cat => cat.value === product.category).label}>{categories.find(cat => cat.value === product.category).label.length > 15 ? categories.find(cat => cat.value === product.category).label.slice(0, 15) + '...' : categories.find(cat => cat.value === product.category).label}</td>
-                    <td>{product.purchase_price} €</td>
-                    <td>{product.selling_price} €</td>
-                    <td>{product.tva || '-'}</td>
-                    <td title={product.dlc}>{product.dlc && product.dlc.length > 10 ? product.dlc.slice(0, 10) + '...' : product.dlc || '-'}</td>
-                    <td>{product.quantity}</td>
-                    <td>{product.barcode || '-'}</td>
-                    <td>{product.inventory_month}</td>
-                    <td>
-                      <button onClick={() => handleEdit(product)}>
-                        <i className="fas fa-pen"></i> Modifier
-                      </button>
-                      <button onClick={() => handleDelete(product.id)}>
-                        <i className="fas fa-trash"></i> Supprimer
-                      </button>
-                    </td>
+            <div className="table-container">
+              <table className="table-responsive">
+                <thead>
+                  <tr>
+                    <th>Nom</th>
+                    <th>Catégorie</th>
+                    <th>Prix d'achat</th>
+                    <th>Prix de vente</th>
+                    <th>TVA (%)</th>
+                    <th>DLC</th>
+                    <th>Quantité</th>
+                    <th>Code-barres</th>
+                    <th>Mois</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {groupedProducts[category].map(product => (
+                    <tr key={product.id}>
+                      <td title={product.name}>{product.name.length > 15 ? product.name.slice(0, 15) + '...' : product.name}</td>
+                      <td title={categories.find(cat => cat.value === product.category).label}>{categories.find(cat => cat.value === product.category).label.length > 15 ? categories.find(cat => cat.value === product.category).label.slice(0, 15) + '...' : categories.find(cat => cat.value === product.category).label}</td>
+                      <td>{product.purchase_price} €</td>
+                      <td>{product.selling_price} €</td>
+                      <td>{product.tva || '-'}</td>
+                      <td title={product.dlc}>{product.dlc && product.dlc.length > 10 ? product.dlc.slice(0, 10) + '...' : product.dlc || '-'}</td>
+                      <td>{product.quantity}</td>
+                      <td>{product.barcode || '-'}</td>
+                      <td>{product.inventory_month}</td>
+                      <td>
+                        <button onClick={() => handleEdit(product)}>
+                          <i className="fas fa-pen"></i> Modifier
+                        </button>
+                        <button onClick={() => handleDelete(product.id)}>
+                          <i className="fas fa-trash"></i> Supprimer
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )
       ))}
@@ -794,13 +824,13 @@ function App() {
               <p>Quantité : {cat.total_quantity || 0}</p>
               <p>Valeur achat : {(cat.total_purchase_value || 0).toFixed(2)} €</p>
               <p>Valeur vente : {(cat.total_selling_value || 0).toFixed(2)} €</p>
-              <p>Marge moyenne : {(cat.avg_margin || 0).toFixed(2)} €</p>
+              <p>Marge moyenne : {calculateMarginPercentage(cat.total_purchase_value || 0, cat.total_selling_value || 0)} % ({(cat.avg_margin || 0).toFixed(2)} €)</p>
             </div>
           ))}
         </div>
       </div>
       <footer style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px', color: '#999' }}>
-        By Alioune.              © 2025 Inventaire Épicerie La Plage.
+        By Alioune. © 2025 Inventaire Épicerie La Plage.
       </footer>
     </div>
   );
