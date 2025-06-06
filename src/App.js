@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
@@ -28,6 +28,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [barcodeSearch, setBarcodeSearch] = useState('');
   const [isScanning, setIsScanning] = useState(false);
+  const [isQuaggaInitialized, setIsQuaggaInitialized] = useState(false);
   const [prices, setPrices] = useState({});
   const [categories, setCategories] = useState([
     { value: 'sec', label: 'Sec' },
@@ -45,39 +46,20 @@ function App() {
     ? 'https://inventory-tool-plage.onrender.com'
     : 'http://localhost:8000';
 
-  useEffect(() => {
-    fetchPrices();
-    fetchProducts();
-    fetchStats();
-    validateInventoryMonth(inventoryMonth);
-
-    return () => {
-      stopScanning();
-    };
-  }, [selectedMonth, inventoryMonth]);
-
-  useEffect(() => {
-    if (isScanning) {
-      startScanning();
-    } else {
-      stopScanning();
-    }
-  }, [isScanning]);
-
-  const fetchPrices = () => {
+  const fetchPrices = useCallback(() => {
     fetch('/prices.json')
       .then(res => {
         if (!res.ok) {
-          console.error('Erreur réseau prices.json:', res.status, res.statusText);
-          return null;
+          console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
+          return {};
         }
         return res.json();
       })
-      .then(data => data && setPrices(data))
+      .then(data => setPrices(data || {}))
       .catch(err => console.error('Erreur chargement prices.json:', err));
-  };
+  }, []);
 
-  const validateInventoryMonth = (month) => {
+  const validateInventoryMonth = useCallback((month) => {
     const selectedDate = new Date(month + '-01');
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
@@ -93,76 +75,9 @@ function App() {
     } else {
       setFutureMonthMessage('');
     }
-  };
+  }, []);
 
-  const startScanning = async () => {
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('getUserMedia non supporté par ce navigateur');
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-
-        Quagga.init({
-          inputStream: {
-            type: 'LiveStream',
-            target: videoRef.current,
-            constraints: {
-              facingMode: 'environment',
-              width: { min: 640 },
-              height: { min: 480 }
-            }
-          },
-          decoder: {
-            readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader']
-          }
-        }, (err) => {
-          if (err) {
-            console.error('Erreur initialisation Quagga:', err);
-            alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
-            setIsScanning(false);
-            return;
-          }
-          Quagga.start();
-        });
-
-        Quagga.onDetected((data) => {
-          if (data && data.codeResult && data.codeResult.code) {
-            console.log('Code-barres détecté:', data.codeResult.code);
-            setIsScanning(false);
-            handleBarcodeInput(data.codeResult.code);
-            try {
-              new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
-            } catch (err) {
-              console.error('Erreur lecture audio:', err);
-            }
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Erreur démarrage scanner:', error);
-      alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS, permissions caméra, et utilisez Chrome/Safari récent.`);
-      setIsScanning(false);
-    }
-  };
-
-  const stopScanning = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-    if (Quagga) Quagga.stop(); // Vérifie que Quagga est initialisé
-  };
-
-  const fetchProducts = () => {
+  const fetchProducts = useCallback(() => {
     axios.get(`${BASE_URL}/api/products/?month=${selectedMonth}`)
       .then(res => {
         console.log('Produits récupérés:', res.data);
@@ -178,15 +93,108 @@ function App() {
         alert('Erreur de connexion au backend. Vérifiez que le serveur est en marche et accessible via ngrok.');
         setProducts([]);
       });
-  };
+  }, [selectedMonth, BASE_URL]);
 
-  const fetchStats = () => {
+  const fetchStats = useCallback(() => {
     axios.get(`${BASE_URL}/api/inventory-stats/?month=${selectedMonth}`)
       .then(res => {
         console.log('Stats récupérées:', res.data);
         setStats(res.data);
       })
       .catch(err => console.error('Erreur fetch stats:', err));
+  }, [selectedMonth, BASE_URL]);
+
+  useEffect(() => {
+    fetchPrices();
+    fetchProducts();
+    fetchStats();
+    validateInventoryMonth(inventoryMonth);
+  }, [fetchPrices, fetchProducts, fetchStats, validateInventoryMonth, selectedMonth, inventoryMonth]);
+
+  const startScanning = useCallback(async () => {
+    if (!videoRef.current) {
+      console.error('Erreur : videoRef n\'est pas initialisé');
+      setIsScanning(false);
+      return;
+    }
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('getUserMedia non supporté par ce navigateur');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+
+      Quagga.init({
+        inputStream: {
+          type: 'LiveStream',
+          target: videoRef.current,
+          constraints: {
+            facingMode: 'environment',
+            width: { min: 640 },
+            height: { min: 480 }
+          }
+        },
+        decoder: {
+          readers: ['ean_reader', 'ean_8_reader', 'code_128_reader', 'upc_reader', 'upc_e_reader']
+        }
+      }, (err) => {
+        if (err) {
+          console.error('Erreur initialisation Quagga:', err);
+          alert(`Erreur caméra : ${err.message}. Vérifiez les permissions et utilisez Chrome/Safari récent.`);
+          setIsScanning(false);
+          return;
+        }
+        setIsQuaggaInitialized(true);
+        Quagga.start();
+      });
+
+      Quagga.onDetected((data) => {
+        if (data && data.codeResult && data.codeResult.code) {
+          console.log('Code-barres détecté:', data.codeResult.code);
+          setIsScanning(false);
+          handleBarcodeInput(data.codeResult.code);
+          try {
+            new Audio('/beep-short.mp3').play().catch(err => console.error('Erreur audio:', err));
+          } catch (err) {
+            console.error('Erreur lecture audio:', err);
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Erreur démarrage scanner:', error);
+      alert(`Erreur caméra : ${error.message}. Vérifiez HTTPS, permissions caméra, et utilisez Chrome/Safari récent.`);
+      setIsScanning(false);
+    }
+  }, []);
+
+  const stopScanning = useCallback(() => {
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    if (isQuaggaInitialized && typeof Quagga !== 'undefined' && Quagga) {
+      Quagga.stop();
+      setIsQuaggaInitialized(false);
+    }
+  }, [isQuaggaInitialized]);
+
+  const handleScanToggle = () => {
+    if (isScanning) {
+      stopScanning();
+      setIsScanning(false);
+    } else {
+      setIsScanning(true);
+      startScanning();
+    }
+    if (!isScanning) focusBarcodeInput();
   };
 
   const handleSubmit = (e) => {
@@ -707,7 +715,7 @@ function App() {
           inputMode="numeric"
           autoFocus
         />
-        <button onClick={() => { setIsScanning(!isScanning); if (!isScanning) focusBarcodeInput(); }}>
+        <button onClick={handleScanToggle}>
           <i className="fas fa-camera"></i> {isScanning ? 'Arrêter Scan' : 'Scanner'}
         </button>
         <button onClick={handleExportExcel}>
