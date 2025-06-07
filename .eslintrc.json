@@ -1,0 +1,15 @@
+{
+  "extends": ["react-app"],
+  "env": {
+    "browser": true,
+    "es2021": true,
+    "worker": true
+  },
+  "globals": {
+    "self": true
+  },
+  "rules": {
+    "no-restricted-globals": "off"
+  },
+  "ignorePatterns": ["node_modules/", "build/"]
+}
