@@ -196,55 +196,40 @@ function App() {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const data = { ...form, inventory_month: inventoryMonth };
-    if (!data.tva) delete data.tva;
-    if (!data.dlc || data.category === 'non_perissable') delete data.dlc;
-    if (!data.barcode) delete data.barcode;
+const handleSubmit = async (e) => {
+  e.preventDefault();
+  const data = { ...form, inventory_month: inventoryMonth };
+  if (!data.tva) delete data.tva;
+  if (!data.dlc || data.category === 'non_perissable') delete data.dlc;
+  if (!data.barcode) delete data.barcode;
 
-    await saveProductLocally(data);
+  await saveProductLocally(data);
 
-    if (editId) {
-      axios.put(`${BASE_URL}/api/products/${editId}/`, data)
-        .then(() => {
-          fetchProducts();
-          fetchStats();
-          resetForm();
-          focusBarcodeInput();
-          if ('serviceWorker' in navigator && 'SyncManager' in window) {
-            navigator.serviceWorker.ready.then((registration) => {
-              registration.sync.register('sync-products');
-            });
-          }
-        })
-        .catch(err => {
-          console.error('Erreur mise à jour produit:', err);
-          if (err.response && err.response.status === 400) {
-            alert('Erreur : Ce code-barres est déjà utilisé par un autre produit.');
-          }
+  const request = editId
+    ? axios.put(`${BASE_URL}/api/products/${editId}/`, data)
+    : axios.post(`${BASE_URL}/api/products/`, data);
+
+  request
+    .then(() => {
+      fetchProducts();
+      fetchStats();
+      resetForm();
+      focusBarcodeInput();
+      if ('serviceWorker' in navigator && 'SyncManager' in window) {
+        navigator.serviceWorker.ready.then((registration) => {
+          registration.sync.register('sync-products').catch(err =>
+            console.error('Sync registration failed:', err)
+          );
         });
-    } else {
-      axios.post(`${BASE_URL}/api/products/`, data)
-        .then(() => {
-          fetchProducts();
-          fetchStats();
-          resetForm();
-          focusBarcodeInput();
-          if ('serviceWorker' in navigator && 'SyncManager' in window) {
-            navigator.serviceWorker.ready.then((registration) => {
-              registration.sync.register('sync-products');
-            });
-          }
-        })
-        .catch(err => {
-          console.error('Erreur ajout produit:', err);
-          if (err.response && err.response.status === 400) {
-            alert('Erreur : Ce code-barres est déjà utilisé par un autre produit.');
-          }
-        });
-    }
-  };
+      }
+    })
+    .catch(err => {
+      console.error(`Erreur ${editId ? 'mise à jour' : 'ajout'} produit:`, err);
+      if (err.response && err.response.status === 400) {
+        alert('Erreur : Ce code-barres est déjà utilisé par un autre produit.');
+      }
+    });
+};
 
   const resetForm = () => {
     setForm({
