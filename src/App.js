@@ -43,22 +43,22 @@ function App() {
 
   const BASE_URL = 'https://inventory-tool-plage.onrender.com';
 
-const fetchPrices = useCallback(() => {
-  fetch('/prices.json')
-    .then(res => {
-      if (!res.ok) {
-        console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
+  const fetchPrices = useCallback(() => {
+    fetch('/prices.json')
+      .then(res => {
+        if (!res.ok) {
+          console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
+          setPrices({});
+          return;
+        }
+        return res.json();
+      })
+      .then(data => setPrices(data || {}))
+      .catch(err => {
+        console.error('Erreur chargement prices.json:', err);
         setPrices({});
-        return;
-      }
-      return res.json();
-    })
-    .then(data => setPrices(data || {}))
-    .catch(err => {
-      console.error('Erreur chargement prices.json:', err);
-      setPrices({});
-    });
-}, [handleBarcodeInput]); // Ajouter handleBarcodeInput
+      });
+  }, []);
 
   const validateInventoryMonth = useCallback((month) => {
     const selectedDate = new Date(month + '-01');
@@ -113,44 +113,37 @@ const fetchPrices = useCallback(() => {
   }, [fetchPrices, fetchProducts, fetchStats, validateInventoryMonth, selectedMonth, inventoryMonth]);
 
   const startScanning = useCallback(() => {
-  if (scannerInstanceRef.current) {
-    scannerInstanceRef.current.clear();
-    scannerInstanceRef.current = null;
-  }
-
-  const scanner = new Html5QrcodeScanner(
-    'reader',
-    { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128'] },
-    false
-  );
-
-  scanner.render(
-    (decodedText) => {
-      console.log('Code-barres détecté:', decodedText);
-      setIsScanning(false);
-      handleBarcodeInput(decodedText);
-      if (scannerInstanceRef.current) {
-        scannerInstanceRef.current.clear();
-        scannerInstanceRef.current = null;
-      }
-      try {
-        new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
-      } catch (err) {
-        console.error('Erreur lecture audio:', err);
-      }
-    },
-    (error) => {
-      console.warn('Erreur scan:', error);
-      setIsScanning(false);
-      if (scannerInstanceRef.current) {
-        scannerInstanceRef.current.clear();
-        scannerInstanceRef.current = null;
-      }
+    if (scannerInstanceRef.current) {
+      scannerInstanceRef.current.clear();
+      scannerInstanceRef.current = null;
     }
-  );
 
-  scannerInstanceRef.current = scanner;
-}, []);
+    const scanner = new Html5QrcodeScanner(
+      'reader',
+      { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128'] },
+      false
+    );
+
+    scanner.render(
+      (decodedText) => {
+        console.log('Code-barres détecté:', decodedText);
+        setIsScanning(false);
+        handleBarcodeInput(decodedText);
+        scanner.clear();
+        scannerInstanceRef.current = null;
+           try {
+             new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
+           } catch (err) {
+             console.error('Erreur lecture audio:', err);
+           }
+      },
+      (error) => {
+        console.warn('Erreur scan:', error);
+      }
+    );
+
+    scannerInstanceRef.current = scanner;
+  }, []);
 
   const stopScanning = useCallback(() => {
     if (scannerInstanceRef.current) {
@@ -222,13 +215,7 @@ const handleSubmit = async (e) => {
       fetchStats();
       resetForm();
       focusBarcodeInput();
-      if ('serviceWorker' in navigator && 'SyncManager' in window) {
-        navigator.serviceWorker.ready.then((registration) => {
-          registration.sync.register('sync-products').catch(err =>
-            console.error('Sync registration failed:', err)
-          );
-        });
-      }
+      // Suppression de la logique Service Worker
     })
     .catch(err => {
       console.error(`Erreur ${editId ? 'mise à jour' : 'ajout'} produit:`, err);
@@ -236,9 +223,7 @@ const handleSubmit = async (e) => {
         alert('Erreur : Ce code-barres est déjà utilisé par un autre produit.');
       }
     });
-};
-
-  const resetForm = () => {
+};  const resetForm = () => {
     setForm({
       name: '',
       category: 'sec',
