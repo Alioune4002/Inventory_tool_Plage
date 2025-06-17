@@ -43,22 +43,22 @@ function App() {
 
   const BASE_URL = 'https://inventory-tool-plage.onrender.com';
 
-  const fetchPrices = useCallback(() => {
-    fetch('/prices.json')
-      .then(res => {
-        if (!res.ok) {
-          console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
-          setPrices({});
-          return;
-        }
-        return res.json();
-      })
-      .then(data => setPrices(data || {}))
-      .catch(err => {
-        console.error('Erreur chargement prices.json:', err);
+const fetchPrices = useCallback(() => {
+  fetch('/prices.json')
+    .then(res => {
+      if (!res.ok) {
+        console.warn('Fichier prices.json non trouvé ou inaccessible:', res.status, res.statusText);
         setPrices({});
-      });
-  }, []);
+        return;
+      }
+      return res.json();
+    })
+    .then(data => setPrices(data || {}))
+    .catch(err => {
+      console.error('Erreur chargement prices.json:', err);
+      setPrices({});
+    });
+}, [handleBarcodeInput]); // Ajouter handleBarcodeInput
 
   const validateInventoryMonth = useCallback((month) => {
     const selectedDate = new Date(month + '-01');
@@ -113,37 +113,44 @@ function App() {
   }, [fetchPrices, fetchProducts, fetchStats, validateInventoryMonth, selectedMonth, inventoryMonth]);
 
   const startScanning = useCallback(() => {
-    if (scannerInstanceRef.current) {
-      scannerInstanceRef.current.clear();
-      scannerInstanceRef.current = null;
-    }
+  if (scannerInstanceRef.current) {
+    scannerInstanceRef.current.clear();
+    scannerInstanceRef.current = null;
+  }
 
-    const scanner = new Html5QrcodeScanner(
-      'reader',
-      { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128'] },
-      false
-    );
+  const scanner = new Html5QrcodeScanner(
+    'reader',
+    { fps: 10, qrbox: { width: 250, height: 250 }, formatsToSupport: ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128'] },
+    false
+  );
 
-    scanner.render(
-      (decodedText) => {
-        console.log('Code-barres détecté:', decodedText);
-        setIsScanning(false);
-        handleBarcodeInput(decodedText);
-        scanner.clear();
+  scanner.render(
+    (decodedText) => {
+      console.log('Code-barres détecté:', decodedText);
+      setIsScanning(false);
+      handleBarcodeInput(decodedText);
+      if (scannerInstanceRef.current) {
+        scannerInstanceRef.current.clear();
         scannerInstanceRef.current = null;
-           try {
-             new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
-           } catch (err) {
-             console.error('Erreur lecture audio:', err);
-           }
-      },
-      (error) => {
-        console.warn('Erreur scan:', error);
       }
-    );
+      try {
+        new Audio('/beep-short.wav').play().catch(err => console.error('Erreur audio:', err));
+      } catch (err) {
+        console.error('Erreur lecture audio:', err);
+      }
+    },
+    (error) => {
+      console.warn('Erreur scan:', error);
+      setIsScanning(false);
+      if (scannerInstanceRef.current) {
+        scannerInstanceRef.current.clear();
+        scannerInstanceRef.current = null;
+      }
+    }
+  );
 
-    scannerInstanceRef.current = scanner;
-  }, []);
+  scannerInstanceRef.current = scanner;
+}, []);
 
   const stopScanning = useCallback(() => {
     if (scannerInstanceRef.current) {
