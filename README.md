@@ -1,70 +1,92 @@
-# Getting Started with Create React App
+# 🏖️ Inventarium Épicerie La Plage 📋
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+Bienvenue dans **Inventarium Épicerie La Plage**, une application web d’inventaire conçue pour gérer les stocks d’une épicerie dans un camping ! 🌴 Cette application permet de scanner des codes-barres, suivre les produits, et exporter les données en Excel. 🎉
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## 🚀 Présentation du projet
 
-### `npm start`
+Ce projet a été créé pour répondre au besoin d’une gestion efficace des stocks dans une épicerie de camping, avec des produits variés (boissons, aliments frais, articles de plage, etc.). 🌊 Il inclut un scanner QR/code-barres, des statistiques visuelles, et une interface intuitive pour les utilisateurs. 🖥️
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### 🎯 Contexte
+- Développé pour une épicerie saisonnière dans un camping.
+- Objectif : Simplifier l’inventaire mensuel et optimiser la gestion des produits périssables ou non.
+- Inspiré par un besoin réel d’organisation en environnement estival ! ☀️
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+---
 
-### `npm test`
+## 🛠️ Technologies utilisées
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+- **Frontend** : 
+  - [React](https://reactjs.org/) ⚛️ pour une interface dynamique.
+  - [Chart.js](https://www.chartjs.org/) 📊 pour les graphiques (barres et camemberts).
+  - [html5-qrcode](https://github.com/mebjas/html5-qrcode) 📷 pour le scanner de codes-barres.
+- **Backend** : 
+  - [Django](https://www.djangoproject.com/) 🐍 avec une API REST pour gérer les produits et les stats.
+  - Base de données SQLite pour stocker les données localement.
+- **Déploiement** : 
+  - [Vercel](https://vercel.com/) 🚀 pour héberger l’application.
+- **Fonctionnalités** : Export Excel via une API personnalisée. 📥
 
-### `npm run build`
+---
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## 🌟 Fonctionnalités principales
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+- 📋 Ajout/Modification/Suppression de produits avec nom, catégorie, prix, TVA, DLC, quantité, et code-barres.
+- 🔍 Scanner de codes-barres avec intégration Open Food Facts pour les détails produits.
+- 📊 Statistiques visuelles : valeur du stock et répartition par catégorie.
+- 📅 Gestion par mois d’inventaire avec validation des dates futures.
+- 💾 Export des données en fichier Excel.
+- 🌐 Interface responsive pour ordinateur, iPad, et mobile (iPhone après ajustements).
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+---
 
-### `npm run eject`
+## ⚠️ Challenges rencontrés
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+Ce projet a été une aventure technique avec plusieurs obstacles :  
+- 🛑 **Service Worker** : Problèmes d’importation résolus en supprimant les références inutiles.
+- 💾 **OneDrive** : Erreurs `EPERM` sur Windows corrigées en déplaçant le projet vers `C:\Projects\`.
+- 🔄 **Git Conflicts** : Gestion de merges complexes due à des divergences avec `origin/master`.
+- 🌐 **Déploiement Vercel** : Erreur 401 sur `manifest.json` résolue en ajustant l’authentification.
+- 📱 **Compatibilité mobile** : Page blanche sur iPhone 13 fixée après vidage de cache et reconfiguration.
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+Chaque défi a été surmonté avec patience et des ajustements itératifs ! 💪
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+---
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+## 📦 Installation
 
-## Learn More
+1. Clone le dépôt :  
+   ```bash
+   git clone https://github.com/Alioune4002/Inventory_tool_Plage.git
+   cd Inventory_tool_Plage
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+2. Installe les dépendances (dans frontend) :
+cd frontend
+npm install
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+3. Configure le backend (dans backend) :
+ - Installe les dépendances Python :
+pip install -r requirements.txt
 
-### Code Splitting
+ - Applique les migrations :
+python manage.py migrate
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+4. Lance le projet :
+   - Backend :
+python manage.py runserver
 
-### Analyzing the Bundle Size
+ - Frontend :
+npm start
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+5. Déploie sur Vercel (optionnel) :
+vercel deploy --prod
 
-### Making a Progressive Web App
+🎉 Déploiement
+L’application est hébergée sur Vercel. Teste-la et donne-moi tes retours ! 👇
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+🤝 Contribution
+ - Ouvre une issue pour signaler des bugs ou proposer des idées. 🐛
+ - Fais un fork et une pull request pour contribuer ! 🌟
 
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+Made with ❤️ by Alioune. © 2025 Inventaire Épicerie La Plage.
