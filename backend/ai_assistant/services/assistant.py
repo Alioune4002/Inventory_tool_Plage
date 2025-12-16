@@ -5,6 +5,11 @@ from uuid import uuid4
 from django.conf import settings
 from django.db.models import Sum, Count, Q
 from django.db.models.functions import Coalesce
+import time
+import uuid
+
+import jsonschema
+
 try:
     from openai import OpenAI
 except Exception:  # pragma: no cover
