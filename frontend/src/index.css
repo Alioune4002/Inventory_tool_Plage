@@ -1,0 +1,172 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --primary: #2563eb;
+  --success: #16a34a;
+  --accent: #e0e7ff;
+  --radius-card: 24px;
+  --radius-pill: 999px;
+  --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
+  --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --surface: #0c1426;
+  --text: #e5e7eb;
+  --muted: #cbd5e1;
+  --border: #1f2937;
+  --primary: #3b82f6;
+  --success: #22c55e;
+  --accent: #1e293b;
+  --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.5);
+  --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.12), 0 25px 70px rgba(59, 130, 246, 0.35);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply antialiased;
+  background: radial-gradient(circle at 20% 20%, rgba(37, 99, 235, 0.06), transparent 28%),
+    radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.06), transparent 30%),
+    var(--bg);
+  color: var(--text);
+}
+
+.public-shell {
+  min-height: 100vh;
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.05), transparent 32%),
+    radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.18), transparent 38%),
+    linear-gradient(180deg, #0b1220, #0f172a 45%, #0b1220 100%);
+  color: #e2e8f0;
+}
+
+.public-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  color: #e2e8f0;
+}
+
+.public-shell a {
+  color: #93c5fd;
+}
+
+.public-shell h1,
+.public-shell h2,
+.public-shell h3,
+.public-shell h4 {
+  color: #ffffff;
+}
+
+.public-shell p,
+.public-shell li {
+  color: #e2e8f0;
+}
+
+/* scrollbars */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  [data-theme="dark"] body {
+    background: radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.12), transparent 32%),
+      radial-gradient(circle at 80% 0%, rgba(34, 197, 94, 0.08), transparent 32%),
+      var(--bg);
+  }
+
+  /* Harmonise les classes Tailwind les plus courantes en mode sombre */
+  [data-theme="dark"] .text-slate-900,
+  [data-theme="dark"] .text-slate-800,
+  [data-theme="dark"] .text-slate-700 {
+    color: var(--text) !important;
+  }
+  [data-theme="dark"] .text-slate-600,
+  [data-theme="dark"] .text-slate-500,
+  [data-theme="dark"] .text-slate-400 {
+    color: var(--muted) !important;
+  }
+  [data-theme="dark"] .bg-white,
+  [data-theme="dark"] .bg-slate-50,
+  [data-theme="dark"] .bg-slate-100 {
+    background-color: var(--surface) !important;
+  }
+  [data-theme="dark"] .border-slate-200,
+  [data-theme="dark"] .border-slate-300 {
+    border-color: var(--border) !important;
+  }
+
+  /* Inputs / selects en mode sombre : fond sombre, texte clair, placeholders lisibles */
+  [data-theme="dark"] input,
+  [data-theme="dark"] select,
+  [data-theme="dark"] textarea {
+    background-color: #111827 !important;
+    color: #e5e7eb !important;
+    border-color: #1f2937 !important;
+  }
+  [data-theme="dark"] input::placeholder,
+  [data-theme="dark"] textarea::placeholder {
+    color: #cbd5e1 !important;
+    opacity: 0.9;
+  }
+}
+
+@layer components {
+  .surface-card {
+    border-radius: var(--radius-card);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .glass {
+    border-radius: var(--radius-card);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
+  }
+
+  .shadow-soft {
+    box-shadow: var(--shadow-soft);
+  }
+
+  .shadow-glow {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .bg-grid {
+    background-image: linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}

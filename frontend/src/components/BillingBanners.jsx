@@ -1,0 +1,214 @@
+// frontend/src/components/BillingBanners.jsx
+import React, { useState } from "react";
+import Card from "../ui/Card";
+import Button from "../ui/Button";
+import { api } from "../lib/api";
+
+const Banner = ({ title, subtitle, tone = "info", actions = [] }) => {
+  const palette = {
+    info: "from-blue-500/15 via-blue-500/10 to-cyan-500/15 border-blue-200 text-slate-800 dark:text-slate-100",
+    warning:
+      "from-amber-500/15 via-amber-500/10 to-orange-500/15 border-amber-200 text-amber-900 dark:text-amber-100",
+    danger:
+      "from-rose-500/15 via-rose-500/10 to-orange-500/15 border-rose-200 text-rose-900 dark:text-rose-100",
+    neutral: "from-slate-500/10 via-slate-500/5 to-slate-500/10 border-slate-200 text-slate-800 dark:text-slate-100",
+  }[tone];
+
+  return (
+    <Card className={`p-4 border bg-gradient-to-r ${palette}`} hover={false}>
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="space-y-1">
+          <div className="text-sm font-semibold uppercase tracking-wide opacity-80">{title}</div>
+          <div className="text-sm opacity-90">{subtitle}</div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {actions.map((a) => (
+            <Button
+              key={a.label}
+              size="sm"
+              variant={a.variant || (tone === "danger" ? "danger" : "primary")}
+              onClick={a.onClick}
+              disabled={a.disabled}
+              loading={a.loading}
+            >
+              {a.label}
+            </Button>
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+function daysLeft(expiresAt) {
+  if (!expiresAt) return null;
+  const d = new Date(expiresAt);
+  const diff = (d.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  return Math.max(0, Math.floor(diff));
+}
+
+async function openBillingPortal(setBusy) {
+  try {
+    setBusy(true);
+    const res = await api.post("/api/auth/billing/portal/", {});
+    const url = res?.data?.url;
+    if (!url) throw new Error("URL Billing Portal manquante.");
+    window.location.href = url;
+  } catch (e) {
+    const msg =
+      e?.response?.data?.detail ||
+      e?.message ||
+      "Impossible d’ouvrir la gestion d’abonnement. Réessaie plus tard.";
+    alert(msg);
+  } finally {
+    setBusy(false);
+  }
+}
+
+export default function BillingBanners({ entitlements }) {
+  const [busy, setBusy] = useState(false);
+
+  if (!entitlements) return null;
+
+  const {
+    plan_source,
+    expires_at,
+    over_limit,
+    limits,
+    usage,
+    subscription_status,
+    last_plan_was_trial,
+  } = entitlements;
+
+  const banners = [];
+  const dLeft = daysLeft(expires_at);
+
+  const goTarifs = () => {
+    window.location.href = "/tarifs";
+  };
+
+  // Essai en cours
+  if (plan_source === "TRIAL" && dLeft !== null) {
+    if (dLeft <= 3) {
+      banners.push({
+        tone: "warning",
+        title: "Votre essai se termine bientôt",
+        subtitle:
+          `Plus que ${dLeft} jour${dLeft > 1 ? "s" : ""} avant la fin de votre accès premium. Continuez sans interruption en choisissant un plan.`,
+        actions: [
+          { label: "Choisir un plan", onClick: goTarifs, variant: "primary" },
+          { label: "Comparer les offres", onClick: goTarifs, variant: "secondary" },
+        ],
+      });
+    } else {
+      banners.push({
+        tone: "info",
+        title: "Essai premium en cours",
+        subtitle:
+          `Il vous reste ${dLeft} jour${dLeft > 1 ? "s" : ""} pour tester les fonctionnalités premium. À la fin, retour Essentiel automatiquement.`,
+        actions: [
+          { label: "Voir les plans", onClick: goTarifs, variant: "primary" },
+        ],
+      });
+    }
+  }
+
+  // Fin d'essai
+  if (plan_source === "FREE" && last_plan_was_trial) {
+    banners.push({
+      tone: "neutral",
+      title: "Fin de l’accès premium",
+      subtitle:
+        "Votre essai est terminé. Vous êtes revenu sur Essentiel (gratuit). Vos données restent intactes, et l’export reste disponible.",
+      actions: [
+        { label: "Comparer les plans", onClick: goTarifs, variant: "primary" },
+      ],
+    });
+  }
+
+  // Impayés / suspension
+  if (subscription_status === "PAST_DUE") {
+    banners.push({
+      tone: "warning",
+      title: "Paiement en attente",
+      subtitle:
+        "Votre paiement n’a pas été régularisé. Pour éviter la suspension, mettez à jour votre moyen de paiement.",
+      actions: [
+        {
+          label: "Régulariser",
+          onClick: () => openBillingPortal(setBusy),
+          loading: busy,
+          disabled: busy,
+          variant: "primary",
+        },
+        { label: "Voir les plans", onClick: goTarifs, variant: "secondary" },
+      ],
+    });
+  } else if (subscription_status === "SUSPENDED") {
+    banners.push({
+      tone: "danger",
+      title: "Accès premium suspendu",
+      subtitle:
+        "Faute de paiement, votre compte est repassé sur Essentiel. Vos données sont conservées, l’export reste disponible.",
+      actions: [
+        {
+          label: "Réactiver via Stripe",
+          onClick: () => openBillingPortal(setBusy),
+          loading: busy,
+          disabled: busy,
+          variant: "danger",
+        },
+        { label: "Comparer les plans", onClick: goTarifs, variant: "secondary" },
+      ],
+    });
+  }
+
+  // Limites dépassées
+  const overProd =
+    over_limit?.products ||
+    (limits?.max_products != null && usage?.products_count != null && usage.products_count > limits.max_products);
+  const overSrv =
+    over_limit?.services ||
+    (limits?.max_services != null && usage?.services_count != null && usage.services_count > limits.max_services);
+  const overUsers =
+    over_limit?.users ||
+    (limits?.max_users != null && usage?.users_count != null && usage.users_count > limits.max_users);
+
+  if (overProd) {
+    banners.push({
+      tone: "danger",
+      title: "Limite de produits atteinte",
+      subtitle:
+        `Votre plan limite le nombre de produits à ${limits?.max_products ?? "100"}. Vous en avez ${usage?.products_count ?? "plus que la limite"}. Lecture/export OK, ajout bloqué.`,
+      actions: [{ label: "Passer à un plan supérieur", onClick: goTarifs, variant: "danger" }],
+    });
+  }
+  if (overSrv) {
+    banners.push({
+      tone: "warning",
+      title: "Limite de services atteinte",
+      subtitle:
+        `Votre plan autorise ${limits?.max_services ?? "1"} service(s). Pour en ajouter un, choisissez un plan supérieur.`,
+      actions: [{ label: "Comparer les plans", onClick: goTarifs, variant: "primary" }],
+    });
+  }
+  if (overUsers) {
+    banners.push({
+      tone: "warning",
+      title: "Nombre maximal d’utilisateurs atteint",
+      subtitle:
+        `Votre plan autorise ${limits?.max_users ?? "1"} utilisateur(s). Ajoutez-en davantage en changeant de plan.`,
+      actions: [{ label: "Augmenter mon plan", onClick: goTarifs, variant: "primary" }],
+    });
+  }
+
+  if (!banners.length) return null;
+
+  return (
+    <div className="space-y-3">
+      {banners.map((b, idx) => (
+        <Banner key={`${b.title}-${idx}`} {...b} />
+      ))}
+    </div>
+  );
+}

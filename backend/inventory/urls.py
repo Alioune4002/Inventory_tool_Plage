@@ -15,22 +15,44 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from products.views import ProductViewSet, inventory_stats, export_excel, home
-
-
-
+from ai_assistant.views import AiAssistantView
+from products.views import (
+    ProductViewSet,
+    CategoryViewSet,
+    LossEventViewSet,
+    inventory_stats,
+    export_excel,
+    export_advanced,
+    export_generic,
+    home,
+    search_products,
+    lookup_product,
+)
 
 router = DefaultRouter()
-router.register(r'products', ProductViewSet)
+router.register(r'products', ProductViewSet, basename='products')
+router.register(r'categories', CategoryViewSet, basename='categories')
+router.register(r'losses', LossEventViewSet, basename='losses')
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
+
 
 urlpatterns = [
-    
     path('', home, name='home'),
+    path('health/', health, name='health'),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/inventory-stats/', inventory_stats),
     path('api/export-excel/', export_excel),
-    
+    path('api/export-advanced/', export_advanced),
+    path('api/exports/', export_generic),
+    path('api/products/lookup/', lookup_product),
+    path('api/products/search/', search_products),
+    path('api/auth/', include('accounts.urls')),
+    path('api/ai/assistant/', AiAssistantView.as_view(), name='ai-assistant'),
 ]

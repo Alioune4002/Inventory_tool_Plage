@@ -1,92 +1,121 @@
-# 🏖️ Inventarium Épicerie La Plage 📋
+# StockScan (Inventarium)
 
-Bienvenue dans **Inventarium Épicerie La Plage**, une application web d’inventaire conçue pour gérer les stocks d’une épicerie dans un camping ! 🌴 Cette application permet de scanner des codes-barres, suivre les produits, et exporter les données en Excel. 🎉
+SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec ou sans code-barres. Frontend React (Vite + Tailwind) et backend Django/DRF (JWT, multi-tenant, exports).
 
----
+## Architecture
+- `backend/` : API Django REST (DRF + SimpleJWT). Multi-tenant, multi-services, exports CSV/XLSX.
+- `frontend/` : Vite + React + Tailwind (UI premium, animations Framer Motion).
+- `frontend-cra-old/` : ancien front (CRA) conservé à titre d’archive.
 
-## 🚀 Présentation du projet
+## Fonctionnalités clés
+- Auth JWT : register/login/me, refresh, suppression de compte.
+- Multi-tenant, multi-services : sélection de service côté front, requêtes scoping tenant/service.
+- Onboarding : choix du business type (restaurant, bar, épicerie, boutique, camping_multi, autre), services uniques ou multiples avec presets (kitchen/bar/retail/etc.).
+- Service profiles : `service_type`, `counting_mode` (unit/weight/volume/mixed), `features` (barcode/sku/prices/dlc…).
+- Produits : champs optionnels (barcode/SKU, prix achat/vente, DLC, unités pcs/kg/g/l/ml). Gestion entamé/non entamé (`container_status`, pack_size, remaining_qty/fraction), warnings “soft” si infos manquantes.
+- Pertes : déclaration de pertes (casse/DLC/vol/offert/erreur), impact dans les stats mensuelles, option de désactiver entamé/non entamé pour les services retail/pharma.
+- Exports : `/api/exports/` CSV/XLSX (from/to, service/all, mode sealed/opened/all) + envoi par email (param `email` + `message`).
+- Inventaire : filtre mois/service, ajout produit rapide, search, empty state premium.
+- Lookup / Scan : `/api/products/lookup/?barcode=` cherche d’abord dans le tenant/service, renvoie historique + derniers produits; fallback OpenFoodFacts (alimentaire) pour préremplir.
+- Settings : services, (à compléter : email/password, invitations).
+- Suppression de compte avec confirmations.
 
-Ce projet a été créé pour répondre au besoin d’une gestion efficace des stocks dans une épicerie de camping, avec des produits variés (boissons, aliments frais, articles de plage, etc.). 🌊 Il inclut un scanner QR/code-barres, des statistiques visuelles, et une interface intuitive pour les utilisateurs. 🖥️
+## Prérequis
+- Node.js 18+ et npm.
+- Python 3.11+ et `pip`/`pip3`.
+- PostgreSQL recommandé en prod (`DATABASE_URL`), SQLite OK en dev.
 
-### 🎯 Contexte
-- Développé pour une épicerie saisonnière dans un camping.
-- Objectif : Simplifier l’inventaire mensuel et optimiser la gestion des produits périssables ou non.
-- Inspiré par un besoin réel d’organisation en environnement estival ! ☀️
+## Installation rapide
+1. Cloner  
+```bash
+git clone https://github.com/Alioune4002/Inventory_tool_Plage.git
+cd Inventory_tool_Plage
+```
 
----
-
-## 🛠️ Technologies utilisées
-
-- **Frontend** : 
-  - [React](https://reactjs.org/) ⚛️ pour une interface dynamique.
-  - [Chart.js](https://www.chartjs.org/) 📊 pour les graphiques (barres et camemberts).
-  - [html5-qrcode](https://github.com/mebjas/html5-qrcode) 📷 pour le scanner de codes-barres.
-- **Backend** : 
-  - [Django](https://www.djangoproject.com/) 🐍 avec une API REST pour gérer les produits et les stats.
-  - Base de données SQLite pour stocker les données localement.
-- **Déploiement** : 
-  - [Vercel](https://vercel.com/) 🚀 pour héberger l’application.
-- **Fonctionnalités** : Export Excel via une API personnalisée. 📥
-
----
-
-## 🌟 Fonctionnalités principales
-
-- 📋 Ajout/Modification/Suppression de produits avec nom, catégorie, prix, TVA, DLC, quantité, et code-barres.
-- 🔍 Scanner de codes-barres avec intégration Open Food Facts pour les détails produits.
-- 📊 Statistiques visuelles : valeur du stock et répartition par catégorie.
-- 📅 Gestion par mois d’inventaire avec validation des dates futures.
-- 💾 Export des données en fichier Excel.
-- 🌐 Interface responsive pour ordinateur, iPad, et mobile (iPhone après ajustements).
-
----
-
-## ⚠️ Challenges rencontrés
-
-Ce projet a été une aventure technique avec plusieurs obstacles :  
-- 🛑 **Service Worker** : Problèmes d’importation résolus en supprimant les références inutiles.
-- 💾 **OneDrive** : Erreurs `EPERM` sur Windows corrigées en déplaçant le projet vers `C:\Projects\`.
-- 🔄 **Git Conflicts** : Gestion de merges complexes due à des divergences avec `origin/master`.
-- 🌐 **Déploiement Vercel** : Erreur 401 sur `manifest.json` résolue en ajustant l’authentification.
-- 📱 **Compatibilité mobile** : Page blanche sur iPhone 13 fixée après vidage de cache et reconfiguration.
-
-Chaque défi a été surmonté avec patience et des ajustements itératifs ! 💪
-
----
-
-## 📦 Installation
-
-1. Clone le dépôt :  
-   ```bash
-   git clone https://github.com/Alioune4002/Inventory_tool_Plage.git
-   cd Inventory_tool_Plage
-
-2. Installe les dépendances (dans frontend) :
-cd frontend
-npm install
-
-3. Configure le backend (dans backend) :
- - Installe les dépendances Python :
+2. Backend  
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate  # ou .venv\Scripts\activate sous Windows
 pip install -r requirements.txt
-
- - Applique les migrations :
+python manage.py makemigrations accounts products
 python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+```
 
-4. Lance le projet :
-   - Backend :
-python manage.py runserver
+3. Frontend (Vite)  
+```bash
+cd ../frontend
+npm install
+npm run dev   # http://127.0.0.1:5173
+```
+Le front pointe par défaut sur `window.location.origin` ou `VITE_API_BASE_URL` si défini. En dev, assure-toi que le backend tourne sur `http://127.0.0.1:8000`.
 
- - Frontend :
-npm start
+## Endpoints principaux (extraits)
+- Auth :  
+  - `POST /api/auth/register/` (business_type, service_type/service_name, extra_services)  
+  - `POST /api/auth/login/`  
+  - `GET /api/auth/me/`  
+  - `GET/POST/PATCH/DELETE /api/auth/services/`  
+  - `DELETE /api/auth/delete-account/`
+- Produits :  
+  - `GET /api/products/?month=YYYY-MM&service=<id>`  
+  - `POST /api/products/` (champs optionnels barcode/SKU/prix/DLC + entamé : container_status, pack_size, remaining_qty/fraction)  
+  - `GET /api/inventory-stats/?month=YYYY-MM&service=<id>`
+  - `GET /api/products/lookup/?barcode=CODE` (local + historique + suggestion OpenFoodFacts)
+- Pertes :  
+  - `GET /api/losses/?month=YYYY-MM&service=<id>`  
+  - `POST /api/losses/` (reason, qty, unit, product)  
+  - `DELETE /api/losses/<id>/`
+- Assistant IA (optionnel) :  
+  - `POST /api/ai/assistant/` (AI_ENABLED/OPENAI_API_KEY). Retourne message + insights + actions en JSON strict à partir d’un contexte limité (stocks, pertes, top items).
+- Entitlements / limites :  
+  - `GET /api/me/org/entitlements` : plan_effective, plan_source, expires_at, subscription_status, entitlements, limits, usage, over_limit.  
+  - Les endpoints bloqués pour dépassement retournent 403 avec code `LIMIT_*` et message explicite (lecture/export restent possibles).
+- Export :  
+  - `GET /api/exports/?from=YYYY-MM&to=YYYY-MM&service=<id|all>&mode=sealed|opened|all&format=csv|xlsx&email=<dest>&message=<txt>`
+- Divers :  
+  - `GET /health/`
 
-5. Déploie sur Vercel (optionnel) :
-vercel deploy --prod
+## Modèle / Service profiles (backend)
+- Tenant : `business_type` (restaurant, bar, grocery, retail, camping_multi, other), `domain` (food/general).
+- Service : `service_type` (grocery_food, bulk_food, bar, kitchen, retail_general, pharmacy_parapharmacy, other), `counting_mode` (unit/weight/volume/mixed), `features` JSON (barcode/sku/prices/dlc…).
+- Produit : UOM pcs/kg/g/l/ml, `container_status` SEALED/OPENED, `pack_size/pack_uom`, `remaining_qty`, `remaining_fraction`, `is_packaged_item`. Tout est optionnel, warnings renvoyés si infos clés manquantes.
+- Pertes : `LossEvent` (tenant, service, product, occurred_at, inventory_month, qty+unit, reason, note, created_by). Sont intégrées aux stats (losses_total_qty/cost et breakdown par reason).
 
-🎉 Déploiement
-L’application est hébergée sur Vercel. Teste-la et donne-moi tes retours ! 👇
+## Frontend (Vite)
+- Pages : Landing, Login/Register, Dashboard, Inventory, Products, Categories, Exports, Settings, Support, Terms/Privacy.
+- UI : composants réutilisables (Button/Card/Input/Badge/Toast), transitions Framer Motion, thèmes premium.
+- Inventory : champs dynamiques selon domaine/service, warnings non bloquants, DLC caché si non-food, toggle entamé désactivé pour retail/pharma.
+- Pertes : page dédiée pour déclarer et lister les pertes mensuelles.
+- Exports : déclenchement CSV/XLSX via `/api/exports` avec envoi email optionnel.
+- Assistant IA : panneau d’analyse dans le Dashboard (message, insights, actions).
+- Entitlements front : hook `useEntitlements()` + bannières Essai/Fin d’essai/Limites/Impayés visibles dans AppShell/Dashboard/Settings. Les actions bloquées affichent des toasts clairs (codes LIMIT_*).
 
-🤝 Contribution
- - Ouvre une issue pour signaler des bugs ou proposer des idées. 🐛
- - Fais un fork et une pull request pour contribuer ! 🌟
+## Tests
+- Backend : `cd backend && pytest`
+- Frontend : `cd frontend && npm test` (vitest/RTL)
 
-Made with ❤️ by Alioune. © 2025 Inventaire Épicerie La Plage.
+## Déploiement
+- Backend : Gunicorn/Render/Heroku (Procfile fourni). Config : `DJANGO_ALLOWED_HOSTS`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DATABASE_URL` (Postgres), `CORS_ALLOWED_ORIGINS`.
+- Assistant IA : `AI_ENABLED=true`, `OPENAI_API_KEY`, `AI_MODEL` (ex: gpt-4o-mini), `AI_THROTTLE_RATE` (par défaut 10/min).
+- Frontend : Vercel/Netlify (build Vite). Var : `VITE_API_BASE_URL` si l’API n’est pas sur le même domaine.
+
+## Points d’attention actuels
+- Appliquer les migrations avant de tester (sinon erreurs “no such column business_type”).
+- Les exports “SEALED/OPENED” sont disponibles via `/api/exports` (une seule feuille).  
+- Les settings (change email/password, invitations) restent à étendre si besoin.
+
+## Commandes utiles
+```bash
+# backend
+python manage.py makemigrations accounts products
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+
+# frontend
+npm run dev
+npm run build
+```
+
+Bon usage de StockScan !
