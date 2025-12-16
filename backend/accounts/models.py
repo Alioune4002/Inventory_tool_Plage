@@ -1,3 +1,4 @@
+# Deployed backend: https://inventory-tool-plage.onrender.com
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -35,21 +36,21 @@ class Plan(models.Model):
 
 class Tenant(models.Model):
     DOMAIN_CHOICES = (
-        ('food', 'Food'),
-        ('general', 'General'),
+        ("food", "Food"),
+        ("general", "General"),
     )
     BUSINESS_CHOICES = (
-        ('restaurant', 'Restaurant'),
-        ('bar', 'Bar'),
-        ('grocery', 'Grocery / Epicerie'),
-        ('retail', 'Retail / Boutique'),
-        ('camping_multi', 'Camping / Hôtel multi-services'),
-        ('other', 'Other'),
+        ("restaurant", "Restaurant"),
+        ("bar", "Bar"),
+        ("grocery", "Grocery / Epicerie"),
+        ("retail", "Retail / Boutique"),
+        ("camping_multi", "Camping / Hôtel multi-services"),
+        ("other", "Other"),
     )
 
     name = models.CharField(max_length=150)
-    domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default='food')
-    business_type = models.CharField(max_length=30, choices=BUSINESS_CHOICES, default='other')
+    domain = models.CharField(max_length=20, choices=DOMAIN_CHOICES, default="food")
+    business_type = models.CharField(max_length=30, choices=BUSINESS_CHOICES, default="other")
     created_at = models.DateTimeField(auto_now_add=True)
 
     # Billing & plan
@@ -106,7 +107,7 @@ class Service(models.Model):
         ("volume", "Volume"),
         ("mixed", "Mixte"),
     )
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='services', db_index=True)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="services", db_index=True)
     name = models.CharField(max_length=150)
     slug = models.SlugField(max_length=160, blank=True, null=True)
     service_type = models.CharField(max_length=40, choices=SERVICE_TYPES, default="other")
@@ -124,9 +125,9 @@ class Service(models.Model):
 
 
 class UserProfile(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='profile')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='users')
-    role = models.CharField(max_length=30, default='owner')
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="users")
+    role = models.CharField(max_length=30, default="owner")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -135,20 +136,33 @@ class UserProfile(models.Model):
 
 class Membership(models.Model):
     ROLE_CHOICES = (
-        ('owner', 'Owner'),
-        ('manager', 'Manager'),
-        ('operator', 'Operator'),
+        ("owner", "Owner"),
+        ("manager", "Manager"),
+        ("operator", "Operator"),
     )
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='memberships')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='operator')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="memberships")
+
+    # ✅ IMPORTANT: scope optionnel à un service précis (Salle / Cuisine / Bar...)
+    # - NULL => accès multi-service (comme avant)
+    # - Non-NULL => accès limité à CE service (et seulement ce service)
+    service = models.ForeignKey(
+        Service,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="scoped_memberships",
+    )
+
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="operator")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ('user', 'tenant')
+        unique_together = ("user", "tenant")
 
     def __str__(self):
-        return f"{self.user.username} - {self.tenant.name} ({self.role})"
+        scope = f" / {self.service.name}" if self.service_id else ""
+        return f"{self.user.username} - {self.tenant.name}{scope} ({self.role})"
 
 
 class OrganizationOverrides(models.Model):
@@ -188,9 +202,7 @@ class PromoCode(models.Model):
 class PromoRedemption(models.Model):
     promo = models.ForeignKey(PromoCode, on_delete=models.CASCADE)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
-    redeemed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True
-    )
+    redeemed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     redeemed_at = models.DateTimeField(auto_now_add=True)
     granted_until = models.DateTimeField()
 
@@ -203,9 +215,7 @@ class NotificationLog(models.Model):
         ("BOUNCED", "Bounced"),
         ("SPAM", "Spam"),
     )
-    tenant = models.ForeignKey(
-        Tenant, on_delete=models.SET_NULL, null=True, blank=True, related_name="logs"
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.SET_NULL, null=True, blank=True, related_name="logs")
     to_email = models.EmailField()
     template = models.CharField(max_length=100)
     payload = models.JSONField(default=dict)
@@ -245,3 +255,37 @@ class Invitation(models.Model):
 
     def __str__(self):
         return f"Invitation {self.email} ({self.tenant.name})"
+
+
+# ✅ NEW: Audit log (traçabilité)
+class AuditLog(models.Model):
+    ACTION_CHOICES = (
+        ("CREATE", "Create"),
+        ("UPDATE", "Update"),
+        ("DELETE", "Delete"),
+        ("LOGIN", "Login"),
+        ("EXPORT", "Export"),
+        ("INVITE", "Invite"),
+        ("ROLE_CHANGE", "Role change"),
+        ("MEMBER_REMOVE", "Member remove"),
+    )
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="audit_logs")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    object_type = models.CharField(max_length=50, blank=True, default="")
+    object_id = models.CharField(max_length=80, blank=True, default="")
+    metadata = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "created_at"]),
+            models.Index(fields=["tenant", "action"]),
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self):
+        who = getattr(self.user, "username", None) or "system"
+        return f"{self.action} by {who}"

@@ -1,6 +1,9 @@
+# Deployed backend: https://inventory-tool-plage.onrender.com
 from copy import deepcopy
 from django.utils.text import slugify
-from accounts.models import Tenant, UserProfile, Service
+from rest_framework import exceptions
+
+from accounts.models import Tenant, UserProfile, Service, Membership
 
 
 def _base_features():
@@ -16,11 +19,6 @@ def _base_features():
 
 
 def _merge_features(base: dict, overrides: dict) -> dict:
-    """
-    Merge "features" de manière sûre.
-    - garde les clés base
-    - écrase proprement les sous-dicts (barcode/sku/dlc/prices/etc.)
-    """
     out = deepcopy(base)
     for k, v in (overrides or {}).items():
         if isinstance(v, dict) and isinstance(out.get(k), dict):
@@ -31,135 +29,104 @@ def _merge_features(base: dict, overrides: dict) -> dict:
 
 
 def apply_service_preset(service_type: str, domain: str = None):
-    """
-    Retourne counting_mode et features par défaut selon le type.
-    domain: optionnel ("food" / "general" / etc.) pour forcer certaines règles produit.
-    """
     base = _base_features()
 
     presets = {
-        # Épicerie / petite distribution alimentaire
         "grocery_food": {
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {
-                    "dlc": {"enabled": True, "recommended": True},
-                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"dlc": {"enabled": True, "recommended": True},
+                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
-        # Vrac / épicerie vrac
         "bulk_food": {
             "counting_mode": "weight",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": True},
-                    "dlc": {"enabled": True, "recommended": False},
-                    "open_container_tracking": {"enabled": True},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": True},
+                 "dlc": {"enabled": True, "recommended": False},
+                 "open_container_tracking": {"enabled": True},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
-        # Bar
         "bar": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": True},
-                    # bar : souvent prix d’achat utile, prix de vente pas toujours nécessaire (marge “théorique”)
-                    "prices": {"purchase_enabled": True, "selling_enabled": False, "recommended": False},
-                    "dlc": {"enabled": True, "recommended": False},
-                    "open_container_tracking": {"enabled": True},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": True},
+                 "prices": {"purchase_enabled": True, "selling_enabled": False, "recommended": False},
+                 "dlc": {"enabled": True, "recommended": False},
+                 "open_container_tracking": {"enabled": True},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
-        # Cuisine / production interne (restaurant cuisine)
         "kitchen": {
             "counting_mode": "weight",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": False},
-                    # cuisine : prix inutiles dans l’inventaire simple
-                    "prices": {"purchase_enabled": False, "selling_enabled": False, "recommended": False},
-                    "dlc": {"enabled": True, "recommended": False},
-                    "open_container_tracking": {"enabled": True},
-                    "tva": {"enabled": False, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": False},
+                 "prices": {"purchase_enabled": False, "selling_enabled": False, "recommended": False},
+                 "dlc": {"enabled": True, "recommended": False},
+                 "open_container_tracking": {"enabled": True},
+                 "tva": {"enabled": False, "recommended": False}},
             ),
         },
-        # Retail général (boutiques non alimentaires)
         "retail_general": {
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": True},
-                    "dlc": {"enabled": False, "recommended": False},
-                    "open_container_tracking": {"enabled": False},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": True},
+                 "dlc": {"enabled": False, "recommended": False},
+                 "open_container_tracking": {"enabled": False},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
-        # Pharmacie / parapharmacie
         "pharmacy_parapharmacy": {
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": True},
-                    "sku": {"enabled": True, "recommended": True},
-                    "dlc": {"enabled": True, "recommended": True},  # lots / péremption important
-                    "open_container_tracking": {"enabled": False},
-                    "tva": {"enabled": True, "recommended": True},
-                    "suppliers": {"enabled": True},
-                },
+                {"barcode": {"enabled": True, "recommended": True},
+                 "sku": {"enabled": True, "recommended": True},
+                 "dlc": {"enabled": True, "recommended": True},
+                 "open_container_tracking": {"enabled": False},
+                 "tva": {"enabled": True, "recommended": True},
+                 "suppliers": {"enabled": True}},
             ),
         },
-        # Boulangerie / pâtisserie
         "bakery": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": True},
-                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                    "dlc": {"enabled": True, "recommended": True},  # DLC/DDM/24h géré côté front
-                    "open_container_tracking": {"enabled": False},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": True},
+                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                 "dlc": {"enabled": True, "recommended": True},
+                 "open_container_tracking": {"enabled": False},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
-        # Salle / service restaurant (dining)
         "restaurant_dining": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {
-                    "barcode": {"enabled": True, "recommended": False},
-                    "sku": {"enabled": True, "recommended": False},
-                    "prices": {"purchase_enabled": False, "selling_enabled": False, "recommended": False},
-                    "dlc": {"enabled": True, "recommended": True},
-                    "open_container_tracking": {"enabled": True},
-                    "tva": {"enabled": True, "recommended": False},
-                },
+                {"barcode": {"enabled": True, "recommended": False},
+                 "sku": {"enabled": True, "recommended": False},
+                 "prices": {"purchase_enabled": False, "selling_enabled": False, "recommended": False},
+                 "dlc": {"enabled": True, "recommended": True},
+                 "open_container_tracking": {"enabled": True},
+                 "tva": {"enabled": True, "recommended": False}},
             ),
         },
     }
 
     preset = presets.get(service_type) or {"counting_mode": "unit", "features": deepcopy(base)}
 
-    # règle globale : si domain general => DLC OFF (promesse “non-alimentaire”)
     if domain == "general":
         preset = deepcopy(preset)
         preset["features"] = deepcopy(preset.get("features") or {})
@@ -197,8 +164,36 @@ def get_default_service(tenant: Tenant):
     return service
 
 
+def _get_membership_for_tenant(user, tenant: Tenant):
+    if not user or not getattr(user, "is_authenticated", False):
+        return None
+    return Membership.objects.filter(user=user, tenant=tenant).select_related("service").first()
+
+
 def get_service_from_request(request):
+    """
+    ✅ IMPORTANT (scope service):
+    - owner => libre de choisir n'importe quel service du tenant via ?service=
+    - non-owner avec membership.service défini => service forcé (Salle only / Cuisine only)
+    - non-owner sans scope => comportement historique (param ?service= sinon Principal)
+    """
     tenant = get_tenant_for_request(request)
+    user = getattr(request, "user", None)
+
+    # owner = pas de restriction
+    role = get_user_role(request)
+    membership = _get_membership_for_tenant(user, tenant)
+
+    # 🔒 Si scope fixé et non owner => on force le service
+    if role != "owner" and membership and membership.service_id:
+        forced = membership.service
+        # Si le front tente de passer un autre service => interdit
+        requested_service_id = request.query_params.get("service") or (request.data.get("service") if hasattr(request, "data") else None)
+        if requested_service_id and str(requested_service_id) != str(forced.id):
+            raise exceptions.PermissionDenied("Accès limité : vous n'avez pas accès à ce service.")
+        return forced
+
+    # sinon comportement normal
     service_id = request.query_params.get("service") or (
         request.data.get("service") if hasattr(request, "data") else None
     )

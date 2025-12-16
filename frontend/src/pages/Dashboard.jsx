@@ -1,3 +1,4 @@
+// Deployed backend: https://inventory-tool-plage.onrender.com
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
@@ -16,6 +17,14 @@ const fmtCurrency = (n) =>
   typeof n === "number" ? n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : "—";
 const fmtNumber = (n) => (typeof n === "number" ? n.toLocaleString("fr-FR") : "—");
 const safeArray = (v) => (Array.isArray(v) ? v : []);
+const fmtDateTime = (v) => {
+  if (!v) return "—";
+  try {
+    return new Date(v).toLocaleString("fr-FR");
+  } catch {
+    return String(v);
+  }
+};
 
 function getDashboardCopy(serviceType, tenantDomain, isAll) {
   const isGeneral = tenantDomain === "general" || serviceType === "retail_general";
@@ -30,12 +39,7 @@ function getDashboardCopy(serviceType, tenantDomain, isAll) {
     ? "Vue consolidée : valeurs, catégories et pertes sur tous les services."
     : "Valeur de stock, catégories, pertes et aperçu des produits.";
 
-  const stockLabel = isPharma
-    ? "Valeur stock (achat)"
-    : isGeneral
-    ? "Valeur stock (achat)"
-    : "Valeur stock (achat)";
-
+  const stockLabel = isPharma ? "Valeur stock (achat)" : isGeneral ? "Valeur stock (achat)" : "Valeur stock (achat)";
   const sellingLabel = isGeneral ? "Valeur stock (vente)" : "Valeur stock (vente)";
   const marginHelper = isKitchen
     ? "Cuisine : marge non prioritaire (prix souvent désactivés)"
@@ -85,10 +89,18 @@ export default function Dashboard() {
 
   const [productsCount, setProductsCount] = useState(0);
 
+  // ✅ Admin panel (owner)
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersVisible, setMembersVisible] = useState(false); // devient true si endpoint OK
+  const [membersSummary, setMembersSummary] = useState({ members: [], recent_activity: [] });
+
   const tenantDomain = tenant?.domain || "food";
   const serviceType = serviceProfile?.service_type || currentService?.service_type || "other";
 
-  const copy = useMemo(() => getDashboardCopy(serviceType, tenantDomain, isAllServices), [serviceType, tenantDomain, isAllServices]);
+  const copy = useMemo(
+    () => getDashboardCopy(serviceType, tenantDomain, isAllServices),
+    [serviceType, tenantDomain, isAllServices]
+  );
 
   const badgeText = useMemo(() => {
     if (isAllServices) return `Tous les services — ${month}`;
@@ -141,9 +153,7 @@ export default function Dashboard() {
               }
             });
 
-            acc.by_product.push(
-              ...safeArray(r.stats.by_product).map((p) => ({ ...p, __service_name: r.service?.name }))
-            );
+            acc.by_product.push(...safeArray(r.stats.by_product).map((p) => ({ ...p, __service_name: r.service?.name })));
 
             safeArray(r.stats.losses_by_reason).forEach((lr) => {
               const existing = acc.losses_by_reason.find((x) => x.reason === lr.reason);
@@ -203,10 +213,7 @@ export default function Dashboard() {
         setProductsCount(list.length);
       }
     } catch (e) {
-      pushToast?.({
-        message: "Impossible de charger les données (auth/service ?)",
-        type: "error",
-      });
+      pushToast?.({ message: "Impossible de charger les données (auth/service ?)", type: "error" });
       setStats({
         total_value: 0,
         total_selling_value: 0,
@@ -223,10 +230,42 @@ export default function Dashboard() {
     }
   };
 
+  // ✅ Admin-only panel data
+  const loadMembersSummary = async () => {
+    setMembersLoading(true);
+    try {
+      const res = await api.get("/api/auth/members/summary/");
+      const data = res?.data || { members: [], recent_activity: [] };
+      setMembersSummary({
+        members: safeArray(data.members),
+        recent_activity: safeArray(data.recent_activity),
+      });
+      setMembersVisible(true);
+    } catch (e) {
+      // 403 => pas owner => on masque sans bruit
+      const status = e?.response?.status;
+      if (status === 403) {
+        setMembersVisible(false);
+        setMembersSummary({ members: [], recent_activity: [] });
+      } else {
+        setMembersVisible(false);
+        pushToast?.({ message: "Impossible de charger les membres (réessaie).", type: "error" });
+      }
+    } finally {
+      setMembersLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceId, month]);
+
+  // ✅ On tente une fois au chargement : si owner => panel s’affiche
+  useEffect(() => {
+    loadMembersSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const purchaseValue = stats.service_totals?.purchase_value ?? stats.total_value ?? 0;
   const sellingValue = stats.service_totals?.selling_value ?? stats.total_selling_value ?? 0;
@@ -267,6 +306,9 @@ export default function Dashboard() {
   const lossesByReason = safeArray(stats.losses_by_reason);
   const products = safeArray(stats.by_product);
 
+  const members = safeArray(membersSummary.members);
+  const recentActivity = safeArray(membersSummary.recent_activity);
+
   return (
     <PageTransition>
       <Helmet>
@@ -277,6 +319,120 @@ export default function Dashboard() {
       <div className="grid gap-4">
         <BillingBanners entitlements={entitlements} />
 
+        {/* ✅ Admin principal: équipe + traçabilité */}
+        {membersVisible ? (
+          <Card className="p-6 space-y-4">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm text-slate-500">Admin</div>
+                <div className="text-2xl font-black tracking-tight">Équipe & traçabilité</div>
+                <div className="text-sm text-slate-600">
+                  Membres, rôles, scope par service (Salle / Cuisine…) et activité récente.
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="secondary" onClick={loadMembersSummary} loading={membersLoading}>
+                  Rafraîchir (membres)
+                </Button>
+                <Badge variant="neutral">{membersLoading ? "Chargement…" : `${members.length} membre(s)`}</Badge>
+              </div>
+            </div>
+
+            <div className="grid lg:grid-cols-2 gap-4">
+              <Card className="p-4 space-y-3" hover>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-slate-800">Membres & rôles</div>
+                  <Badge variant="info">Owner only</Badge>
+                </div>
+
+                {membersLoading ? (
+                  <div className="grid gap-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                    ))}
+                  </div>
+                ) : members.length ? (
+                  <div className="space-y-2">
+                    {members.map((m) => {
+                      const scope = m?.service_scope?.name ? `Service: ${m.service_scope.name}` : "Accès multi-services";
+                      const last = m?.last_action?.action ? `${m.last_action.action} · ${fmtDateTime(m.last_action.at)}` : "—";
+                      const role = (m?.role || "operator").toUpperCase();
+                      const user = m?.user || {};
+                      return (
+                        <Card key={m.id} className="p-4" hover>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 truncate">
+                                {user.username || "Utilisateur"}{" "}
+                                <span className="text-slate-400 font-normal">·</span>{" "}
+                                <span className="text-slate-600 font-semibold">{user.email || "—"}</span>
+                              </div>
+                              <div className="text-xs text-slate-500 mt-1">
+                                {scope} · Dernière action : {last}
+                              </div>
+                            </div>
+                            <Badge variant={role === "OWNER" ? "info" : role === "MANAGER" ? "neutral" : "neutral"}>
+                              {role}
+                            </Badge>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">Aucun membre trouvé.</div>
+                )}
+              </Card>
+
+              <Card className="p-4 space-y-3" hover>
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-slate-800">Activité récente</div>
+                  <Badge variant="neutral">{recentActivity.length} évènement(s)</Badge>
+                </div>
+
+                {membersLoading ? (
+                  <div className="grid gap-2">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-10 w-full animate-pulse rounded-2xl bg-slate-100" />
+                    ))}
+                  </div>
+                ) : recentActivity.length ? (
+                  <div className="space-y-2">
+                    {recentActivity.slice(0, 12).map((a, idx) => {
+                      const who = a?.user?.username || "system";
+                      const action = a?.action || "—";
+                      const when = fmtDateTime(a?.at);
+                      const obj = a?.object_type ? `${a.object_type}${a.object_id ? `#${a.object_id}` : ""}` : "";
+                      return (
+                        <div key={`${action}-${idx}`} className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-slate-800 truncate">
+                              {action} <span className="text-slate-400 font-normal">·</span>{" "}
+                              <span className="text-slate-600">{who}</span>
+                              {obj ? <span className="text-slate-400 font-normal"> · {obj}</span> : null}
+                            </div>
+                            <div className="text-xs text-slate-500">{when}</div>
+                          </div>
+                          <Badge variant="neutral">{action}</Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500">
+                    Aucune activité enregistrée (ou AuditLog pas encore alimenté).
+                  </div>
+                )}
+              </Card>
+            </div>
+
+            <div className="text-xs text-slate-500">
+              Prochaine étape (Settings) : modifier le scope service + rôle d’un membre, retirer un accès, renvoyer une invitation.
+            </div>
+          </Card>
+        ) : null}
+
+        {/* Dashboard header */}
         <Card className="p-6 space-y-3">
           <div className="flex flex-wrap gap-3 items-center justify-between">
             <div>
@@ -315,6 +471,7 @@ export default function Dashboard() {
           </div>
         </Card>
 
+        {/* KPIs */}
         <div className="grid md:grid-cols-3 xl:grid-cols-5 gap-4">
           {kpis.map((k) => (
             <Card key={k.label} className="p-5" hover>
@@ -325,6 +482,7 @@ export default function Dashboard() {
           ))}
         </div>
 
+        {/* Categories */}
         <Card className="p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-slate-700">{copy.categoryTitle}</div>
@@ -367,12 +525,11 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">
-              Aucune donnée pour ce mois. Ajoutez des produits (ou changez de mois/service).
-            </div>
+            <div className="text-sm text-slate-500">Aucune donnée pour ce mois. Ajoutez des produits (ou changez de mois/service).</div>
           )}
         </Card>
 
+        {/* Losses */}
         <Card className="p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-slate-700">Pertes par raison</div>
@@ -413,6 +570,7 @@ export default function Dashboard() {
           )}
         </Card>
 
+        {/* Products preview */}
         <Card className="p-5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-semibold text-slate-700">{copy.productsTitle}</div>
@@ -432,9 +590,7 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-sm font-semibold text-slate-800">{p.name}</div>
                     <div className="flex gap-2 items-center">
-                      {isAllServices && (
-                        <Badge variant="neutral">{p.__service_name || "Service"}</Badge>
-                      )}
+                      {isAllServices && <Badge variant="neutral">{p.__service_name || "Service"}</Badge>}
                       <Badge variant="neutral">{p.category || "—"}</Badge>
                     </div>
                   </div>
@@ -451,9 +607,7 @@ export default function Dashboard() {
                   {p.notes?.length ? (
                     <div className="text-xs text-amber-700">{p.notes.join(" ")}</div>
                   ) : (
-                    <div className="text-xs text-slate-500">
-                      Astuce : renseignez prix d’achat/vente pour des stats plus précises.
-                    </div>
+                    <div className="text-xs text-slate-500">Astuce : renseignez prix d’achat/vente pour des stats plus précises.</div>
                   )}
                 </Card>
               ))}

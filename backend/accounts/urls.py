@@ -19,6 +19,7 @@ from .views import (
     StripeWebhookView,
 )
 from .views_delete import DeleteAccountView
+from .views_members_summary import MembersSummaryView  # ✅ NEW
 
 router = DefaultRouter()
 router.register(r"services", ServiceViewSet, basename="services")
@@ -32,6 +33,9 @@ urlpatterns = [
 
     # Entitlements (utilisé par useEntitlements)
     path("me/org/entitlements", EntitlementsView.as_view(), name="auth-entitlements"),
+
+    # ✅ NEW: Dashboard admin members summary (owner only)
+    path("members/summary/", MembersSummaryView.as_view(), name="auth-members-summary"),
 
     path("password-reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
     path("password-reset/confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
