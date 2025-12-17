@@ -13,6 +13,8 @@ describe("Landing page", () => {
         </BrowserRouter>
       </HelmetProvider>
     );
-    expect(screen.getByText(/inventaire moderne/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /inventaire/i, level: 1 })
+    ).toBeInTheDocument();
   });
 });
