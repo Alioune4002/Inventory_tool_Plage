@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence, useInView } from "framer-motion";
 import DemoProvider, { useDemo } from "./context/DemoProvider";
-import Sidebar from "../components/Sidebar";
-import Topbar from "../components/Topbar";
+import DemoSidebar from "./components/DemoSidebar";
+import DemoTopbar from "./components/DemoTopbar";
 import Card from "../ui/Card";
 import DemoDashboard from "./pages/DemoDashboard";
 import DemoInventory from "./pages/DemoInventory";
@@ -56,11 +56,11 @@ function DesktopDemo() {
   return (
     <div ref={shellRef} className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950/95 via-slate-900/90 to-slate-950/95 text-white shadow-[0_30px_70px_rgba(15,23,42,0.65)] overflow-hidden">
       <div className="hidden lg:block">
-        <Topbar />
+        <DemoTopbar />
       </div>
 
       <div className="grid lg:grid-cols-[288px_1fr_360px] min-h-[520px]">
-        <Sidebar />
+        <DemoSidebar />
 
         <div className="p-4 lg:p-6 bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 relative overflow-hidden">
           <div className="flex flex-wrap gap-2 mb-4 text-slate-100">
