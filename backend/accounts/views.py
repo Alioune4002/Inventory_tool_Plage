@@ -1,3 +1,4 @@
+# Deployed backend: https://inventory-tool-plage.onrender.com
 # backend/accounts/views.py
 from __future__ import annotations
 
@@ -20,7 +21,15 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from products.models import Product
 
-from .models import Service, Membership, Tenant, Plan, Subscription, UserProfile
+from .models import (
+    Service,
+    Membership,
+    Tenant,
+    Plan,
+    Subscription,
+    UserProfile,
+    AuditLog,  # ✅ NEW: traçabilité
+)
 from .serializers import (
     RegisterSerializer,
     SimpleTokenObtainPairSerializer,
@@ -40,6 +49,37 @@ try:
     import stripe  # type: ignore
 except Exception:  # pragma: no cover
     stripe = None
+
+
+# --------------------------------
+# Audit helpers
+# --------------------------------
+
+def _audit(
+    *,
+    tenant: Tenant,
+    user,
+    action: str,
+    object_type: str = "",
+    object_id: str = "",
+    service: Optional[Service] = None,
+    meta: Optional[dict] = None,
+):
+    """
+    Enregistre une action dans AuditLog, sans bloquer l'API si ça échoue.
+    """
+    try:
+        AuditLog.objects.create(
+            tenant=tenant,
+            user=user if user and getattr(user, "is_authenticated", False) else None,
+            action=action,
+            object_type=object_type or "",
+            object_id=str(object_id or ""),
+            service=service,
+            meta=meta or {},
+        )
+    except Exception:
+        LOGGER.exception("AuditLog failed")
 
 
 # --------------------------------
@@ -152,12 +192,140 @@ class MembershipViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         tenant = get_tenant_for_request(self.request)
-        return Membership.objects.filter(tenant=tenant).select_related("user")
+        # ✅ include service pour afficher scope
+        return Membership.objects.filter(tenant=tenant).select_related("user", "service")
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
         ctx["tenant"] = get_tenant_for_request(self.request)
         return ctx
+
+    def perform_create(self, serializer):
+        tenant = get_tenant_for_request(self.request)
+        membership = serializer.save()
+        _audit(
+            tenant=tenant,
+            user=self.request.user,
+            action="MEMBER_ADDED",
+            object_type="Membership",
+            object_id=str(membership.id),
+            service=membership.service,
+            meta={
+                "role": membership.role,
+                "service_id": membership.service_id,
+                "email": membership.user.email,
+                "username": membership.user.username,
+            },
+        )
+
+    def perform_update(self, serializer):
+        tenant = get_tenant_for_request(self.request)
+        membership = serializer.save()
+        _audit(
+            tenant=tenant,
+            user=self.request.user,
+            action="MEMBER_UPDATED",
+            object_type="Membership",
+            object_id=str(membership.id),
+            service=membership.service,
+            meta={
+                "role": membership.role,
+                "service_id": membership.service_id,
+                "email": membership.user.email,
+                "username": membership.user.username,
+            },
+        )
+
+    def perform_destroy(self, instance):
+        tenant = get_tenant_for_request(self.request)
+        _audit(
+            tenant=tenant,
+            user=self.request.user,
+            action="MEMBER_REMOVED",
+            object_type="Membership",
+            object_id=str(instance.id),
+            service=instance.service,
+            meta={
+                "role": instance.role,
+                "service_id": instance.service_id,
+                "email": instance.user.email,
+                "username": instance.user.username,
+            },
+        )
+        return super().perform_destroy(instance)
+
+
+class MembersSummaryView(APIView):
+    """
+    GET /api/auth/members/summary/
+    Owner only.
+
+    Retour:
+      {
+        "members": [
+          {
+            "id": membership_id,
+            "role": "operator|manager|owner",
+            "service_scope": {"id": 1, "name": "Salle"} | null,
+            "user": {"id": 2, "username": "...", "email": "..."},
+            "last_action": {"action": "...", "at": "..."} | null
+          }
+        ],
+        "recent_activity": [
+          {"action": "...", "at": "...", "user": {...}|null, "object_type": "...", "object_id": "..."}
+        ]
+      }
+    """
+    permission_classes = [permissions.IsAuthenticated, MembershipPermission]
+
+    def get(self, request):
+        tenant = get_tenant_for_request(request)
+
+        members_qs = (
+            Membership.objects.filter(tenant=tenant)
+            .select_related("user", "service")
+            .order_by("created_at")
+        )
+
+        # Dernière action par user
+        last_by_user = {}
+        logs = AuditLog.objects.filter(tenant=tenant).select_related("user").order_by("-created_at")[:200]
+        for l in logs:
+            uid = l.user_id or 0
+            if uid not in last_by_user:
+                last_by_user[uid] = l
+
+        members_payload = []
+        for m in members_qs:
+            last = last_by_user.get(m.user_id or 0)
+            members_payload.append(
+                {
+                    "id": m.id,
+                    "role": m.role,
+                    "service_scope": {"id": m.service.id, "name": m.service.name} if m.service_id else None,
+                    "user": {"id": m.user.id, "username": m.user.username, "email": m.user.email},
+                    "last_action": (
+                        {"action": last.action, "at": last.created_at.isoformat()}
+                        if last
+                        else None
+                    ),
+                }
+            )
+
+        recent = AuditLog.objects.filter(tenant=tenant).select_related("user").order_by("-created_at")[:20]
+        recent_payload = []
+        for a in recent:
+            recent_payload.append(
+                {
+                    "action": a.action,
+                    "at": a.created_at.isoformat(),
+                    "user": {"id": a.user.id, "username": a.user.username, "email": a.user.email} if a.user_id else None,
+                    "object_type": a.object_type,
+                    "object_id": a.object_id,
+                }
+            )
+
+        return Response({"members": members_payload, "recent_activity": recent_payload})
 
 
 # --------------------------------

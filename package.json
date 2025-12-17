@@ -1,0 +1,9 @@
+{
+  "name": "inventory-tool-plage",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "install": "npm install --prefix frontend",
+    "build": "npm run build --prefix frontend && rm -rf dist && cp -a frontend/dist dist"
+  }
+}

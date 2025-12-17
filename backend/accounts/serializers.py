@@ -1,10 +1,10 @@
+# Deployed backend: https://inventory-tool-plage.onrender.com
 from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import Tenant, UserProfile, Service, Membership
 from .utils import get_default_service
-
 
 User = get_user_model()
 
@@ -15,11 +15,10 @@ class RegisterSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True, min_length=8)
     tenant_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    domain = serializers.ChoiceField(choices=Tenant.DOMAIN_CHOICES, default='food')
-    business_type = serializers.ChoiceField(choices=Tenant.BUSINESS_CHOICES, default='other')
+    domain = serializers.ChoiceField(choices=Tenant.DOMAIN_CHOICES, default="food")
+    business_type = serializers.ChoiceField(choices=Tenant.BUSINESS_CHOICES, default="other")
     service_type = serializers.ChoiceField(choices=Service.SERVICE_TYPES, required=False, allow_blank=True)
     service_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    # Accept either a list of strings or a list of dicts {name, service_type}
     extra_services = serializers.JSONField(required=False)
 
     def validate_username(self, value):
@@ -41,7 +40,6 @@ class RegisterSerializer(serializers.Serializer):
         service_name = validated_data.get("service_name") or "Principal"
         extra_services = validated_data.get("extra_services") or []
 
-        # Construire la liste des services demandés par l'utilisateur.
         user_defined_services = [(service_name, service_type)]
         for item in extra_services:
             if isinstance(item, dict):
@@ -53,7 +51,6 @@ class RegisterSerializer(serializers.Serializer):
             if name:
                 user_defined_services.append((name, stype))
 
-        # Fallback : si aucun service renseigné, utiliser les presets métier.
         defaults_by_business = {
             "restaurant": [("Cuisine", "kitchen"), ("Salle", "dining")],
             "bar": [("Bar", "bar"), ("Stock", "retail_general")],
@@ -67,7 +64,6 @@ class RegisterSerializer(serializers.Serializer):
             else defaults_by_business.get(business_type, [("Principal", "other")])
         )
 
-        # Calculer le domaine du tenant : food si au moins un service alimentaire, sinon general.
         food_types = {"grocery_food", "bulk_food", "bar", "kitchen", "dining"}
         has_food_service = any(stype in food_types for _, stype in chosen_services)
         domain = "food" if has_food_service else "general"
@@ -110,7 +106,6 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        # Accepter email comme identifiant
         username = attrs.get(self.username_field)
         if username and "@" in username:
             try:
@@ -118,23 +113,18 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
                 attrs[self.username_field] = user_by_email.username
             except User.DoesNotExist:
                 pass
+
         data = super().validate(attrs)
+
         profile = getattr(self.user, "profile", None)
         if not profile:
             tenant = Tenant.objects.first() or Tenant.objects.create(name="Default Tenant", domain="food")
             profile = UserProfile.objects.create(user=self.user, tenant=tenant, role="owner")
+
         data.update(
             {
-                "user": {
-                    "id": self.user.id,
-                    "username": self.user.username,
-                    "email": self.user.email,
-                },
-                "tenant": {
-                    "id": profile.tenant.id,
-                    "name": profile.tenant.name,
-                    "domain": profile.tenant.domain,
-                },
+                "user": {"id": self.user.id, "username": self.user.username, "email": self.user.email},
+                "tenant": {"id": profile.tenant.id, "name": profile.tenant.name, "domain": profile.tenant.domain},
             }
         )
         return data
@@ -150,11 +140,7 @@ class MeSerializer(serializers.Serializer):
         profile = getattr(obj, "profile", None)
         if not profile:
             return None
-        return {
-            "id": profile.tenant.id,
-            "name": profile.tenant.name,
-            "domain": profile.tenant.domain,
-        }
+        return {"id": profile.tenant.id, "name": profile.tenant.name, "domain": profile.tenant.domain}
 
 
 class ServiceSerializer(serializers.ModelSerializer):
@@ -162,10 +148,7 @@ class ServiceSerializer(serializers.ModelSerializer):
         model = Service
         fields = ["id", "name", "slug", "created_at", "service_type", "counting_mode", "features"]
         read_only_fields = ["id", "created_at", "slug"]
-        extra_kwargs = {
-            "features": {"required": False},
-            "counting_mode": {"required": False},
-        }
+        extra_kwargs = {"features": {"required": False}, "counting_mode": {"required": False}}
 
     def create(self, validated_data):
         from .utils import apply_service_preset
@@ -177,7 +160,6 @@ class ServiceSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        # Autoriser la mise à jour des features/counting_mode partiellement
         features = validated_data.pop("features", None)
         if features is not None:
             instance.features = features
@@ -193,15 +175,37 @@ class ServiceSerializer(serializers.ModelSerializer):
 class MembershipSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(write_only=True, required=False)
     username = serializers.CharField(write_only=True, required=False)
+
+    # ✅ scope service
+    service_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    service_scope = serializers.SerializerMethodField(read_only=True)
+
     user_display = serializers.SerializerMethodField()
     temp_password = serializers.SerializerMethodField()
 
     class Meta:
         model = Membership
-        fields = ["id", "user", "tenant", "role", "created_at", "email", "username", "user_display", "temp_password"]
-        read_only_fields = ["id", "tenant", "created_at", "user", "user_display", "temp_password"]
+        fields = [
+            "id",
+            "user",
+            "tenant",
+            "role",
+            "service",
+            "created_at",
+            "email",
+            "username",
+            "service_id",
+            "service_scope",
+            "user_display",
+            "temp_password",
+        ]
+        read_only_fields = ["id", "tenant", "created_at", "user", "service", "service_scope", "user_display", "temp_password"]
 
     def validate(self, attrs):
+        if self.instance:
+            # PATCH: role/service_id autorisés
+            return attrs
+
         if not attrs.get("email") and not attrs.get("username"):
             raise serializers.ValidationError("Fournissez un email ou un nom d'utilisateur.")
         return attrs
@@ -209,14 +213,22 @@ class MembershipSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         request = self.context["request"]
         tenant = self.context["tenant"]
-        email = validated_data.pop("email", "")
-        username = validated_data.pop("username", "")
+
+        email = (validated_data.pop("email", "") or "").strip()
+        username = (validated_data.pop("username", "") or "").strip()
         role = validated_data.get("role", "operator")
+        service_id = validated_data.pop("service_id", None)
+
+        service_obj = None
+        if service_id:
+            service_obj = Service.objects.filter(id=service_id, tenant=tenant).first()
+
         user_obj = None
         if email:
             user_obj = User.objects.filter(email=email).first()
         if not user_obj and username:
             user_obj = User.objects.filter(username=username).first()
+
         created_new = False
         if not user_obj:
             base_username = username or (email.split("@")[0] if email else "user")
@@ -225,47 +237,75 @@ class MembershipSerializer(serializers.ModelSerializer):
             user_obj = User.objects.create_user(username=final_username, email=email, password=temp_password)
             self._temp_password = temp_password
             created_new = True
+
         from django.db import IntegrityError
+
         try:
             membership, _ = Membership.objects.update_or_create(
-                user=user_obj, tenant=tenant, defaults={"role": role}
+                user=user_obj,
+                tenant=tenant,
+                defaults={"role": role, "service": service_obj},
             )
         except IntegrityError:
             raise serializers.ValidationError("Ce membre existe déjà pour ce commerce.")
+
         # ensure profile exists
         if not hasattr(user_obj, "profile"):
             UserProfile.objects.create(user=user_obj, tenant=tenant, role=role)
+
+        # si user existait déjà, on ne renvoie pas de mdp
+        if not created_new:
+            self._temp_password = None
+
         return membership
 
+    def update(self, instance, validated_data):
+        tenant = instance.tenant
+        if "role" in validated_data:
+            instance.role = validated_data.get("role") or instance.role
+
+        if "service_id" in validated_data:
+            service_id = validated_data.get("service_id")
+            if service_id in ("", None):
+                instance.service = None
+            else:
+                service_obj = Service.objects.filter(id=service_id, tenant=tenant).first()
+                if not service_obj:
+                    raise serializers.ValidationError({"service_id": "Service invalide pour ce tenant."})
+                instance.service = service_obj
+
+        instance.save()
+        return instance
+
     def get_user_display(self, obj):
-        return {
-            "id": obj.user.id,
-            "username": obj.user.username,
-            "email": obj.user.email,
-        }
+        return {"id": obj.user.id, "username": obj.user.username, "email": obj.user.email}
 
     def get_temp_password(self, obj):
-        # Expose temp password only if freshly created in this serializer instance
         return getattr(self, "_temp_password", None)
+
+    def get_service_scope(self, obj):
+        if not obj.service_id:
+            return None
+        return {"id": obj.service.id, "name": obj.service.name}
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
-    username = serializers.CharField(required=False, allow_blank=True)
     email = serializers.EmailField(required=False, allow_blank=True)
+    username = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
-        if not attrs.get("username") and not attrs.get("email"):
-            raise serializers.ValidationError("Fournissez un nom d'utilisateur ou un email.")
+        if not attrs.get("email") and not attrs.get("username"):
+            raise serializers.ValidationError("Fournissez un email ou un nom d'utilisateur.")
         return attrs
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField()
     token = serializers.CharField()
-    new_password = serializers.CharField(min_length=8)
-    new_password_confirm = serializers.CharField(min_length=8)
+    new_password = serializers.CharField(write_only=True, min_length=8)
+    new_password_confirm = serializers.CharField(write_only=True, min_length=8)
 
     def validate(self, attrs):
-        if attrs.get("new_password") != attrs.get("new_password_confirm"):
+        if attrs["new_password"] != attrs["new_password_confirm"]:
             raise serializers.ValidationError("Les mots de passe ne correspondent pas.")
         return attrs

@@ -21,7 +21,7 @@ export function useEntitlements() {
     }
     setLoading(true);
     try {
-      const res = await api.get("/api/me/org/entitlements");
+      const res = await api.get("/api/auth/me/org/entitlements");
       setData(res.data || null);
       setError(null);
     } catch (e) {

@@ -45,6 +45,7 @@ class Tenant(models.Model):
         ("grocery", "Grocery / Epicerie"),
         ("retail", "Retail / Boutique"),
         ("camping_multi", "Camping / Hôtel multi-services"),
+        ("pharmacy", "Pharmacie / Parapharmacie"),
         ("other", "Other"),
     )
 
@@ -142,27 +143,25 @@ class Membership(models.Model):
     )
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="operator")
 
-    # ✅ IMPORTANT: scope optionnel à un service précis (Salle / Cuisine / Bar...)
-    # - NULL => accès multi-service (comme avant)
-    # - Non-NULL => accès limité à CE service (et seulement ce service)
+    # ✅ Scope service (null = accès multi-services pour ce tenant)
     service = models.ForeignKey(
         Service,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="scoped_memberships",
+        related_name="memberships",
     )
 
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="operator")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ("user", "tenant")
 
     def __str__(self):
-        scope = f" / {self.service.name}" if self.service_id else ""
-        return f"{self.user.username} - {self.tenant.name}{scope} ({self.role})"
+        scope = self.service.name if self.service_id else "ALL"
+        return f"{self.user.username} - {self.tenant.name} ({self.role}) [{scope}]"
 
 
 class OrganizationOverrides(models.Model):
@@ -257,35 +256,38 @@ class Invitation(models.Model):
         return f"Invitation {self.email} ({self.tenant.name})"
 
 
-# ✅ NEW: Audit log (traçabilité)
+# ✅ Audit minimal (traçabilité actions)
 class AuditLog(models.Model):
     ACTION_CHOICES = (
-        ("CREATE", "Create"),
-        ("UPDATE", "Update"),
-        ("DELETE", "Delete"),
+        ("MEMBER_ADDED", "Member added"),
+        ("MEMBER_UPDATED", "Member updated"),
+        ("MEMBER_REMOVED", "Member removed"),
+        ("EXPORT_SENT", "Export sent"),
+        ("INVITE_SENT", "Invite sent"),
+        ("INVITE_ACCEPTED", "Invite accepted"),
         ("LOGIN", "Login"),
-        ("EXPORT", "Export"),
-        ("INVITE", "Invite"),
-        ("ROLE_CHANGE", "Role change"),
-        ("MEMBER_REMOVE", "Member remove"),
     )
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="audit_logs")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="audit_logs"
+    )
+
     action = models.CharField(max_length=50, choices=ACTION_CHOICES)
     object_type = models.CharField(max_length=50, blank=True, default="")
-    object_id = models.CharField(max_length=80, blank=True, default="")
-    metadata = models.JSONField(default=dict)
+    object_id = models.CharField(max_length=50, blank=True, default="")
+
+    service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["-created_at"]
         indexes = [
             models.Index(fields=["tenant", "created_at"]),
             models.Index(fields=["tenant", "action"]),
-            models.Index(fields=["user", "created_at"]),
         ]
+        ordering = ["-created_at"]
 
     def __str__(self):
-        who = getattr(self.user, "username", None) or "system"
-        return f"{self.action} by {who}"
+        return f"{self.tenant_id} {self.action} {self.object_type}#{self.object_id}"

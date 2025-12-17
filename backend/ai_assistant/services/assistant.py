@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from uuid import uuid4
 from django.conf import settings
-from django.db.models import Sum, Count, Q
+from django.db.models import Sum, Count, Q, Value, DecimalField
 from django.db.models.functions import Coalesce
 import time
 import uuid
@@ -70,14 +70,14 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
 
     summary = products_qs.aggregate(
         total_skus=Count("id"),
-        total_units=Coalesce(Sum("quantity"), 0),
+        total_units=Coalesce(Sum("quantity"), Value(0), output_field=DecimalField(max_digits=14, decimal_places=4)),
         low_stock_count=Count("id", filter=Q(quantity__lte=2)),
         out_of_stock_count=Count("id", filter=Q(quantity__lte=0)),
     )
 
     loss_totals = losses_qs.aggregate(
         loss_count=Count("id"),
-        losses_total_qty=Coalesce(Sum("quantity"), 0),
+        losses_total_qty=Coalesce(Sum("quantity"), Value(0), output_field=DecimalField(max_digits=14, decimal_places=4)),
     )
 
     loss_by_reason = list(

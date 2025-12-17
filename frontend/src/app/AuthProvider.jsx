@@ -211,13 +211,33 @@ export function AuthProvider({ children }) {
             "API inaccessible (vérifie que le backend tourne et que l’URL API est correcte)."
           );
         }
-        const apiMsg =
-          e.response?.data?.detail ||
-          e.response?.data?.non_field_errors?.[0] ||
-          e.response?.data?.email?.[0] ||
-          e.response?.data?.password?.[0] ||
-          "Création impossible. Vérifiez email, mot de passe et nom du commerce.";
-        throw new Error(apiMsg);
+      const data = e.response?.data;
+      const flattenErrors = (payload) => {
+        if (!payload) return [];
+        if (typeof payload === "string") return [payload];
+        const parts = [];
+        const addEntry = (key, value) => {
+          if (Array.isArray(value)) {
+            parts.push(`${key}: ${value.join(" · ")}`);
+          } else if (typeof value === "object") {
+            parts.push(`${key}: ${JSON.stringify(value)}`);
+          } else if (value) {
+            parts.push(`${key}: ${value}`);
+          }
+        };
+        if (payload.detail) addEntry("detail", payload.detail);
+        if (payload.non_field_errors) addEntry("erreur", payload.non_field_errors.join(" · "));
+        Object.keys(payload).forEach((key) => {
+          if (key === "detail" || key === "non_field_errors") return;
+          addEntry(key, payload[key]);
+        });
+        return parts;
+      };
+      const messages = flattenErrors(data);
+      const apiMsg = messages.length
+        ? messages.join(" · ")
+        : "Création impossible. Vérifiez email, mot de passe et nom du commerce.";
+      throw new Error(apiMsg);
       }
     },
     [fetchServices, refreshMe]

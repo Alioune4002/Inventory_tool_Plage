@@ -14,7 +14,7 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
 ALLOWED_HOSTS = [
     host.strip() for host in os.environ.get(
         'DJANGO_ALLOWED_HOSTS',
-        'localhost,127.0.0.1,inventory-tool-plage.onrender.com'
+        'localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com'
     ).split(',') if host.strip()
 ]
 
