@@ -3,22 +3,6 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
-  --bg: #f8fafc;
-  --surface: #ffffff;
-  --text: #0f172a;
-  --muted: #475569;
-  --border: #e2e8f0;
-  --primary: #2563eb;
-  --success: #16a34a;
-  --accent: #e0e7ff;
-  --radius-card: 24px;
-  --radius-pill: 999px;
-  --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
-  --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
-}
-
-:root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0f172a;
   --surface: #0c1426;
@@ -28,8 +12,24 @@
   --primary: #3b82f6;
   --success: #22c55e;
   --accent: #1e293b;
+  --radius-card: 24px;
+  --radius-pill: 999px;
   --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.12), 0 25px 70px rgba(59, 130, 246, 0.35);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --primary: #2563eb;
+  --success: #16a34a;
+  --accent: #e0e7ff;
+  --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
+  --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
 }
 
 html,

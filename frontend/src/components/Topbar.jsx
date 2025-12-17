@@ -1,10 +1,10 @@
 import React from "react";
-import { LogOut, Moon, Sun } from "lucide-react";
+import { LogOut, Moon, Sun, Menu } from "lucide-react";
 import { useAuth } from "../app/AuthProvider";
 import Button from "../ui/Button";
 import Badge from "../ui/Badge";
 
-export default function Topbar({ onLogout, onToggleTheme }) {
+export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
   const { me, tenant, services, serviceId, selectService, logout, loading } = useAuth();
 
   const isGeneral = tenant?.domain === "general";
@@ -41,6 +41,16 @@ export default function Topbar({ onLogout, onToggleTheme }) {
         </div>
 
         <div className="flex items-center gap-2">
+          {onOpenMobileNav && (
+            <button
+              type="button"
+              onClick={onOpenMobileNav}
+              className="lg:hidden rounded-full bg-white/10 p-2 text-white hover:bg-white/20 transition"
+              aria-label="Ouvrir la navigation"
+            >
+              <Menu size={18} />
+            </button>
+          )}
           {onToggleTheme && (
             <Button
               variant="ghost"

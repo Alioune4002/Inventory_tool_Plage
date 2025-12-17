@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence, useInView } from "framer-motion";
 import DemoProvider, { useDemo } from "./context/DemoProvider";
 import Sidebar from "../components/Sidebar";
@@ -11,7 +11,38 @@ import DemoLosses from "./pages/DemoLosses";
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== "false";
 
-function DemoShell() {
+const navItems = [
+  ["dashboard", "Dashboard"],
+  ["inventory", "Inventaire"],
+  ["losses", "Pertes"],
+  ["exports", "Exports"],
+];
+
+function useDesktopBreakpoint() {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth >= 1024;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handler = () => setIsDesktop(window.innerWidth >= 1024);
+    handler();
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
+  return isDesktop;
+}
+
+function ScreenRenderer({ route }) {
+  if (route === "inventory") return <DemoInventory />;
+  if (route === "exports") return <DemoExports />;
+  if (route === "losses") return <DemoLosses />;
+  return <DemoDashboard />;
+}
+
+function DesktopDemo() {
   const { route, setRoute, highlight, toast, setAutoActive } = useDemo();
   const shellRef = useRef(null);
   const isVisible = useInView(shellRef, { margin: "-30% 0px -30% 0px" });
@@ -22,25 +53,8 @@ function DemoShell() {
     }
   }, [isVisible, setAutoActive]);
 
-  const Screen = () => {
-    if (route === "inventory") return <DemoInventory />;
-    if (route === "exports") return <DemoExports />;
-    if (route === "losses") return <DemoLosses />;
-    return <DemoDashboard />;
-  };
-
-  const navItems = [
-    ["dashboard", "Dashboard"],
-    ["inventory", "Inventaire"],
-    ["losses", "Pertes"],
-    ["exports", "Exports"],
-  ];
-
   return (
-    <div
-      ref={shellRef}
-      className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950/95 via-slate-900/90 to-slate-950/95 text-white shadow-[0_30px_70px_rgba(15,23,42,0.65)] overflow-hidden"
-    >
+    <div ref={shellRef} className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950/95 via-slate-900/90 to-slate-950/95 text-white shadow-[0_30px_70px_rgba(15,23,42,0.65)] overflow-hidden">
       <div className="hidden lg:block">
         <Topbar />
       </div>
@@ -73,12 +87,12 @@ function DemoShell() {
                 exit={{ opacity: 0, y: -18, scale: 0.94 }}
                 transition={{ duration: 0.65, ease: "easeOut" }}
               >
-                <Screen />
+                <ScreenRenderer route={route} />
               </motion.div>
             </AnimatePresence>
 
             <AnimatePresence>
-              {highlight?.text ? (
+              {highlight?.text && (
                 <motion.div
                   initial={{ opacity: 0, y: 15 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -94,11 +108,11 @@ function DemoShell() {
                     </div>
                   </Card>
                 </motion.div>
-              ) : null}
+              )}
             </AnimatePresence>
 
             <AnimatePresence>
-              {toast ? (
+              {toast && (
                 <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -110,7 +124,7 @@ function DemoShell() {
                     {toast.message}
                   </div>
                 </motion.div>
-              ) : null}
+              )}
             </AnimatePresence>
           </div>
         </div>
@@ -126,7 +140,7 @@ function DemoShell() {
                 <div className="p-3">
                   <div className="text-xs text-slate-400 mb-2">UI réelle (démo)</div>
                   <div className="scale-[0.85] origin-top-left w-[120%]">
-                    <Screen />
+                    <ScreenRenderer route={route} />
                   </div>
                 </div>
               </div>
@@ -141,13 +155,80 @@ function DemoShell() {
   );
 }
 
+function MobileDemo() {
+  const { route, setRoute, highlight, toast, setAutoActive } = useDemo();
+  const shellRef = useRef(null);
+  const isVisible = useInView(shellRef, { margin: "-40% 0px -40% 0px" });
+
+  useEffect(() => {
+    if (isVisible) {
+      setAutoActive(true);
+    }
+  }, [isVisible, setAutoActive]);
+
+  return (
+    <div
+      ref={shellRef}
+      className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/80 text-white shadow-[0_20px_60px_rgba(2,6,23,0.55)] p-5 overflow-hidden"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-[0.3em] text-white/60">Auto-démo</div>
+          <h3 className="text-2xl font-black tracking-tight text-white">Voyez StockScan en action</h3>
+        </div>
+        <div className="text-sm font-semibold text-white/60">Données fictives</div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 items-center">
+        {navItems.map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setRoute(k)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-full border border-white/10 transition
+              ${route === k ? "bg-white text-slate-900 shadow-[0_10px_30px_rgba(0,0,0,0.4)]" : "bg-white/5 text-white/80 hover:bg-white/10"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <motion.div
+        className="mt-4 rounded-3xl border border-white/5 bg-white/5 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)]"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
+      >
+        <ScreenRenderer route={route} />
+      </motion.div>
+
+      {highlight?.text && (
+        <div className="mt-4 rounded-3xl border border-white/10 bg-white/10 p-3 text-sm text-white/80 shadow-soft">
+          <div className="text-xs uppercase tracking-widest text-white/60">Focus</div>
+          <div className="font-semibold">{highlight.text}</div>
+          <p className="text-xs text-white/60">
+            UI identique, aucun writing dans la base (données fictives).
+          </p>
+        </div>
+      )}
+
+      {toast && (
+        <div className="mt-3 rounded-2xl border border-white/10 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900">
+          {toast.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AutoDemoShowcase() {
   if (!DEMO_MODE) {
     return null;
   }
+  const isDesktop = useDesktopBreakpoint();
   return (
     <DemoProvider>
-      <DemoShell />
+      {isDesktop ? <DesktopDemo /> : <MobileDemo />}
     </DemoProvider>
   );
 }

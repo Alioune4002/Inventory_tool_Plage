@@ -220,10 +220,21 @@ export default function Register() {
       const main = services[0];
       const extras = isMulti ? services.slice(1).filter((s) => s.service_name?.trim()) : [];
 
+      const slugify = (value) =>
+        (value || "")
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "");
+      const username = slugify(tenantName) || slugify(email.split("@")[0]) || "stockscan-user";
+
       await register({
+        username,
         tenant_name: tenantName.trim(),
         email: email.trim(),
         password,
+        password_confirm: password,
         domain: mainDomain,
         business_type: businessType || "other",
         service_type: main?.service_type,

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { motion } from "framer-motion";
@@ -82,6 +82,16 @@ function TradeCard({ to, title, desc, tag, Icon }) {
 
 export default function Landing() {
   const nav = useNavigate();
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const prevTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
+    return () => {
+      if (prevTheme) {
+        document.documentElement.setAttribute("data-theme", prevTheme);
+      }
+    };
+  }, []);
 
   const features = [
     { title: "Ajoutez des produits", desc: "Scan code-barres si dispo, sinon SKU interne générable." },
@@ -167,7 +177,7 @@ export default function Landing() {
         />
       </Helmet>
 
-      <div className="min-h-screen bg-slate-950 text-white relative overflow-hidden">
+      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white relative overflow-hidden">
         {/* Stripe-like background */}
         <div className="pointer-events-none absolute inset-0 opacity-20 bg-grid" />
         <div className="pointer-events-none absolute -top-24 -left-24 h-96 w-96 rounded-full bg-blue-600 blur-[140px] opacity-35" />
