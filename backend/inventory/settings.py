@@ -154,7 +154,7 @@ AI_MODEL = os.environ.get('AI_MODEL', 'gpt-4o-mini')
 # Billing / Stripe
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://127.0.0.1:5173')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://stockscan.app')
 STRIPE_SUCCESS_URL = os.environ.get('STRIPE_SUCCESS_URL', f"{FRONTEND_URL}/billing/success")
 STRIPE_CANCEL_URL = os.environ.get('STRIPE_CANCEL_URL', f"{FRONTEND_URL}/billing/cancel")
 STRIPE_PRICE_BOUTIQUE_MONTHLY = os.environ.get('STRIPE_PRICE_BOUTIQUE_MONTHLY')
@@ -165,3 +165,4 @@ STRIPE_PRICE_PRO_YEARLY = os.environ.get('STRIPE_PRICE_PRO_YEARLY')
 # Emails (SendGrid)
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 SENDGRID_FROM_EMAIL = os.environ.get('SENDGRID_FROM_EMAIL', 'no-reply@stockscan.app')
+INVITATIONS_SEND_EMAILS = os.environ.get('INVITATIONS_SEND_EMAILS', 'true').lower() == 'true'

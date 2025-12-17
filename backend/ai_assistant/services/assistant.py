@@ -57,6 +57,9 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     service_id = filters.get("service")
     month = filters.get("month") or period_start
 
+    def decimal_zero():
+        return Value(0, output_field=DecimalField(max_digits=14, decimal_places=4))
+
     products_qs = Product.objects.filter(tenant=tenant)
     losses_qs = LossEvent.objects.filter(tenant=tenant)
 
@@ -70,14 +73,14 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
 
     summary = products_qs.aggregate(
         total_skus=Count("id"),
-        total_units=Coalesce(Sum("quantity"), Value(0), output_field=DecimalField(max_digits=14, decimal_places=4)),
+        total_units=Coalesce(Sum("quantity"), decimal_zero(), output_field=DecimalField(max_digits=14, decimal_places=4)),
         low_stock_count=Count("id", filter=Q(quantity__lte=2)),
         out_of_stock_count=Count("id", filter=Q(quantity__lte=0)),
     )
 
     loss_totals = losses_qs.aggregate(
         loss_count=Count("id"),
-        losses_total_qty=Coalesce(Sum("quantity"), Value(0), output_field=DecimalField(max_digits=14, decimal_places=4)),
+        losses_total_qty=Coalesce(Sum("quantity"), decimal_zero(), output_field=DecimalField(max_digits=14, decimal_places=4)),
     )
 
     loss_by_reason = list(
@@ -165,6 +168,63 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     return context
 
 
+def _local_assistant_summary(context):
+    ctx = context or {}
+    inv = ctx.get("inventory_summary", {})
+    losses = ctx.get("losses", {})
+    usage = ctx.get("usage", {})
+    message = (
+        f"{ctx.get('tenant', {}).get('name', 'Votre organisation')} : "
+        f"{inv.get('total_skus', 0)} SKU(s), {inv.get('low_stock_count', 0)} (<3 unités), "
+        f"{inv.get('out_of_stock_count', 0)} épuisés. "
+        f"{losses.get('total_qty', 0)} pertes depuis {ctx.get('period', {}).get('month') or 'le mois actif'}."
+    )
+
+    insights = []
+    if inv.get("low_stock_count", 0) > 0:
+        insights.append(
+            {
+                "title": "Stocks bas détectés",
+                "description": f"{inv['low_stock_count']} produit(s) à moins de 3 unités.",
+                "severity": "warning",
+            }
+        )
+    if inv.get("out_of_stock_count", 0) > 0:
+        insights.append(
+            {
+                "title": "Produits rupture",
+                "description": f"{inv['out_of_stock_count']} produit(s) sont à 0 stock.",
+                "severity": "critical",
+            }
+        )
+    if losses.get("total_qty", 0) > 0:
+        insights.append(
+            {
+                "title": "Pertes enregistrées",
+                "description": f"{losses['total_qty']} unité(s) perdues ce mois.",
+                "severity": "info",
+            }
+        )
+
+    actions = []
+    if insights and usage.get("services_count", 0) > 1:
+        actions.append(
+            {
+                "action_key": "refresh_stats",
+                "label": "Mettre à jour les stats",
+                "payload": {},
+                "requires_confirmation": False,
+            }
+        )
+
+    return {
+        "message": message,
+        "insights": insights[:3],
+        "suggested_actions": actions,
+        "question": None,
+    }
+
+
 def _fallback():
     return {
         "message": "Votre assistant IA est en pause clope, il revient bientôt.",
@@ -175,14 +235,14 @@ def _fallback():
     }
 
 
-def call_llm(system_prompt, context_json):
+def call_llm(system_prompt, context_json, context=None):
     request_id = str(uuid4())
     if not getattr(settings, "AI_ENABLED", False):
-        return {**_fallback(), "request_id": request_id, "mode": "fallback"}
+        return {**_local_assistant_summary(context), "request_id": request_id, "mode": "fallback"}
 
     if OpenAI is None or not getattr(settings, "OPENAI_API_KEY", None):
         LOGGER.warning("AI disabled: missing OpenAI client or API key.")
-        return {**_fallback(), "request_id": request_id, "mode": "fallback"}
+        return {**_local_assistant_summary(context), "request_id": request_id, "mode": "fallback"}
 
     try:
         client = OpenAI(api_key=settings.OPENAI_API_KEY)

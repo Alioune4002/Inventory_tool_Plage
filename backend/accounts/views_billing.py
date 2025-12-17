@@ -253,7 +253,7 @@ class StripePortalSessionView(APIView):
         try:
             portal = stripe.billing_portal.Session.create(
                 customer=tenant.stripe_customer_id,
-                return_url=f"{getattr(settings, 'FRONTEND_URL', 'http://127.0.0.1:5173')}/settings",
+                return_url=f"{getattr(settings, 'FRONTEND_URL', 'https://stockscan.app')}/settings",
             )
             return Response({"url": portal["url"]})
         except Exception as e:

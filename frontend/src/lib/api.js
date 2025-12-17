@@ -2,8 +2,10 @@
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
+const defaultBackendURL = "https://inventory-tool-plage.onrender.com";
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000",
+  baseURL: import.meta.env.VITE_API_BASE_URL || defaultBackendURL,
 });
 
 export const setAuthToken = (token) => {

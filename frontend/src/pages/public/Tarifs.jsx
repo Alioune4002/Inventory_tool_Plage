@@ -7,6 +7,7 @@ import { getStoredToken } from "../../lib/auth";
 export default function Tarifs() {
   const [cycle, setCycle] = useState("MONTHLY"); // MONTHLY | YEARLY
   const [loadingPlan, setLoadingPlan] = useState("");
+  const stripeEnabled = import.meta.env.VITE_STRIPE_ENABLED === "true";
 
   const plans = useMemo(() => buildPlans(cycle), [cycle]);
 
@@ -20,6 +21,11 @@ export default function Tarifs() {
         // entreprise => contact
         window.location.href = "/contact";
       }
+      return;
+    }
+
+    if (!stripeEnabled) {
+      alert("Stripe n’est pas configuré pour ce déploiement. Contactez l’administrateur.");
       return;
     }
 
@@ -132,15 +138,15 @@ export default function Tarifs() {
               <button
                 className="w-full rounded-full bg-blue-600 text-white font-semibold py-2.5 hover:bg-blue-500 transition disabled:opacity-60 disabled:cursor-not-allowed"
                 onClick={() => startCheckout(plan.planCode)}
-                disabled={Boolean(loadingPlan) && loadingPlan !== plan.planCode}
+                disabled={!stripeEnabled || (Boolean(loadingPlan) && loadingPlan !== plan.planCode)}
                 type="button"
               >
-                {loadingPlan === plan.planCode ? "Redirection…" : plan.cta}
-              </button>
+              {loadingPlan === plan.planCode ? "Redirection…" : plan.cta}
+            </button>
 
-              <p className="text-xs text-slate-300">{plan.note}</p>
-            </article>
-          ))}
+            <p className="text-xs text-slate-300">{plan.note}</p>
+          </article>
+        ))}
         </section>
 
         <section className="public-card p-6 space-y-4">
@@ -172,6 +178,16 @@ export default function Tarifs() {
             </div>
           </div>
         </section>
+
+        {!stripeEnabled && (
+          <section className="rounded-2xl border border-amber-500/40 bg-amber-900/30 text-white p-6 space-y-2">
+            <div className="text-sm font-semibold">Paiements désactivés</div>
+            <p className="text-xs text-amber-100">
+              Stripe n’est pas configuré sur cette instance. Vérifiez `VITE_STRIPE_ENABLED` et les clés Stripe
+              (clé API + webhook). Les boutons seront activés automatiquement dès que Stripe sera prêt.
+            </p>
+          </section>
+        )}
 
         <section className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white p-8 space-y-3">
           <h3 className="text-2xl font-bold">Besoin spécifique (pharmacie, production, multi-entrepôts) ?</h3>

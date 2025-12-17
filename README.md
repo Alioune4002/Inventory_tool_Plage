@@ -2,7 +2,7 @@
 
 SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec ou sans code-barres. Frontend React (Vite + Tailwind) et backend Django/DRF (JWT, multi-tenant, exports).
 
-## Architecture
+- **Backend prod** : https://inventory-tool-plage.onrender.com (Render).  
 - `backend/` : API Django REST (DRF + SimpleJWT). Multi-tenant, multi-services, exports CSV/XLSX.
 - `frontend/` : Vite + React + Tailwind (UI premium, animations Framer Motion).
 - `frontend-cra-old/` : ancien front (CRA) conservé à titre d’archive.
@@ -22,16 +22,15 @@ SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec 
 
 ## Prérequis
 - Node.js 18+ et npm.
-- Python 3.11+ et `pip`/`pip3`.
-- PostgreSQL recommandé en prod (`DATABASE_URL`), SQLite OK en dev.
+- Python 3.11+ avec `pip`/`pip3`.
+- PostgreSQL recommandé en production (`DATABASE_URL`), SQLite suffisant en dev.
 
-## Installation rapide
+## Setup rapide (dev)
 1. Cloner  
 ```bash
 git clone https://github.com/Alioune4002/Inventory_tool_Plage.git
 cd Inventory_tool_Plage
 ```
-
 2. Backend  
 ```bash
 cd backend
@@ -42,14 +41,13 @@ python manage.py makemigrations accounts products
 python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 ```
-
 3. Frontend (Vite)  
 ```bash
 cd ../frontend
 npm install
-npm run dev   # http://127.0.0.1:5173
+npm run dev
 ```
-Le front pointe par défaut sur `window.location.origin` ou `VITE_API_BASE_URL` si défini. En dev, assure-toi que le backend tourne sur `http://127.0.0.1:8000`.
+Le front pointe par défaut sur `window.location.origin` ou sur `VITE_API_BASE_URL`.
 
 ## Endpoints principaux (extraits)
 - Auth :  
@@ -96,10 +94,15 @@ Le front pointe par défaut sur `window.location.origin` ou `VITE_API_BASE_URL` 
 - Backend : `cd backend && pytest`
 - Frontend : `cd frontend && npm test` (vitest/RTL)
 
-## Déploiement
-- Backend : Gunicorn/Render/Heroku (Procfile fourni). Config : `DJANGO_ALLOWED_HOSTS`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DATABASE_URL` (Postgres), `CORS_ALLOWED_ORIGINS`.
-- Assistant IA : `AI_ENABLED=true`, `OPENAI_API_KEY`, `AI_MODEL` (ex: gpt-4o-mini), `AI_THROTTLE_RATE` (par défaut 10/min).
-- Frontend : Vercel/Netlify (build Vite). Var : `VITE_API_BASE_URL` si l’API n’est pas sur le même domaine.
+## Production deployment
+- Backend : Gunicorn/Render/Heroku (Procfile fourni). Hébergé sur https://inventory-tool-plage.onrender.com. Variables clés : `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DJANGO_ALLOWED_HOSTS`, `DATABASE_URL`, `CORS_ALLOWED_ORIGINS`.
+- Stripe / billing : `STRIPE_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SUCCESS_URL`, `STRIPE_CANCEL_URL`, `FRONTEND_URL`, `STRIPE_PRICE_*`.
+- Invitations : `INVITATIONS_SEND_EMAILS` (true/false) pour activer l’envoi d’emails via SendGrid. Si vous la passez à `false`, SendGrid n’est pas requis et les invitations peuvent rester manuelles.
+- Email : `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL` (optionnel si les invitations sont désactivées). Le fallback logge un warning si la clé est absente.
+- Assistant IA : `AI_ENABLED=true`, `OPENAI_API_KEY`, `AI_MODEL`, `AI_THROTTLE_RATE`.
+- Frontend : Vercel/Netlify (build Vite). `VITE_API_BASE_URL` doit pointer vers `https://inventory-tool-plage.onrender.com`, `VITE_DEMO_MODE=false` en prod (pour désactiver AutoDemo) et `VITE_STRIPE_ENABLED=true/false` pour activer les boutons checkout. Le script `scripts/validate.sh` vérifie la présence des env critiques et ne bloque pas si `npm test` n’existe pas.
+
+Consultez `DEPLOYMENT.md` pour le runbook complet, les smoke tests curl (Stripe, invitations, entitlements, export, IA) et les alertes à surveiller en production.
 
 ## Points d’attention actuels
 - Appliquer les migrations avant de tester (sinon erreurs “no such column business_type”).
@@ -116,6 +119,9 @@ python manage.py runserver 0.0.0.0:8000
 # frontend
 npm run dev
 npm run build
+
+# validations
+scripts/validate.sh
 ```
 
 Bon usage de StockScan !

@@ -36,7 +36,7 @@ class AiAssistantView(APIView):
 
         context = build_context(request.user, scope, period_start, period_end, filters)
         context_json = json.dumps(context, ensure_ascii=False)
-        raw = call_llm(SYSTEM_PROMPT, context_json)
+        raw = call_llm(SYSTEM_PROMPT, context_json, context)
         data, invalid_json = validate_llm_json(raw)
         duration_ms = int((time.time() - started) * 1000)
         data.update(

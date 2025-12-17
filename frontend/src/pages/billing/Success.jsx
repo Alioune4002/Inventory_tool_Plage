@@ -42,6 +42,7 @@ export default function BillingSuccess() {
 
   const [syncing, setSyncing] = useState(true);
   const [syncedOnce, setSyncedOnce] = useState(false);
+  const [redirectCountdown, setRedirectCountdown] = useState(10);
 
   const sessionId = params.get("session_id"); // Stripe peut renvoyer ça si tu l’ajoutes côté backend
 
@@ -107,6 +108,18 @@ export default function BillingSuccess() {
   const planEffective = prettyPlan(entitlements?.plan_effective);
   const status = prettyStatus(entitlements?.subscription_status);
 
+  useEffect(() => {
+    if (!isAuthed) return;
+    if (redirectCountdown <= 0) {
+      navigate("/app/dashboard");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRedirectCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [redirectCountdown, isAuthed, navigate]);
+
   return (
     <PageTransition>
       <Helmet>
@@ -143,6 +156,11 @@ export default function BillingSuccess() {
 
           {sessionId ? (
             <div className="text-xs text-slate-500 pt-1">Référence: {sessionId}</div>
+          ) : null}
+          {isAuthed ? (
+            <div className="text-xs text-slate-500 pt-1">
+              Redirection vers le dashboard dans {redirectCountdown}s…
+            </div>
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-3">

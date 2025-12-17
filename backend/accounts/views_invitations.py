@@ -4,6 +4,7 @@ from __future__ import annotations
 import secrets
 from datetime import timedelta
 
+import logging
 from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
@@ -15,7 +16,9 @@ from rest_framework.response import Response
 from accounts.models import Invitation, Membership, UserProfile
 from accounts.utils import get_tenant_for_request, get_user_role
 
-from products.views import _send_export_email_sendgrid  # réutilisation SendGrid
+from utils.sendgrid_email import invitations_email_enabled, send_email_with_sendgrid
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -104,15 +107,20 @@ Ce lien expire dans 7 jours.
 </div>
 """
 
-        _send_export_email_sendgrid(
-            to_email=email,
-            subject=subject,
-            text_body=text,
-            html_body=html,
-            filename="",
-            file_bytes=b"",
-            mimetype="text/plain",
-        )
+        if invitations_email_enabled():
+            sent = send_email_with_sendgrid(
+                to_email=email,
+                subject=subject,
+                text_body=text,
+                html_body=html,
+                filename="invitation-stockscan.html",
+                file_bytes=b"",
+                mimetype="text/plain",
+            )
+            if not sent:
+                logger.warning("Invitation créée mais l’email n’a pas pu être envoyé à %s", email)
+        else:
+            logger.info("Envoi d’email d’invitation désactivé (token=%s)", token)
 
         return Response(
             {

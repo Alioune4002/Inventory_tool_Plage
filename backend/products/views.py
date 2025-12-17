@@ -14,11 +14,11 @@ import io
 import json
 from django.db.models import Q
 from django.conf import settings
-from django.core.mail import EmailMessage
 
 from accounts.mixins import TenantQuerySetMixin
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
 from accounts.permissions import ProductPermission, ManagerPermission
+from utils.sendgrid_email import send_email_with_sendgrid
 
 logger = logging.getLogger(__name__)
 
@@ -444,18 +444,16 @@ def export_generic(request):
         attachment_bytes = bio.getvalue()
 
     if email_to:
-        try:
-            from_email = getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@stockscan.local")
-            mail = EmailMessage(
-                subject="Export StockScan",
-                body=email_message or "Ci-joint votre export.",
-                from_email=from_email,
-                to=[email_to],
-            )
-            mail.attach(filename, attachment_bytes or b"", mimetype)
-            mail.send(fail_silently=True)
-        except Exception:
-            logger.exception("Envoi email export échoué")
+        send_email_with_sendgrid(
+            to_email=email_to,
+            subject="Export StockScan",
+            text_body=email_message or "Ci-joint votre export.",
+            html_body=email_message or None,
+            filename=filename,
+            file_bytes=attachment_bytes or b"",
+            mimetype=mimetype,
+            fallback_to_django=True,
+        )
 
     resp = HttpResponse(attachment_bytes, content_type=mimetype)
     resp['Content-Disposition'] = f'attachment; filename="{filename}"'

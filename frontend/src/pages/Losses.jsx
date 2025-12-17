@@ -7,6 +7,7 @@ import Button from "../ui/Button";
 import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
+import { formatApiError } from "../lib/errorUtils";
 
 const REASONS = [
   { value: "breakage", label: "Casse" },
@@ -73,9 +74,16 @@ export default function Losses() {
     }
     setLoading(true);
     try {
+      const quantityValue = Number(form.quantity) || 0;
+      if (quantityValue <= 0) {
+        pushToast?.({ message: "Indiquez une quantité supérieure à zéro.", type: "error" });
+        setLoading(false);
+        return;
+      }
+
       const payload = {
         product: form.product || null,
-        quantity: Number(form.quantity) || 0,
+        quantity: quantityValue,
         unit: form.unit || "pcs",
         reason: form.reason,
         occurred_at: form.occurred_at || new Date().toISOString(),
@@ -88,7 +96,7 @@ export default function Losses() {
       setForm((prev) => ({ ...prev, quantity: 1, note: "" }));
       load();
     } catch (err) {
-      const msg = err?.response?.data?.detail || "Déclaration impossible.";
+      const msg = formatApiError(err);
       pushToast?.({ message: msg, type: "error" });
     } finally {
       setLoading(false);

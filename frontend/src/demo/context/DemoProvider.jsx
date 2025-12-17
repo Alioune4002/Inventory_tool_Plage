@@ -54,6 +54,8 @@ export default function DemoProvider({ children }) {
   };
 
   // scénario auto
+  const SLOW_FACTOR = 1.6;
+
   useEffect(() => {
     if (!autoActive) {
       return undefined;
@@ -71,13 +73,13 @@ export default function DemoProvider({ children }) {
     t1 = window.setTimeout(() => {
       setHighlight({ area: "kpi", text: "Vue instantanée : valeur stock, pertes, catégories." });
       pushToast("Bienvenue dans la démo (données fictives).", "success");
-    }, 600);
+    }, 900 * SLOW_FACTOR);
 
     // Go inventory
     t2 = window.setTimeout(() => {
       setRoute("inventory");
       setHighlight({ area: "scan", text: "Scan : préremplissage EAN / SKU en 1 clic." });
-    }, 2600);
+    }, 2800 * SLOW_FACTOR);
 
     // Simuler ajout
     t3 = window.setTimeout(() => {
@@ -87,7 +89,7 @@ export default function DemoProvider({ children }) {
       ]);
       pushToast("Produit ajouté : Eau 1.5L", "success");
       setHighlight({ area: "table", text: "Le produit apparaît immédiatement dans l’inventaire." });
-    }, 5200);
+    }, 5600 * SLOW_FACTOR);
 
     // Simuler perte
     t4 = window.setTimeout(() => {
@@ -98,14 +100,14 @@ export default function DemoProvider({ children }) {
       ]);
       pushToast("Perte enregistrée (démo).", "warn");
       setHighlight({ area: "losses", text: "Déclarez pertes : casse, DLC, offerts… impact visible sur le dashboard." });
-    }, 8200);
+    }, 8800 * SLOW_FACTOR);
 
     // Export
     t5 = window.setTimeout(() => {
       setRoute("exports");
       setHighlight({ area: "export", text: "Export Excel + partage email en 1 action." });
       pushToast("Export Excel simulé + email simulé.", "success");
-    }, 11000);
+    }, 11800 * SLOW_FACTOR);
 
     return () => [t1, t2, t3, t4, t5].forEach((x) => x && window.clearTimeout(x));
   }, [month, autoActive]);

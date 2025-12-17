@@ -645,7 +645,7 @@ class CreateBillingPortalView(APIView):
         customer_id = _get_or_create_stripe_customer(tenant, request.user)
 
         _stripe_init()
-        return_url = getattr(settings, "FRONTEND_URL", "http://127.0.0.1:5173") + "/settings"
+        return_url = getattr(settings, "FRONTEND_URL", "https://stockscan.app") + "/settings"
 
         portal = stripe.billing_portal.Session.create(  # type: ignore
             customer=customer_id,
