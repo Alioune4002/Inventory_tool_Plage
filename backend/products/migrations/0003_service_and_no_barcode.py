@@ -19,8 +19,10 @@ def backfill_product_service(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    atomic = False
+
     dependencies = [
-        ('accounts', '0002_service'),
+        ('accounts', '0012_alter_tenant_business_type'),
         ('products', '0002_add_tenant_and_constraints'),
     ]
 
