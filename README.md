@@ -112,7 +112,7 @@ Consultez `DEPLOYMENT.md` pour le runbook complet, les smoke tests curl (Stripe,
 ## Commandes utiles
 ```bash
 # backend
-python manage.py makemigrations accounts products
+python manage.py makemigrations 
 python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
 

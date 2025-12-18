@@ -45,9 +45,10 @@ Ce document centralise ce qu’il faut pour lancer StockScan en production (Stri
 
 ### Render (important)
 - **Build command** recommandé : `pip install -r requirements.txt && python manage.py collectstatic --noinput`
-- **Start command** recommandé : `./scripts/render_start.sh`
-  - Lance `migrate` à chaque redémarrage (évite les 500 si la DB est vide / migrations manquantes).
-  - Respecte `$PORT` automatiquement.
+- **Start command** recommandé (choisir selon ton “Root Directory”) :
+  - Si **Root Directory = `backend`** : `./render_start.sh`
+  - Si **Root Directory = repo racine** : `./scripts/render_start.sh`
+  - (Les deux scripts font `migrate` + `collectstatic` puis démarrent gunicorn sur `$PORT`.)
 3. **Frontend**  
    ```bash
    npm run build --prefix frontend
