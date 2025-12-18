@@ -21,9 +21,11 @@ def backfill_tenant_and_fields(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    # Depend explicitly on the migration that introduces inventory_month to avoid
+    # applying AlterField before the column exists (was causing FieldDoesNotExist in CI)
     dependencies = [
         ('accounts', '0001_initial'),
-        ('products', '0001_initial'),
+        ('products', '0002_product_inventory_month_alter_product_category'),
     ]
 
     operations = [

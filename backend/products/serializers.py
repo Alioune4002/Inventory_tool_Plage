@@ -89,11 +89,20 @@ class ProductSerializer(serializers.ModelSerializer):
         prices_cfg = features.get("prices", {})
 
         # ✅ Normalisation : ne jamais laisser "" en DB (sinon contraintes uniques explosent)
-        attrs["barcode"] = self._clean_optional_str(attrs.get("barcode"))
-        attrs["internal_sku"] = self._clean_optional_str(attrs.get("internal_sku"))
+        current_barcode = attrs.get("barcode", getattr(self.instance, "barcode", None))
+        current_sku = attrs.get("internal_sku", getattr(self.instance, "internal_sku", None))
+        attrs["barcode"] = self._clean_optional_str(current_barcode)
+        attrs["internal_sku"] = self._clean_optional_str(current_sku)
 
-        # ✅ no_barcode cohérent : dérivé du barcode réel
+        # ✅ no_barcode cohérent : dérivé du barcode réel, avec enforcement seulement si explicitement demandé
+        explicit_no_barcode = False
+        if hasattr(self, "initial_data"):
+            raw_flag = self.initial_data.get("no_barcode")
+            explicit_no_barcode = str(raw_flag).lower() in ("true", "1", "yes")
+
         attrs["no_barcode"] = attrs.get("barcode") is None
+        if explicit_no_barcode and not attrs.get("internal_sku"):
+            raise serializers.ValidationError({"internal_sku": "SKU requis quand le code-barres est absent."})
 
         # ✅ Unité selon counting_mode
         unit = (attrs.get("unit") or "pcs").strip()
@@ -141,6 +150,16 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def get_warnings(self, obj):
         return getattr(obj, "_warnings", [])
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        for num_field in ["quantity", "purchase_price", "selling_price", "remaining_qty", "remaining_fraction", "pack_size"]:
+            if num_field in data and data[num_field] is not None:
+                try:
+                    data[num_field] = float(data[num_field])
+                except (TypeError, ValueError):
+                    pass
+        return data
 
 
 class CategorySerializer(serializers.ModelSerializer):

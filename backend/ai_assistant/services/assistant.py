@@ -227,7 +227,7 @@ def _local_assistant_summary(context):
 
 def _fallback():
     return {
-        "message": "Votre assistant IA est en pause clope, il revient bientôt.",
+        "message": "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes.",
         "insights": [],
         "suggested_actions": [],
         "question": None,

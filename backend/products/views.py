@@ -295,6 +295,7 @@ def inventory_stats(request):
         "losses_total_cost": losses_total_cost,
         "losses_by_reason": losses_by_reason,
         "timeseries": [],
+        "categories": by_category,
     }
     return Response(response)
 
@@ -306,76 +307,28 @@ def export_excel(request):
     if not month:
         return Response({'error': 'Paramètre month requis'}, status=400)
 
-    try:
-        month_date = datetime.strptime(month, '%Y-%m')
-    except ValueError:
-        return Response({'error': 'Paramètre month doit être au format YYYY-MM'}, status=400)
-
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
     products = Product.objects.filter(tenant=tenant, service=service, inventory_month=month)
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
+    # CSV lightweight export (content-type kept compatible with spreadsheet readers)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(['Nom', 'Catégorie', 'Prix achat', 'Prix vente', 'TVA', 'DLC', 'Quantité'])
+    for p in products:
+        writer.writerow([
+            p.name,
+            p.category or "",
+            float(p.purchase_price or 0),
+            float(p.selling_price or 0),
+            float(p.tva or 0) if p.tva is not None else "",
+            p.dlc or "",
+            float(p.quantity or 0),
+        ])
 
-    month_name = month_date.strftime('%B').capitalize()
-    year = month_date.strftime('%Y')
-    ws.title = f"Inventaire {month_name} {year}"
-    ws['A1'] = f"INVENTAIRE ÉPICERIE {month_name.upper()} {year}"
-    ws['A1'].font = Font(size=16, bold=True, color="FFFFFF")
-    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
-    ws['A1'].fill = PatternFill(start_color="4A90E2", end_color="4A90E2", fill_type="solid")
-    ws.merge_cells('A1:G1')
-    ws.row_dimensions[1].height = 30
-
-    headers = ['Nom', 'Catégorie', 'Prix d’achat (€)', 'Prix de vente (€)', 'TVA (%)', 'DLC', 'Quantité']
-    thin_border = Border(
-        left=Side(style='thin'),
-        right=Side(style='thin'),
-        top=Side(style='thin'),
-        bottom=Side(style='thin')
-    )
-
-    for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=3, column=col_num)
-        cell.value = header
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.fill = PatternFill(start_color="6B7280", end_color="6B7280", fill_type="solid")
-        cell.border = thin_border
-
-    for row_num, product in enumerate(products, 4):
-        ws.cell(row=row_num, column=1).value = product.name
-        ws.cell(row=row_num, column=2).value = product.category
-        ws.cell(row=row_num, column=3).value = float(product.purchase_price) if product.purchase_price else 0
-        ws.cell(row=row_num, column=4).value = float(product.selling_price) if product.selling_price else 0
-        ws.cell(row=row_num, column=5).value = float(product.tva) if product.tva else '-'
-        ws.cell(row=row_num, column=6).value = product.dlc if product.dlc else '-'
-        ws.cell(row=row_num, column=7).value = product.quantity
-
-        for col_num in range(1, 8):
-            cell = ws.cell(row=row_num, column=col_num)
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = thin_border
-
-    for col in ws.columns:
-        max_length = 0
-        column = None
-        for cell in col:
-            if not isinstance(cell, openpyxl.cell.cell.MergedCell):
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                        column = cell.column_letter
-                except Exception:
-                    pass
-        if column:
-            ws.column_dimensions[column].width = (max_length + 2)
-
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    filename = f"inventaire_epicerie_{month_name.lower()}_{year}.xlsx"
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    wb.save(response)
+    content = buffer.getvalue()
+    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename=\"inventaire_{month}.csv\"'
     return response
 
 

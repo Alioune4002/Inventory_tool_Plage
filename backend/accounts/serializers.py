@@ -13,7 +13,7 @@ class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField(required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, min_length=8)
-    password_confirm = serializers.CharField(write_only=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, min_length=8, required=False, allow_blank=True)
     tenant_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     domain = serializers.ChoiceField(choices=Tenant.DOMAIN_CHOICES, default="food")
     business_type = serializers.ChoiceField(choices=Tenant.BUSINESS_CHOICES, default="other")
@@ -27,6 +27,10 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
+        # Accepte l'absence explicite de password_confirm en utilisant le mot de passe fourni
+        if not attrs.get("password_confirm"):
+            attrs["password_confirm"] = attrs.get("password")
+
         if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError("Les mots de passe ne correspondent pas.")
         return attrs
