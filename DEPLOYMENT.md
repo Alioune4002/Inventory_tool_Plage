@@ -8,7 +8,8 @@ Ce document centralise ce qu’il faut pour lancer StockScan en production (Stri
 | `DJANGO_SECRET_KEY` | Clé Django secrète | ✅ | `dj-secret-...` |
 | `DJANGO_DEBUG` | `false` en prod | ✅ | `false` |
 | `DJANGO_ALLOWED_HOSTS` | Domaines autorisés | ✅ | `inventory-tool-plage.onrender.com` |
-| `DATABASE_URL` | PostgreSQL | ✅ | `postgres://user:pass@host/db` |
+| `DATABASE_URL` | PostgreSQL | ✅ | `postgres://user:pass@host/db?sslmode=require` |
+| `CORS_ALLOW_ALL_ORIGINS` | `false` en prod (recommandé) | ⚠️ | `false` |
 | `CORS_ALLOWED_ORIGINS` | Front + Vercel | ✅ | `https://stockscan.app` |
 | `STRIPE_API_KEY` | Clé Stripe secret | ✅ | `sk_test_...` |
 | `STRIPE_WEBHOOK_SECRET` | Secret webhook | ✅ | `whsec_...` |
@@ -41,6 +42,12 @@ Ce document centralise ce qu’il faut pour lancer StockScan en production (Stri
    python manage.py collectstatic --no-input
    python manage.py check
    ```
+
+### Render (important)
+- **Build command** recommandé : `pip install -r requirements.txt && python manage.py collectstatic --noinput`
+- **Start command** recommandé : `./scripts/render_start.sh`
+  - Lance `migrate` à chaque redémarrage (évite les 500 si la DB est vide / migrations manquantes).
+  - Respecte `$PORT` automatiquement.
 3. **Frontend**  
    ```bash
    npm run build --prefix frontend
@@ -51,6 +58,7 @@ Ce document centralise ce qu’il faut pour lancer StockScan en production (Stri
 ## 3. Routes critiques + smoke tests curl
 | Route | Commande exemple | Smoke test attendu |
 | --- | --- | --- |
+| `GET /health/db/` | `curl -i https://inventory-tool-plage.onrender.com/health/db/` | `200` si DB OK, `503` si DB KO (diagnostic rapide). |
 | `POST /api/auth/register/` | `curl -X POST -H "Content-Type: application/json" -d '{"username":"client","password":"Secret123!","password_confirm":"Secret123!","email":"client@example.com","tenant_name":"Mon commerce","business_type":"restaurant","service_type":"kitchen","service_name":"Cuisine","domain":"food"}' https://inventory-tool-plage.onrender.com/api/auth/register/` | Retour 201 avec tokens + tenant/service créés. |
 | `POST /api/auth/memberships/` | `curl -X POST -H "Authorization: Bearer $TOKEN" -d '{"email":"manager@example.com","role":"manager"}'` | 201 + mail SendGrid (ou log fallback) + inclusion dans `/api/auth/members/summary/`. |
 | `POST /api/auth/billing/checkout/` | `curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"plan":"PRO","cycle":"MONTHLY"}' ...` | Devuelve URL Stripe; vérifie `entitlements` mis à jour (plan_effective). |

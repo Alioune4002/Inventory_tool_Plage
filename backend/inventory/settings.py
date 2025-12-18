@@ -3,13 +3,14 @@ Django settings for inventory project.
 """
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-@change-this-in-production')
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://stockscan.app')
 
 def _split_csv(value: str):
     return [p.strip() for p in (value or "").replace("\n", ",").split(",") if p.strip()]
@@ -38,7 +39,9 @@ def _sanitize_host(entry: str):
 
 _default_hosts = 'localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com'
 _raw_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', _default_hosts)
-ALLOWED_HOSTS = [h for h in (_sanitize_host(x) for x in _split_csv(_raw_hosts)) if h]
+_base_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "testserver"}
+_env_hosts = {h for h in (_sanitize_host(x) for x in _split_csv(_raw_hosts)) if h}
+ALLOWED_HOSTS = sorted(_base_hosts | _env_hosts)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -90,6 +93,14 @@ DATABASE_URL = os.environ.get('DATABASE_URL')
 
 if DATABASE_URL:
     parsed = urlparse(DATABASE_URL)
+    query = parse_qs(parsed.query)
+    options = {}
+    sslmode = (query.get("sslmode") or [None])[0]
+    if sslmode:
+        options["sslmode"] = sslmode
+    elif not DEBUG:
+        # Render Postgres typically requires SSL; keep local dev unchanged.
+        options["sslmode"] = os.environ.get("DB_SSLMODE", "require")
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
@@ -98,6 +109,8 @@ if DATABASE_URL:
             'PASSWORD': parsed.password,
             'HOST': parsed.hostname,
             'PORT': parsed.port or '',
+            'CONN_MAX_AGE': int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+            **({'OPTIONS': options} if options else {}),
         }
     }
 else:
@@ -138,13 +151,49 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CORS_ALLOW_ALL_ORIGINS = os.environ.get('CORS_ALLOW_ALL_ORIGINS', 'True').lower() == 'true'
-CORS_ALLOWED_ORIGINS = [
-    origin.strip() for origin in os.environ.get(
-        'CORS_ALLOWED_ORIGINS',
-        "http://localhost:3000"
-    ).split(',') if origin.strip()
-]
+CORS_ALLOW_ALL_ORIGINS = os.environ.get(
+    'CORS_ALLOW_ALL_ORIGINS',
+    'True' if DEBUG else 'False',
+).lower() == 'true'
+
+def _origin_variants(origin: str):
+    """
+    Expand an origin into common variants (www / non-www), preserving scheme and port.
+    """
+    try:
+        parsed = urlparse(origin)
+    except Exception:
+        return []
+    if not parsed.scheme or not parsed.netloc:
+        return []
+    host = parsed.hostname or ""
+    if not host:
+        return []
+    port = f":{parsed.port}" if parsed.port else ""
+
+    base = f"{parsed.scheme}://{host}{port}"
+    alt_host = host[4:] if host.startswith("www.") else f"www.{host}"
+    alt = f"{parsed.scheme}://{alt_host}{port}"
+    return [base, alt] if alt != base else [base]
+
+
+_cors_origins = set()
+for origin in _split_csv(os.environ.get('CORS_ALLOWED_ORIGINS', "")):
+    _cors_origins.update(_origin_variants(origin) or [origin])
+
+# Dev-friendly defaults
+if DEBUG and not os.environ.get("CORS_ALLOWED_ORIGINS"):
+    _cors_origins.update(
+        {
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        }
+    )
+
+# Always allow the main frontend URL (and www/non-www)
+_cors_origins.update(_origin_variants(FRONTEND_URL))
+CORS_ALLOWED_ORIGINS = sorted(_cors_origins)
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
@@ -158,6 +207,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'ai_assistant': os.environ.get('AI_THROTTLE_RATE', '10/min'),
     },
+    'EXCEPTION_HANDLER': 'utils.drf_exceptions.custom_exception_handler',
 }
 
 from datetime import timedelta
@@ -176,7 +226,6 @@ AI_MODEL = os.environ.get('AI_MODEL', 'gpt-4o-mini')
 # Billing / Stripe
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://stockscan.app')
 STRIPE_SUCCESS_URL = os.environ.get('STRIPE_SUCCESS_URL', f"{FRONTEND_URL}/billing/success")
 STRIPE_CANCEL_URL = os.environ.get('STRIPE_CANCEL_URL', f"{FRONTEND_URL}/billing/cancel")
 STRIPE_PRICE_BOUTIQUE_MONTHLY = os.environ.get('STRIPE_PRICE_BOUTIQUE_MONTHLY')

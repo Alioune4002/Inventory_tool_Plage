@@ -112,11 +112,10 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         username = attrs.get(self.username_field)
         if username and "@" in username:
-            try:
-                user_by_email = User.objects.get(email__iexact=username)
+            # Tolère les doublons d'email (email non unique) sans 500.
+            user_by_email = User.objects.filter(email__iexact=username).order_by("id").first()
+            if user_by_email:
                 attrs[self.username_field] = user_by_email.username
-            except User.DoesNotExist:
-                pass
 
         data = super().validate(attrs)
 

@@ -212,9 +212,16 @@ export function AuthProvider({ children }) {
           );
         }
       const data = e.response?.data;
+      const looksLikeHtml = (value) =>
+        typeof value === "string" && /<\s*(!doctype|html|head|body)\b/i.test(value);
       const flattenErrors = (payload) => {
         if (!payload) return [];
-        if (typeof payload === "string") return [payload];
+        if (typeof payload === "string") {
+          if (looksLikeHtml(payload)) {
+            return ["Erreur serveur (API). Réessaie dans quelques instants."];
+          }
+          return [payload];
+        }
         const parts = [];
         const addEntry = (key, value) => {
           if (Array.isArray(value)) {

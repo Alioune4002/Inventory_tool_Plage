@@ -64,7 +64,7 @@ fi
 
 echo "Running frontend lint/build..."
 npm run lint --prefix "$FRONTEND_DIR"
-if node -pe "Boolean(require('./frontend/package.json').scripts?.test)"; then
+if node -e "const pkg=require(process.argv[1]); process.exit(pkg?.scripts?.test ? 0 : 1)" "$FRONTEND_DIR/package.json"; then
   npm run test --prefix "$FRONTEND_DIR"
 else
   echo "Skipping frontend tests (no npm test script defined)."
@@ -89,4 +89,7 @@ if [[ -z "$PY_CMD" ]]; then
 fi
 
 "$PY_CMD" backend/manage.py check --settings=inventory.settings
-"$PY_CMD" backend/manage.py test --settings=inventory.settings
+(
+  cd "$BACKEND_DIR"
+  "$PY_CMD" -m pytest
+)
