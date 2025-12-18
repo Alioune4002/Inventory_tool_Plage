@@ -11,12 +11,34 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-@change-this-i
 
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = [
-    host.strip() for host in os.environ.get(
-        'DJANGO_ALLOWED_HOSTS',
-        'localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com'
-    ).split(',') if host.strip()
-]
+def _split_csv(value: str):
+    return [p.strip() for p in (value or "").replace("\n", ",").split(",") if p.strip()]
+
+
+def _sanitize_host(entry: str):
+    """
+    Accepts values like:
+    - stockscan.app
+    - https://stockscan.app
+    - https://inventory-tool-plage.onrender.com
+    - http://0.0.0.0:8000/
+    and returns only the hostname part (no scheme/path).
+    """
+    s = (entry or "").strip()
+    if not s:
+        return None
+    if "://" in s:
+        parsed = urlparse(s)
+        return parsed.hostname
+    # strip path/query if user pasted a URL without scheme
+    s = s.split("/")[0]
+    # strip port
+    return s.split(":")[0] or None
+
+
+_default_hosts = 'localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com'
+_raw_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', _default_hosts)
+ALLOWED_HOSTS = [h for h in (_sanitize_host(x) for x in _split_csv(_raw_hosts)) if h]
 
 INSTALLED_APPS = [
     'django.contrib.admin',

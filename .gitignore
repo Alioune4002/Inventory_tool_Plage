@@ -24,3 +24,12 @@ yarn-debug.log*
 yarn-error.log*
 
 .vercel
+
+# Python / Django
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+backend/db.sqlite3
+backend/staticfiles/
