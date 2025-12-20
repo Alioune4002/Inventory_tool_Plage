@@ -35,6 +35,7 @@ class ProductSerializer(serializers.ModelSerializer):
         sku_cfg = features.get("sku", {})
         dlc_cfg = features.get("dlc", {})
         open_cfg = features.get("open_container_tracking", {"enabled": False})
+        item_type_cfg = features.get("item_type", {"enabled": False})
         service_type = getattr(service, "service_type", "other")
 
         barcode = attrs.get("barcode")
@@ -42,6 +43,7 @@ class ProductSerializer(serializers.ModelSerializer):
         purchase_price = attrs.get("purchase_price")
         selling_price = attrs.get("selling_price")
         dlc = attrs.get("dlc")
+        product_role = attrs.get("product_role")
 
         container_status = attrs.get("container_status", "SEALED")
         remaining_qty = attrs.get("remaining_qty")
@@ -53,10 +55,19 @@ class ProductSerializer(serializers.ModelSerializer):
 
         if not barcode and not sku:
             warnings.append("Aucun identifiant (EAN/SKU) : risque de doublons.")
-        if prices_cfg.get("recommended") and purchase_price is None:
+        if prices_cfg.get("recommended") and purchase_price is None and product_role not in ("finished_product", "homemade_prep"):
             warnings.append("Prix d'achat manquant : stats moins précises.")
         if prices_cfg.get("selling_enabled") and selling_price is None and prices_cfg.get("recommended"):
-            warnings.append("Prix de vente manquant : export ventes moins précis.")
+            if product_role in ("finished_product", "homemade_prep") or not product_role:
+                warnings.append("Prix de vente manquant : export ventes moins précis.")
+        if item_type_cfg.get("enabled") and item_type_cfg.get("recommended") and not product_role:
+            warnings.append("Type d'article non précisé : aide pour marge et suivi matières/produits finis.")
+        if product_role == "raw_material" and purchase_price is None and prices_cfg.get("purchase_enabled", True):
+            warnings.append("Matière première sans prix d'achat : coût des pertes approximatif.")
+        if product_role in ("finished_product", "homemade_prep") and selling_price is None and prices_cfg.get(
+            "selling_enabled", True
+        ):
+            warnings.append("Produit fini sans prix de vente : marge théorique indisponible.")
         if "dlc" in attrs and dlc_cfg.get("enabled") and not dlc and dlc_cfg.get("recommended"):
             warnings.append("DLC manquante pour ce service.")
         if barcode_cfg.get("enabled") is False and barcode:

@@ -41,9 +41,10 @@ function getDashboardCopy(serviceType, tenantDomain, isAll) {
 
   const stockLabel = isPharma ? "Valeur stock (achat)" : isGeneral ? "Valeur stock (achat)" : "Valeur stock (achat)";
   const sellingLabel = isGeneral ? "Valeur stock (vente)" : "Valeur stock (vente)";
-  const marginHelper = isKitchen
-    ? "Cuisine : marge non prioritaire (prix souvent désactivés)"
-    : "Basé sur le stock actuel (hors ventes réelles)";
+  const marginHelper =
+    isKitchen || isDining || isBakery
+      ? "Marge estimée selon prix d'achat/vente saisis (hors ventes réelles)."
+      : "Basé sur le stock actuel (hors ventes réelles)";
 
   const lossHelper = isPharma
     ? "Pertes : casse / péremption / erreurs (déclaré)"

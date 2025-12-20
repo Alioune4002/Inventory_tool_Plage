@@ -10,9 +10,9 @@ import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
 const servicePresets = (family, isMulti, linkedMode = "separate") => {
   const primary = {
     retail: { service_type: "grocery_food", service_name: "Épicerie" },
-    mode: { service_type: "retail_general", service_name: "Boutique mode" },
+    mode: { service_type: "retail_general", service_name: "Boutique (mode)" },
     bar: { service_type: "bar", service_name: "Bar" },
-    restauration: { service_type: "kitchen", service_name: "Cuisine" },
+    restauration: { service_type: "kitchen", service_name: "Restaurant" },
     boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
     pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
   }[family] || { service_type: "other", service_name: "Service principal" };
@@ -140,7 +140,7 @@ export default function Register() {
         mode: "retail",
         bar: "bar",
         restauration: "restaurant",
-        boulangerie: "other",
+        boulangerie: "retail",
         pharmacie: "pharmacy",
       };
       const domainByFamily = {
@@ -149,7 +149,7 @@ export default function Register() {
         restauration: "food",
         boulangerie: "food",
         mode: "general",
-        pharmacie: "general",
+        pharmacie: "food",
       };
       await register({
         password: form.password,
@@ -248,6 +248,14 @@ export default function Register() {
                   </select>
                 </div>
               )}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">
+                <div className="font-semibold">Identifiants recommandés</div>
+                <div className="text-slate-400">
+                  {familyMeta.identifiers?.barcode ? "Code-barres activé" : "Code-barres désactivé"} ·{" "}
+                  {familyMeta.identifiers?.sku ? "SKU activé" : "SKU désactivé"}
+                </div>
+                <div className="text-xs text-slate-500">Modifiable ensuite dans Settings → Modules.</div>
+              </div>
             </section>
           )}
 

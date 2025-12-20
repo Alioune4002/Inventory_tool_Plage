@@ -107,7 +107,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = référentiel. Les quantités, pertes et péremptions se font dans Inventaire.",
         inventoryTitle: "Inventaire pharmacie / parapharmacie",
         inventoryIntro:
-          "Saisie rapide par CIP, suivi mensuel, export pour contrôle et pilotage.",
+          "Comptage mensuel par CIP, export pour contrôle et pilotage.",
 
         // UI labels / hints
         quickAddTitle: "Ajout rapide / Scan CIP",
@@ -139,7 +139,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = base des références. Le comptage se fait dans Inventaire.",
         inventoryTitle: "Inventaire bar",
         inventoryIntro:
-          "Pensé pour les bouteilles et références : rapide, clair et exploitable.",
+          "Comptage mensuel pour bouteilles et références : rapide, clair et exploitable.",
 
         quickAddTitle: "Ajout rapide / Scan",
         scanButton: "Chercher / préremplir",
@@ -168,7 +168,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = base des produits. Les quantités et pertes sont gérées dans Inventaire.",
         inventoryTitle: "Inventaire boulangerie",
         inventoryIntro:
-          "Produits, ingrédients et stocks du mois. Objectif : rapidité + fiabilité.",
+          "Comptage du mois : produits, ingrédients, stocks. Objectif : rapidité + fiabilité.",
 
         quickAddTitle: "Ajout rapide",
         scanButton: "Chercher / préremplir",
@@ -186,6 +186,8 @@ export function getUxCopy(serviceType, domain) {
         skuHelper:
           "Recommandé : SKU pour vos produits maison + ingrédients récurrents.",
         categoryHelper: "Ex. Pains, Viennoiseries, Pâtisseries, Ingrédients…",
+        productRoleHelper:
+          "Choisissez si c’est une matière première, un produit fini ou une préparation maison.",
       };
 
     case "kitchen":
@@ -197,7 +199,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = liste de base. Le comptage mensuel est dans Inventaire.",
         inventoryTitle: "Inventaire cuisine",
         inventoryIntro:
-          "Matières premières suivies au mois. Rapide, simple, sans friction.",
+          "Comptage du mois des matières premières. Rapide, simple, sans friction.",
 
         quickAddTitle: "Ajout rapide",
         scanButton: "Chercher / préremplir",
@@ -213,6 +215,8 @@ export function getUxCopy(serviceType, domain) {
         barcodeHelper: "Optionnel : utile pour produits emballés.",
         skuHelper: "Optionnel : pratique pour garder un catalogue propre.",
         categoryHelper: "Ex. Viandes, Légumes, Épicerie, Surgelés…",
+        productRoleHelper:
+          "Matière première = coût. Produit fini = vente. Utile pour marge estimée.",
       };
 
     case "grocery_food":
@@ -227,7 +231,7 @@ export function getUxCopy(serviceType, domain) {
         inventoryTitle:
           serviceType === "bulk_food" ? "Inventaire vrac" : "Inventaire alimentaire",
         inventoryIntro:
-          "Inventaire du mois avec scan, DLC et unités adaptées. Objectif : fiabilité + vitesse.",
+          "Comptage du mois avec scan, DLC et unités adaptées. Objectif : fiabilité + vitesse.",
 
         quickAddTitle: "Ajout rapide / Scan",
         scanButton: "Chercher / préremplir",
@@ -259,7 +263,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = fiches articles. Le comptage et les pertes sont dans Inventaire.",
         inventoryTitle: "Inventaire mode",
         inventoryIntro:
-          "Suivi mensuel propre : SKU, collections et quantités. Scan optionnel.",
+          "Comptage mensuel propre : SKU, collections et quantités. Scan optionnel.",
 
         quickAddTitle: "Ajout rapide",
         scanButton: "Chercher / préremplir",
@@ -289,7 +293,7 @@ export function getUxCopy(serviceType, domain) {
             "Catalogue = base articles. Les quantités se saisissent dans Inventaire.",
           inventoryTitle: "Inventaire",
           inventoryIntro:
-            "Suivi du mois : articles, quantités, catégories et identifiants.",
+            "Comptage du mois : articles, quantités, catégories et identifiants.",
 
           quickAddTitle: "Ajout rapide",
           scanButton: "Chercher / préremplir",
@@ -313,7 +317,7 @@ export function getUxCopy(serviceType, domain) {
           "Catalogue = base produits. Le comptage se fait dans Inventaire.",
         inventoryTitle: "Inventaire",
         inventoryIntro:
-          "Suivi mensuel adapté à votre activité. Simple, rapide, exportable.",
+          "Comptage mensuel adapté à votre activité. Simple, rapide, exportable.",
 
         quickAddTitle: "Ajout rapide / Scan",
         scanButton: "Chercher / préremplir",
@@ -424,5 +428,6 @@ export function getFieldHelpers(serviceType, domain) {
     barcode: ux.barcodeHelper,
     sku: ux.skuHelper,
     category: ux.categoryHelper,
+    productRole: ux.productRoleHelper,
   };
 }

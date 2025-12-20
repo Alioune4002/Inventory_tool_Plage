@@ -87,6 +87,7 @@ def default_service_features():
         "dlc": {"enabled": True, "recommended": False},
         "tva": {"enabled": True, "recommended": False},
         "suppliers": {"enabled": False},
+        "item_type": {"enabled": False, "recommended": False},
     }
 
 

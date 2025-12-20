@@ -97,7 +97,7 @@ const FAMILLES = [
       sku: true,
       expiry: true,
     },
-    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit"],
+    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
     defaults: {
       categoryLabel: "Poste",
       unitLabel: "portion",
@@ -124,7 +124,7 @@ const FAMILLES = [
       sku: true,
       expiry: true,
     },
-    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit"],
+    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
     defaults: {
       categoryLabel: "Fournée",
       unitLabel: "pièce",
@@ -202,6 +202,13 @@ const MODULES = [
     families: ["bar", "restauration", "boulangerie"],
   },
   {
+    id: "itemType",
+    name: "Matières premières / Produits finis",
+    description:
+      "Classez vos articles (matière première, produit fini, préparation maison) pour mieux lire les marges.",
+    families: ["restauration", "boulangerie"],
+  },
+  {
     id: "multiUnit",
     name: "Multi-unités",
     description: "Conversions d’unités (kg ↔ pièce ↔ L) selon vos besoins.",
@@ -213,8 +220,8 @@ const DEFAULT_MODULES = {
   retail: ["pricing", "identifier", "expiry", "multiUnit"],
   mode: ["pricing", "identifier", "variants"],
   bar: ["pricing", "identifier", "expiry", "opened", "lot", "multiUnit"],
-  restauration: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit"],
-  boulangerie: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit"],
+  restauration: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
+  boulangerie: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
   pharmacie: ["pricing", "identifier", "expiry", "lot"],
 };
 

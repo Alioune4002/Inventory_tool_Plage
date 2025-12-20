@@ -40,8 +40,6 @@ export default function Inventory() {
     quantity: 1,
     barcode: "",
     internal_sku: "",
-    purchase_price: "",
-    selling_price: "",
     dlc: "",
     unit: "pcs",
     container_status: "SEALED",
@@ -50,6 +48,10 @@ export default function Inventory() {
     remaining_qty: "",
     remaining_fraction: "",
     lotNumber: "",
+    comment: "",
+    loss_quantity: "",
+    loss_reason: "breakage",
+    loss_note: "",
   });
 
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
@@ -59,8 +61,6 @@ export default function Inventory() {
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const familyIdentifiers = familyMeta?.identifiers ?? {};
   const familyModules = familyMeta?.modules ?? [];
-  const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
-  const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
 
   const getFeatureFlag = (key, fallback = false) => {
     const cfg = serviceFeatures?.[key];
@@ -74,33 +74,22 @@ export default function Inventory() {
   const ux = getUxCopy(serviceType, serviceDomain);
   const placeholders = getPlaceholders(serviceType, serviceDomain);
   const helpers = getFieldHelpers(serviceType, serviceDomain);
-
-  const isGeneral = serviceDomain === "general";
-  const isFood = !isGeneral && serviceType !== "pharmacy_parapharmacy";
+  const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
+  const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
 
   const isAllServices = services.length > 1 && String(serviceId) === "all";
 
   // features dérivées
-  const priceCfg = serviceFeatures?.prices || {};
-  const barcodeCfg = serviceFeatures?.barcode || {};
-  const skuCfg = serviceFeatures?.sku || {};
   const dlcCfg = serviceFeatures?.dlc || {};
-  const openCfg = serviceFeatures?.open_container_tracking || { enabled: false };
-
-  const purchaseEnabled = priceCfg.purchase_enabled !== false;
-  const sellingEnabled = priceCfg.selling_enabled !== false;
-  const priceRecommended = priceCfg.recommended === true;
-
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
   const lotEnabled = getFeatureFlag("lot", familyModules.includes("lot"));
 
-  // DLC : seulement food (et pas general) + pas pharmacie (pharma a sa logique mais ici on garde cohérence UI)
-  const dlcEnabled = isFood ? dlcCfg.enabled !== false : false;
+  const dlcEnabled = getFeatureFlag("dlc", familyModules.includes("expiry"));
   const dlcRecommended = !!dlcCfg.recommended;
 
-  // “Entamé” uniquement si feature activée + domaine food
-  const showOpenFields = openCfg.enabled === true && isFood;
+  const openEnabled = getFeatureFlag("open_container_tracking", familyModules.includes("opened"));
+  const showOpenFields = openEnabled;
 
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
@@ -171,9 +160,7 @@ export default function Inventory() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceId, month]);
 
-  const showIdentifierWarning = barcodeEnabled && !quick.barcode && (!skuEnabled || !quick.internal_sku);
-  const showPurchaseWarning = purchaseEnabled && priceRecommended && !quick.purchase_price;
-  const showSellingWarning = sellingEnabled && priceRecommended && !quick.selling_price;
+  const showIdentifierWarning = !quick.barcode && !quick.internal_sku && (barcodeEnabled || skuEnabled);
   const showDlcWarning = dlcEnabled && dlcRecommended && !quick.dlc;
 
   const isOpened = quick.container_status === "OPENED" && showOpenFields;
@@ -211,8 +198,6 @@ export default function Inventory() {
       quantity: 1,
       barcode: "",
       internal_sku: "",
-      purchase_price: "",
-      selling_price: "",
       dlc: "",
       unit: unitOptions[0],
       container_status: "SEALED",
@@ -221,6 +206,10 @@ export default function Inventory() {
       remaining_qty: "",
       remaining_fraction: "",
       lotNumber: "",
+      comment: "",
+      loss_quantity: "",
+      loss_reason: "breakage",
+      loss_note: "",
     });
     setLastFound(null);
   };
@@ -239,6 +228,9 @@ export default function Inventory() {
 
     const cleanedBarcode = (quick.barcode || "").trim();
     const cleanedSku = (quick.internal_sku || "").trim();
+    const lossQuantity = Number(quick.loss_quantity);
+    const shouldCreateLoss = Number.isFinite(lossQuantity) && lossQuantity > 0;
+    const occurredAt = month ? `${month}-01T12:00:00Z` : undefined;
 
     const payload = {
       name: quick.name.trim(),
@@ -247,18 +239,14 @@ export default function Inventory() {
       inventory_month: month,
       service: serviceId,
       unit: quick.unit || "pcs",
+      notes: quick.comment || "",
     };
 
     if (barcodeEnabled) payload.barcode = cleanedBarcode;
     else payload.barcode = "";
 
-    if (skuEnabled) payload.internal_sku = cleanedSku || (cleanedBarcode ? "" : quick.name.slice(0, 3).toLowerCase());
+    if (skuEnabled) payload.internal_sku = cleanedSku || "";
     else payload.internal_sku = "";
-
-    payload.no_barcode = !cleanedBarcode;
-
-    if (purchaseEnabled) payload.purchase_price = quick.purchase_price || null;
-    if (sellingEnabled) payload.selling_price = quick.selling_price || null;
     if (dlcEnabled) payload.dlc = quick.dlc || null;
     if (lotEnabled) payload.lot_number = quick.lotNumber || null;
 
@@ -280,9 +268,33 @@ export default function Inventory() {
     try {
       const res = await api.post("/api/products/", payload);
       const warnings = res?.data?.warnings || [];
+      const filteredWarnings = warnings.filter(
+        (warning) =>
+          !String(warning).toLowerCase().includes("prix d'achat") &&
+          !String(warning).toLowerCase().includes("prix de vente")
+      );
 
-      if (warnings.length) pushToast?.({ message: warnings.join(" "), type: "warn" });
-      else pushToast?.({ message: "Ajout enregistré.", type: "success" });
+      if (filteredWarnings.length) pushToast?.({ message: filteredWarnings.join(" "), type: "warn" });
+      else pushToast?.({ message: "Comptage enregistré.", type: "success" });
+
+      if (shouldCreateLoss && res?.data?.id) {
+        try {
+          await api.post("/api/losses/", {
+            product: res.data.id,
+            quantity: lossQuantity,
+            reason: quick.loss_reason || "other",
+            note: quick.loss_note || "",
+            unit: quick.unit || "pcs",
+            occurred_at: occurredAt,
+          });
+          pushToast?.({ message: "Perte enregistrée.", type: "info" });
+        } catch (lossErr) {
+          pushToast?.({
+            message: "Comptage OK, mais la perte n’a pas pu être enregistrée.",
+            type: "warn",
+          });
+        }
+      }
 
       resetQuick();
       await load();
@@ -311,10 +323,7 @@ export default function Inventory() {
             ...prev,
             name: p.name || prev.name,
             category: p.category || prev.category,
-            quantity: p.quantity || prev.quantity,
             internal_sku: p.internal_sku || prev.internal_sku,
-            purchase_price: p.purchase_price ?? prev.purchase_price,
-            selling_price: p.selling_price ?? prev.selling_price,
             dlc: p.dlc || prev.dlc,
             unit: p.unit || prev.unit,
             lotNumber: p.lot_number || prev.lotNumber,
@@ -351,6 +360,9 @@ export default function Inventory() {
           <div className="text-sm text-slate-500">Inventaire</div>
           <div className="text-2xl font-black tracking-tight">{ux.inventoryTitle}</div>
           <p className="text-slate-600 text-sm">{ux.inventoryIntro}</p>
+          <p className="text-xs text-slate-500">
+            Inventaire = comptage du mois. Le catalogue reste dans l’onglet Produits.
+          </p>
 
           <div className="grid sm:grid-cols-3 gap-3 items-center">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
@@ -427,11 +439,12 @@ export default function Inventory() {
                   )}
 
                   <Input
-                    label="Quantité"
+                    label="Comptage (quantité)"
                     type="number"
                     min={0}
                     value={quick.quantity}
                     onChange={(e) => setQuick((p) => ({ ...p, quantity: e.target.value }))}
+                    helper="Quantité comptée pour ce mois."
                   />
 
                   {barcodeEnabled && (
@@ -507,30 +520,6 @@ export default function Inventory() {
                     </label>
                   )}
 
-                  {purchaseEnabled && (
-                    <Input
-                      label="Prix d'achat (€)"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={quick.purchase_price}
-                      onChange={(e) => setQuick((p) => ({ ...p, purchase_price: e.target.value }))}
-                      helper={showPurchaseWarning ? "Recommandé pour des stats fiables." : "Optionnel"}
-                    />
-                  )}
-
-                  {sellingEnabled && (
-                    <Input
-                      label="Prix de vente (€)"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={quick.selling_price}
-                      onChange={(e) => setQuick((p) => ({ ...p, selling_price: e.target.value }))}
-                      helper={showSellingWarning ? "Recommandé pour exports et pilotage." : "Optionnel"}
-                    />
-                  )}
-
                   {lotEnabled && (
                     <Input
                       label="Lot / Batch"
@@ -600,6 +589,48 @@ export default function Inventory() {
                     </>
                   )}
 
+                  <Input
+                    label="Commentaire (optionnel)"
+                    placeholder={placeholders.notes}
+                    value={quick.comment}
+                    onChange={(e) => setQuick((p) => ({ ...p, comment: e.target.value }))}
+                    helper="Note interne liée au comptage du mois."
+                  />
+
+                  <div className="md:col-span-3 grid md:grid-cols-3 gap-3 items-end">
+                    <Input
+                      label="Pertes (quantité)"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={quick.loss_quantity}
+                      onChange={(e) => setQuick((p) => ({ ...p, loss_quantity: e.target.value }))}
+                      helper="Optionnel : pertes ou casse."
+                    />
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium text-[var(--text)]">Raison</span>
+                      <select
+                        value={quick.loss_reason}
+                        onChange={(e) => setQuick((p) => ({ ...p, loss_reason: e.target.value }))}
+                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
+                      >
+                        <option value="breakage">Casse</option>
+                        <option value="expired">DLC dépassée</option>
+                        <option value="theft">Vol</option>
+                        <option value="free">Offert</option>
+                        <option value="mistake">Erreur</option>
+                        <option value="other">Autre</option>
+                      </select>
+                    </label>
+                    <Input
+                      label="Note perte"
+                      placeholder="Ex. casse en livraison"
+                      value={quick.loss_note}
+                      onChange={(e) => setQuick((p) => ({ ...p, loss_note: e.target.value }))}
+                      helper="Optionnel : détail utile pour les exports."
+                    />
+                  </div>
+
                   <div className="md:col-span-3 flex flex-wrap gap-3 items-center">
                     {showIdentifierWarning && (
                       <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
@@ -635,8 +666,9 @@ export default function Inventory() {
               <div className="text-sm text-slate-700">
                 <div>
                   <span className="font-semibold">{lastFound.product?.name}</span> —{" "}
-                  {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — quantité{" "}
-                  {lastFound.product?.quantity}
+                  {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — dernier comptage{" "}
+                  {lastFound.product?.quantity} {lastFound.product?.unit || "pcs"} (
+                  {lastFound.product?.inventory_month || "—"})
                 </div>
 
                 {lastFound.recent?.length ? (
@@ -703,7 +735,7 @@ export default function Inventory() {
                     <th className="text-left px-4 py-3">{wording.itemLabel}</th>
                     <th className="text-left px-4 py-3">{wording.categoryLabel}</th>
                     <th className="text-left px-4 py-3">Mois</th>
-                    <th className="text-left px-4 py-3">Quantité</th>
+                    <th className="text-left px-4 py-3">Comptage</th>
                     <th className="text-left px-4 py-3">
                       {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
                     </th>
@@ -724,7 +756,6 @@ export default function Inventory() {
                                 setQuick((p) => ({
                                   ...p,
                                   name: placeholders.name,
-                                  quantity: 1,
                                 }))
                               }
                             >
@@ -746,7 +777,9 @@ export default function Inventory() {
                         <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
                         <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
                         <td className="px-4 py-3 text-slate-700">{p.inventory_month}</td>
-                        <td className="px-4 py-3 text-slate-700">{p.quantity}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {p.quantity} {p.unit || "pcs"}
+                        </td>
                         <td className="px-4 py-3 text-slate-700">{p.barcode || p.internal_sku || "—"}</td>
                       </tr>
                     ))

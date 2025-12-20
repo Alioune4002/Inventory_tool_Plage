@@ -10,6 +10,8 @@ import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import Divider from "../ui/Divider";
 import useEntitlements from "../app/useEntitlements";
+import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { getWording } from "../lib/labels";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -167,6 +169,25 @@ export default function Settings() {
       await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
       await refreshServices();
       pushToast?.({ message: "Service mis à jour.", type: "success" });
+    } catch (e) {
+      pushToast?.({ message: "Mise à jour impossible.", type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const applyIdentifierDefaults = async (svc, identifiers) => {
+    const recBarcode = typeof identifiers?.barcode === "boolean" ? identifiers.barcode : true;
+    const recSku = typeof identifiers?.sku === "boolean" ? identifiers.sku : true;
+
+    setLoading(true);
+    try {
+      const nextFeatures = { ...(svc.features || {}) };
+      nextFeatures.barcode = { ...(nextFeatures.barcode || {}), enabled: recBarcode };
+      nextFeatures.sku = { ...(nextFeatures.sku || {}), enabled: recSku };
+      await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
+      await refreshServices();
+      pushToast?.({ message: "Identifiants mis à jour selon la recommandation métier.", type: "success" });
     } catch (e) {
       pushToast?.({ message: "Mise à jour impossible.", type: "error" });
     } finally {
@@ -565,6 +586,13 @@ export default function Settings() {
           <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
             {(services || []).map((s) => {
               const features = s.features || {};
+              const serviceType = s.service_type;
+              const familyId = resolveFamilyId(serviceType, tenant?.domain);
+              const familyMeta = FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0];
+              const identifiers = familyMeta?.identifiers || {};
+              const wording = getWording(serviceType, tenant?.domain);
+              const recBarcode = typeof identifiers.barcode === "boolean" ? identifiers.barcode : true;
+              const recSku = typeof identifiers.sku === "boolean" ? identifiers.sku : true;
               return (
                 <Card key={s.id} className="p-4 space-y-3" hover>
                   <div className="font-semibold text-slate-900">{s.name}</div>
@@ -577,7 +605,7 @@ export default function Settings() {
                         checked={features.barcode?.enabled !== false}
                         onChange={(e) => toggleFeature(s, "barcode", e.target.checked)}
                       />
-                      <span>Code-barres</span>
+                      <span>{wording?.barcodeLabel || "Code-barres"}</span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -585,7 +613,7 @@ export default function Settings() {
                         checked={features.sku?.enabled !== false}
                         onChange={(e) => toggleFeature(s, "sku", e.target.checked)}
                       />
-                      <span>SKU interne</span>
+                      <span>{wording?.skuLabel || "SKU interne"}</span>
                     </label>
                     <label className="flex items-center gap-2">
                       <input
@@ -604,6 +632,19 @@ export default function Settings() {
                       />
                       <span>Suivi entamé (bars/resto)</span>
                     </label>
+                    <div className="text-xs text-slate-500">
+                      Recommandé pour {familyMeta?.name || "ce métier"} :{" "}
+                      {recBarcode ? "code-barres activé" : "code-barres désactivé"} ·{" "}
+                      {recSku ? "SKU activé" : "SKU désactivé"}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => applyIdentifierDefaults(s, identifiers)}
+                      disabled={loading}
+                    >
+                      Appliquer la recommandation métier
+                    </Button>
                   </div>
                 </Card>
               );

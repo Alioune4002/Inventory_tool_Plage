@@ -27,6 +27,7 @@ export default function Products() {
     brand: "",
     supplier: "",
     notes: "",
+    product_role: "",
     purchase_price: "",
     selling_price: "",
     tva: "20",
@@ -77,6 +78,18 @@ export default function Products() {
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
   const multiUnitEnabled = getFeatureFlag("multi_unit", familyModules.includes("multiUnit"));
+  const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
+
+  const productRoleOptions = [
+    { value: "", label: "Non précisé" },
+    { value: "raw_material", label: "Matière première" },
+    { value: "finished_product", label: "Produit fini" },
+    { value: "homemade_prep", label: "Préparation maison" },
+  ];
+  const productRoleLabels = productRoleOptions.reduce((acc, option) => {
+    if (option.value) acc[option.value] = option.label;
+    return acc;
+  }, {});
 
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
@@ -152,6 +165,7 @@ export default function Products() {
       brand: "",
       supplier: "",
       notes: "",
+      product_role: "",
       purchase_price: "",
       selling_price: "",
       tva: "20",
@@ -209,6 +223,7 @@ export default function Products() {
       if (purchaseEnabled || sellingEnabled) {
         payload.tva = form.tva === "" ? null : Number(form.tva);
       }
+      if (itemTypeEnabled) payload.product_role = form.product_role || null;
 
       let res;
       if (editId) res = await api.put(`/api/products/${editId}/`, payload);
@@ -416,6 +431,27 @@ export default function Products() {
                 </label>
               )}
 
+              {itemTypeEnabled && (
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-slate-700">Type d’article</span>
+                  <select
+                    value={form.product_role}
+                    onChange={(e) => setForm((p) => ({ ...p, product_role: e.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  >
+                    {productRoleOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500">
+                    {helpers.productRole ||
+                      "Matière première = coût, produit fini = vente. Utile pour la marge estimée."}
+                  </p>
+                </label>
+              )}
+
               {barcodeEnabled && (
                 <Input
                   label={wording.barcodeLabel}
@@ -564,6 +600,11 @@ export default function Products() {
                     <tr key={p.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-900">{p.name}</div>
+                        {p.product_role && (
+                          <div className="text-xs text-slate-500">
+                            Type : {productRoleLabels[p.product_role] || p.product_role}
+                          </div>
+                        )}
                         {(p.brand || p.supplier) && (
                           <div className="text-xs text-slate-500">
                             {[p.brand, p.supplier].filter(Boolean).join(" · ")}
@@ -616,6 +657,7 @@ export default function Products() {
                                 brand: p.brand || "",
                                 supplier: p.supplier || "",
                                 notes: p.notes || "",
+                                product_role: p.product_role || "",
                                 purchase_price: p.purchase_price || "",
                                 selling_price: p.selling_price || "",
                                 tva: p.tva === null || p.tva === undefined ? "20" : String(p.tva),
