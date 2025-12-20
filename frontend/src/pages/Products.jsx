@@ -8,29 +8,34 @@ import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
+import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 
 export default function Products() {
   const { serviceId, services, selectService, serviceFeatures, countingMode, tenant, serviceProfile } = useAuth();
   const pushToast = useToast();
 
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [search, setSearch] = useState("");
   const [editId, setEditId] = useState(null);
+  const [editMonth, setEditMonth] = useState(null);
+  const currentMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
   const [form, setForm] = useState({
     name: "",
     category: "",
-    quantity: 1,
     barcode: "",
     internal_sku: "",
+    brand: "",
+    supplier: "",
+    notes: "",
     purchase_price: "",
     selling_price: "",
-    dlc: "",
+    tva: "20",
     unit: "pcs",
   });
 
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [page, setPage] = useState(1);
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -40,30 +45,38 @@ export default function Products() {
 
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+  const familyId = useMemo(() => resolveFamilyId(serviceType, serviceDomain), [serviceType, serviceDomain]);
+  const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
+  const familyIdentifiers = familyMeta?.identifiers ?? {};
+  const familyModules = familyMeta?.modules ?? [];
+
+  const getFeatureFlag = (key, fallback = false) => {
+    const cfg = serviceFeatures?.[key];
+    if (cfg && typeof cfg.enabled === "boolean") {
+      return cfg.enabled;
+    }
+    return fallback;
+  };
 
   const wording = getWording(serviceType, serviceDomain);
   const ux = getUxCopy(serviceType, serviceDomain);
   const placeholders = getPlaceholders(serviceType, serviceDomain);
   const helpers = getFieldHelpers(serviceType, serviceDomain);
-
-  const isGeneral = serviceDomain === "general";
-  const isFood = !isGeneral && serviceType !== "pharmacy_parapharmacy";
+  const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
+  const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
+  const catalogueNote =
+    ux.catalogueNote ||
+    "Catalogue (référentiel) : aucune quantité ici. Le comptage et les pertes se font dans Inventaire.";
 
   const priceCfg = serviceFeatures?.prices || {};
-  const barcodeCfg = serviceFeatures?.barcode || {};
-  const skuCfg = serviceFeatures?.sku || {};
-  const dlcCfg = serviceFeatures?.dlc || {};
 
   const purchaseEnabled = priceCfg.purchase_enabled !== false;
   const sellingEnabled = priceCfg.selling_enabled !== false;
-  const priceRecommended = !!priceCfg.recommended;
+  const priceRecommended = priceCfg.recommended === true;
 
-  const barcodeEnabled = barcodeCfg.enabled !== false;
-  const skuEnabled = skuCfg.enabled !== false;
-
-  // DLC seulement si domaine food et service != pharmacie (déjà géré côté pages, on garde cohérent)
-  const dlcEnabled = isFood ? dlcCfg.enabled !== false : false;
-  const dlcRecommended = !!dlcCfg.recommended;
+  const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
+  const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
+  const multiUnitEnabled = getFeatureFlag("multi_unit", familyModules.includes("multiUnit"));
 
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
@@ -71,6 +84,8 @@ export default function Products() {
     if (countingMode === "mixed") return ["pcs", "kg", "g", "l", "ml"];
     return ["pcs"];
   }, [countingMode]);
+  const vatOptions = ["0", "5.5", "10", "20"];
+  const showUnit = multiUnitEnabled || countingMode !== "unit";
 
   const readableServiceName = (id) => services?.find((s) => String(s.id) === String(id))?.name || id;
 
@@ -83,7 +98,7 @@ export default function Products() {
       if (isAllServices) {
         const calls = services.map((s) =>
           api
-            .get(`/api/products/?month=${month}&service=${s.id}`)
+            .get(`/api/products/?service=${s.id}`)
             .then((res) => ({ service: s, items: Array.isArray(res.data) ? res.data : [] }))
         );
 
@@ -91,7 +106,7 @@ export default function Products() {
         const merged = results.flatMap((r) => r.items.map((it) => ({ ...it, __service_name: r.service.name })));
         setItems(merged);
       } else {
-        const res = await api.get(`/api/products/?month=${month}&service=${serviceId}`);
+        const res = await api.get(`/api/products/?service=${serviceId}`);
         setItems(Array.isArray(res.data) ? res.data : []);
       }
     } catch (e) {
@@ -105,7 +120,7 @@ export default function Products() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId, month]);
+  }, [serviceId, services]);
 
   useEffect(() => {
     const loadCats = async () => {
@@ -132,15 +147,18 @@ export default function Products() {
     setForm({
       name: "",
       category: "",
-      quantity: 1,
       barcode: "",
       internal_sku: "",
+      brand: "",
+      supplier: "",
+      notes: "",
       purchase_price: "",
       selling_price: "",
-      dlc: "",
+      tva: "20",
       unit: unitOptions[0],
     });
     setEditId(null);
+    setEditMonth(null);
     setErr("");
   };
 
@@ -164,10 +182,13 @@ export default function Products() {
       const payload = {
         name: form.name.trim(),
         category: form.category || "",
-        quantity: Number(form.quantity) || 0,
-        inventory_month: month,
+        quantity: 0,
+        inventory_month: editMonth || currentMonth,
         service: serviceId,
         unit: form.unit || "pcs",
+        brand: form.brand.trim() || null,
+        supplier: form.supplier.trim() || null,
+        notes: form.notes.trim() || "",
       };
 
       // identifiants
@@ -178,17 +199,16 @@ export default function Products() {
       else payload.barcode = "";
 
       if (skuEnabled) {
-        // SKU si fourni, sinon fallback léger (si pas de code-barres)
-        payload.internal_sku = cleanedSku || (cleanedBarcode ? "" : form.name.slice(0, 3).toLowerCase());
+        payload.internal_sku = cleanedSku;
       } else {
         payload.internal_sku = "";
       }
 
-      payload.no_barcode = !cleanedBarcode;
-
       if (purchaseEnabled) payload.purchase_price = form.purchase_price || null;
       if (sellingEnabled) payload.selling_price = form.selling_price || null;
-      if (dlcEnabled) payload.dlc = form.dlc || null;
+      if (purchaseEnabled || sellingEnabled) {
+        payload.tva = form.tva === "" ? null : Number(form.tva);
+      }
 
       let res;
       if (editId) res = await api.put(`/api/products/${editId}/`, payload);
@@ -217,16 +237,64 @@ export default function Products() {
     }
   };
 
+  const catalogItems = useMemo(() => {
+    const map = new Map();
+    items.forEach((item) => {
+      const key =
+        item.internal_sku?.toLowerCase() ||
+        item.barcode?.toLowerCase() ||
+        item.name?.trim().toLowerCase() ||
+        String(item.id);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, item);
+        return;
+      }
+      const monthA = item.inventory_month || "";
+      const monthB = existing.inventory_month || "";
+      if (monthA > monthB) {
+        map.set(key, item);
+        return;
+      }
+      if (monthA === monthB) {
+        const dateA = item.created_at ? new Date(item.created_at).getTime() : 0;
+        const dateB = existing.created_at ? new Date(existing.created_at).getTime() : 0;
+        if (dateA > dateB) {
+          map.set(key, item);
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
-    if (!search) return items;
+    if (!search) return catalogItems;
     const q = search.toLowerCase();
-    return items.filter(
+    return catalogItems.filter(
       (p) =>
         p.name?.toLowerCase().includes(q) ||
         p.barcode?.toLowerCase().includes(q) ||
-        p.internal_sku?.toLowerCase().includes(q)
+        p.internal_sku?.toLowerCase().includes(q) ||
+        p.brand?.toLowerCase().includes(q) ||
+        p.supplier?.toLowerCase().includes(q) ||
+        p.notes?.toLowerCase().includes(q)
     );
-  }, [items, search]);
+  }, [catalogItems, search]);
+
+  const PAGE_SIZE = 12;
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, totalPages]);
+  const paginatedItems = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredItems.slice(start, start + PAGE_SIZE);
+  }, [filteredItems, page]);
 
   return (
     <PageTransition>
@@ -240,12 +308,11 @@ export default function Products() {
           <div className="text-sm text-slate-500">{wording.itemPlural}</div>
           <h1 className="text-2xl font-black">{ux.productsTitle}</h1>
           <p className="text-slate-600 text-sm">{ux.productsIntro}</p>
+          <div className="text-xs text-slate-500">{catalogueNote}</div>
         </Card>
 
         <Card className="p-6 space-y-4">
-          <div className="grid md:grid-cols-4 gap-3 items-end">
-            <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-
+          <div className="grid md:grid-cols-3 gap-3 items-end">
             {services?.length > 0 && (
               <label className="space-y-1.5">
                 <span className="text-sm font-medium text-slate-700">Service</span>
@@ -325,24 +392,16 @@ export default function Products() {
               ) : (
                 <Input
                   label={wording.categoryLabel}
-                  placeholder={placeholders.category}
+                  placeholder={categoryPlaceholder}
                   value={form.category}
                   onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
                   helper={helpers.category}
                 />
               )}
 
-              <Input
-                label="Quantité"
-                type="number"
-                min={0}
-                value={form.quantity}
-                onChange={(e) => setForm((p) => ({ ...p, quantity: Number(e.target.value) || 0 }))}
-              />
-
-              {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (
+              {showUnit && (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">Unité</span>
+                <span className="text-sm font-medium text-slate-700">{unitLabel}</span>
                   <select
                     value={form.unit}
                     onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
@@ -377,9 +436,23 @@ export default function Products() {
                 />
               )}
 
+              <Input
+                label="Marque / laboratoire"
+                placeholder={placeholders.brand || "Ex. Sanofi, Nike, Brasserie X"}
+                value={form.brand}
+                onChange={(e) => setForm((p) => ({ ...p, brand: e.target.value }))}
+              />
+
+              <Input
+                label="Fournisseur"
+                placeholder={placeholders.supplier || "Ex. Metro, Promocash, Centrale"}
+                value={form.supplier}
+                onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
+              />
+
               {purchaseEnabled && (
                 <Input
-                  label="Prix d’achat (€)"
+                  label="Prix d’achat HT (€)"
                   type="number"
                   min={0}
                   step="0.01"
@@ -391,7 +464,7 @@ export default function Products() {
 
               {sellingEnabled && (
                 <Input
-                  label="Prix de vente (€)"
+                  label="Prix de vente HT (€)"
                   type="number"
                   min={0}
                   step="0.01"
@@ -401,15 +474,32 @@ export default function Products() {
                 />
               )}
 
-              {dlcEnabled && (
-                <Input
-                  label="DLC"
-                  type="date"
-                  value={form.dlc}
-                  onChange={(e) => setForm((p) => ({ ...p, dlc: e.target.value }))}
-                  helper={dlcRecommended && !form.dlc ? "Recommandée pour limiter pertes et oublis." : "Optionnel"}
-                />
+              {(purchaseEnabled || sellingEnabled) && (
+                <label className="space-y-1.5">
+                  <span className="text-sm font-medium text-slate-700">TVA</span>
+                  <select
+                    value={form.tva}
+                    onChange={(e) => setForm((p) => ({ ...p, tva: e.target.value }))}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  >
+                    {vatOptions.map((rate) => (
+                      <option key={rate} value={rate}>
+                        {rate}%
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500">
+                    Prix saisis en HT. La TVA sert aux exports et estimations.
+                  </p>
+                </label>
               )}
+
+              <Input
+                label="Notes internes"
+                placeholder={placeholders.notes || "Ex. Rotation lente, saisonnier, fragile…"}
+                value={form.notes}
+                onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
+              />
 
               <div className="md:col-span-4 flex gap-3 flex-wrap">
                 <Button type="submit" loading={loading} disabled={isAllServices}>
@@ -426,11 +516,26 @@ export default function Products() {
           {err && <div className="text-sm text-red-600">{err}</div>}
         </Card>
 
-        <Card className="p-6">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-sm text-slate-500">Résultats</div>
+              <div className="text-lg font-semibold">{filteredItems.length} élément(s)</div>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <span>
+                Page {page} / {totalPages}
+              </span>
+              <span>
+                Affichage {paginatedItems.length} / {filteredItems.length}
+              </span>
+            </div>
+          </div>
+
           {loading ? (
-            <div className="space-y-3">
-              {[1, 2].map((i) => (
-                <div key={i} className="h-12 rounded-2xl bg-slate-100 animate-pulse" />
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <div key={idx} className="h-12 rounded-2xl bg-slate-100 animate-pulse" />
               ))}
             </div>
           ) : filteredItems.length === 0 ? (
@@ -443,29 +548,57 @@ export default function Products() {
                     <th className="text-left px-4 py-3">{wording.itemLabel}</th>
                     <th className="text-left px-4 py-3">{wording.categoryLabel}</th>
                     {isAllServices && <th className="text-left px-4 py-3">Service</th>}
-                    <th className="text-left px-4 py-3">Quantité</th>
                     <th className="text-left px-4 py-3">
                       {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
                     </th>
+                    {(purchaseEnabled || sellingEnabled) && (
+                      <th className="text-left px-4 py-3">Prix & TVA</th>
+                    )}
+                    {showUnit && <th className="text-left px-4 py-3">Unité</th>}
                     {!isAllServices && <th className="text-left px-4 py-3">Actions</th>}
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredItems.map((p, idx) => (
+                  {paginatedItems.map((p, idx) => (
                     <tr key={p.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-slate-900">{p.name}</div>
+                        {(p.brand || p.supplier) && (
+                          <div className="text-xs text-slate-500">
+                            {[p.brand, p.supplier].filter(Boolean).join(" · ")}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
 
                       {isAllServices && (
                         <td className="px-4 py-3 text-slate-700">{p.__service_name || readableServiceName(p.service)}</td>
                       )}
 
-                      <td className="px-4 py-3 text-slate-700">{p.quantity}</td>
-
                       <td className="px-4 py-3 text-slate-700">
-                        {p.barcode || p.internal_sku || "—"}
+                        <div className="space-y-1">
+                          <div>{p.barcode || "—"}</div>
+                          {skuEnabled && <div className="text-xs text-slate-500">{p.internal_sku || "SKU —"}</div>}
+                        </div>
                       </td>
+
+                      {(purchaseEnabled || sellingEnabled) && (
+                        <td className="px-4 py-3 text-slate-700">
+                          <div className="space-y-1">
+                            {purchaseEnabled && (
+                              <div>Achat: {p.purchase_price ? `${p.purchase_price} €` : "—"}</div>
+                            )}
+                            {sellingEnabled && (
+                              <div className="text-xs text-slate-500">
+                                Vente: {p.selling_price ? `${p.selling_price} €` : "—"} · TVA {p.tva ?? "—"}%
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      )}
+
+                      {showUnit && <td className="px-4 py-3 text-slate-700">{p.unit || "—"}</td>}
 
                       {!isAllServices && (
                         <td className="px-4 py-3 text-slate-700">
@@ -474,15 +607,18 @@ export default function Products() {
                             variant="secondary"
                             onClick={() => {
                               setEditId(p.id);
+                              setEditMonth(p.inventory_month || currentMonth);
                               setForm({
                                 name: p.name || "",
                                 category: p.category || "",
-                                quantity: p.quantity || 1,
                                 barcode: p.barcode || "",
                                 internal_sku: p.internal_sku || "",
+                                brand: p.brand || "",
+                                supplier: p.supplier || "",
+                                notes: p.notes || "",
                                 purchase_price: p.purchase_price || "",
                                 selling_price: p.selling_price || "",
-                                dlc: p.dlc || "",
+                                tva: p.tva === null || p.tva === undefined ? "20" : String(p.tva),
                                 unit: p.unit || unitOptions[0],
                               });
                               pushToast?.({ message: "Produit pré-rempli : modifiez puis validez.", type: "info" });
@@ -496,6 +632,17 @@ export default function Products() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {filteredItems.length > PAGE_SIZE && (
+            <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
+                ← Précédent
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
+                Suivant →
+              </Button>
             </div>
           )}
         </Card>

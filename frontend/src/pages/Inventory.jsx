@@ -9,6 +9,7 @@ import Card from "../ui/Card";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
+import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 
 export default function Inventory() {
   const {
@@ -27,6 +28,7 @@ export default function Inventory() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [lastFound, setLastFound] = useState(null);
   const [err, setErr] = useState("");
@@ -47,11 +49,26 @@ export default function Inventory() {
     pack_uom: "",
     remaining_qty: "",
     remaining_fraction: "",
+    lotNumber: "",
   });
 
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+  const familyId = useMemo(() => resolveFamilyId(serviceType, serviceDomain), [serviceType, serviceDomain]);
+  const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
+  const familyIdentifiers = familyMeta?.identifiers ?? {};
+  const familyModules = familyMeta?.modules ?? [];
+  const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
+  const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
+
+  const getFeatureFlag = (key, fallback = false) => {
+    const cfg = serviceFeatures?.[key];
+    if (cfg && typeof cfg.enabled === "boolean") {
+      return cfg.enabled;
+    }
+    return fallback;
+  };
 
   const wording = getWording(serviceType, serviceDomain);
   const ux = getUxCopy(serviceType, serviceDomain);
@@ -72,10 +89,11 @@ export default function Inventory() {
 
   const purchaseEnabled = priceCfg.purchase_enabled !== false;
   const sellingEnabled = priceCfg.selling_enabled !== false;
-  const priceRecommended = !!priceCfg.recommended;
+  const priceRecommended = priceCfg.recommended === true;
 
-  const barcodeEnabled = barcodeCfg.enabled !== false;
-  const skuEnabled = skuCfg.enabled !== false;
+  const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
+  const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
+  const lotEnabled = getFeatureFlag("lot", familyModules.includes("lot"));
 
   // DLC : seulement food (et pas general) + pas pharmacie (pharma a sa logique mais ici on garde cohérence UI)
   const dlcEnabled = isFood ? dlcCfg.enabled !== false : false;
@@ -171,6 +189,21 @@ export default function Inventory() {
     );
   }, [items, search]);
 
+  const PAGE_SIZE = 12;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+  useEffect(() => {
+    setPage(1);
+  }, [search, totalPages]);
+  const paginatedInventory = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filtered.slice(start, start + PAGE_SIZE);
+  }, [filtered, page]);
+
   const resetQuick = () => {
     setQuick({
       name: "",
@@ -187,6 +220,7 @@ export default function Inventory() {
       pack_uom: "",
       remaining_qty: "",
       remaining_fraction: "",
+      lotNumber: "",
     });
     setLastFound(null);
   };
@@ -226,6 +260,7 @@ export default function Inventory() {
     if (purchaseEnabled) payload.purchase_price = quick.purchase_price || null;
     if (sellingEnabled) payload.selling_price = quick.selling_price || null;
     if (dlcEnabled) payload.dlc = quick.dlc || null;
+    if (lotEnabled) payload.lot_number = quick.lotNumber || null;
 
     if (showOpenFields) {
       payload.container_status = quick.container_status || "SEALED";
@@ -272,17 +307,18 @@ export default function Inventory() {
       const res = await api.get(`/api/products/lookup/?barcode=${encodeURIComponent(quick.barcode)}`);
       if (res?.data?.found && res.data.product) {
         const p = res.data.product;
-        setQuick((prev) => ({
-          ...prev,
-          name: p.name || prev.name,
-          category: p.category || prev.category,
-          quantity: p.quantity || prev.quantity,
-          internal_sku: p.internal_sku || prev.internal_sku,
-          purchase_price: p.purchase_price ?? prev.purchase_price,
-          selling_price: p.selling_price ?? prev.selling_price,
-          dlc: p.dlc || prev.dlc,
-          unit: p.unit || prev.unit,
-        }));
+          setQuick((prev) => ({
+            ...prev,
+            name: p.name || prev.name,
+            category: p.category || prev.category,
+            quantity: p.quantity || prev.quantity,
+            internal_sku: p.internal_sku || prev.internal_sku,
+            purchase_price: p.purchase_price ?? prev.purchase_price,
+            selling_price: p.selling_price ?? prev.selling_price,
+            dlc: p.dlc || prev.dlc,
+            unit: p.unit || prev.unit,
+            lotNumber: p.lot_number || prev.lotNumber,
+          }));
         setLastFound({
           type: "local",
           product: res.data.product,
@@ -383,7 +419,7 @@ export default function Inventory() {
                   ) : (
                     <Input
                       label={wording.categoryLabel}
-                      placeholder={placeholders.category}
+                      placeholder={categoryPlaceholder}
                       value={quick.category}
                       onChange={(e) => setQuick((p) => ({ ...p, category: e.target.value }))}
                       helper={helpers.category}
@@ -448,7 +484,7 @@ export default function Inventory() {
 
                   {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (
                     <label className="space-y-1.5">
-                      <span className="text-sm font-medium text-[var(--text)]">Unité</span>
+                      <span className="text-sm font-medium text-[var(--text)]">{unitLabel}</span>
                       <select
                         value={quick.unit}
                         onChange={(e) => setQuick((p) => ({ ...p, unit: e.target.value }))}
@@ -492,6 +528,16 @@ export default function Inventory() {
                       value={quick.selling_price}
                       onChange={(e) => setQuick((p) => ({ ...p, selling_price: e.target.value }))}
                       helper={showSellingWarning ? "Recommandé pour exports et pilotage." : "Optionnel"}
+                    />
+                  )}
+
+                  {lotEnabled && (
+                    <Input
+                      label="Lot / Batch"
+                      placeholder="Ex. LOT-2025-12"
+                      value={quick.lotNumber}
+                      onChange={(e) => setQuick((p) => ({ ...p, lotNumber: e.target.value }))}
+                      helper="Optionnel : utile pour traçabilité et exports."
                     />
                   )}
 
@@ -624,11 +670,26 @@ export default function Inventory() {
           </Card>
         )}
 
-        <Card className="p-0 overflow-hidden">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-sm text-slate-500">Inventaire</div>
+              <div className="text-lg font-semibold">{filtered.length} entrée(s)</div>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <span>
+                Page {page} / {totalPages}
+              </span>
+              <span>
+                Affichage {paginatedInventory.length} / {filtered.length}
+              </span>
+            </div>
+          </div>
+
           {authLoading || loading ? (
-            <div className="p-6 space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+            <div className="grid gap-2">
+              {Array.from({ length: 3 }).map((_, idx) => (
+                <div key={idx} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
               ))}
             </div>
           ) : err ? (
@@ -677,7 +738,7 @@ export default function Inventory() {
                       </td>
                     </tr>
                   ) : (
-                    filtered.map((p, idx) => (
+                    paginatedInventory.map((p, idx) => (
                       <tr key={p.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
                         {isAllServices && (
                           <td className="px-4 py-3 text-slate-700">{p.__service_name || p.service_name || "—"}</td>
@@ -692,6 +753,17 @@ export default function Inventory() {
                   )}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {filtered.length > PAGE_SIZE && (
+            <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
+                ← Précédent
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
+                Suivant →
+              </Button>
             </div>
           )}
 

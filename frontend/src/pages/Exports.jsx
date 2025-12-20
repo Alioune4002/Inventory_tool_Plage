@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { api } from "../lib/api";
 import PageTransition from "../components/PageTransition";
@@ -13,11 +13,17 @@ export default function Exports() {
   const pushToast = useToast();
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
-  const [cat, setCat] = useState("");
+  const [availableCategories, setAvailableCategories] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState("all");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("");
+  const [includeTVA, setIncludeTVA] = useState(true);
+  const [includeDLC, setIncludeDLC] = useState(true);
+  const [includeSKU, setIncludeSKU] = useState(true);
+  const [includeCharts, setIncludeCharts] = useState(true);
+  const [includeSummary, setIncludeSummary] = useState(true);
   const [toast, setToast] = useState("");
 
   const doExport = async (format = "xlsx") => {
@@ -28,18 +34,27 @@ export default function Exports() {
     setLoading(true);
     setToast("");
     try {
-      const params = new URLSearchParams();
-      if (periodFrom) params.append("from", periodFrom);
-      if (periodTo) params.append("to", periodTo);
-      params.append("service", serviceId);
-      params.append("format", format);
-      params.append("mode", mode);
-      if (cat) params.append("category", cat);
-      if (email) params.append("email", email);
-      if (message) params.append("message", message);
-      const res = await api.get(`/api/exports/?${params.toString()}`, { responseType: "blob" });
+      const payload = {
+        service: serviceId,
+        mode,
+        include_tva: includeTVA,
+        include_dlc: includeDLC,
+        include_sku: includeSKU,
+        include_charts: includeCharts,
+        include_summary: includeSummary,
+        categories: selectedCategories,
+        from_month: periodFrom,
+        to_month: periodTo,
+        format,
+        email,
+        message,
+      };
+      const res = await api.post("/api/export-advanced/", payload, { responseType: "blob" });
       const blob = new Blob([res.data], {
-        type: format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type:
+          format === "csv"
+            ? "text/csv"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -53,11 +68,25 @@ export default function Exports() {
       setToast(`Export lancé${emailMsg}.`);
       pushToast?.({ message: `Export lancé${emailMsg}`, type: "success" });
     } catch (e) {
-      setToast("Échec de l’export (auth ou filtres).");
+      setToast("Échec de l’export, vérifie les filtres.");
       pushToast?.({ message: "Échec de l’export", type: "error" });
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (!serviceId) return;
+    api
+      .get("/api/categories/", { params: { service: serviceId } })
+      .then((res) => setAvailableCategories(res.data || []))
+      .catch(() => setAvailableCategories([]));
+  }, [serviceId]);
+
+  const toggleCategory = (slug) => {
+    setSelectedCategories((prev) =>
+      prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
+    );
   };
 
   return (
@@ -94,12 +123,6 @@ export default function Exports() {
                 <span className="text-xs text-slate-500">Service sélectionné dans la topbar.</span>
               </label>
             )}
-            <Input
-              label="Catégorie (optionnel)"
-              placeholder="Ex. Boissons"
-              value={cat}
-              onChange={(e) => setCat(e.target.value)}
-            />
             <label className="space-y-1.5">
               <span className="text-sm font-medium text-slate-700">Mode</span>
               <select
@@ -127,6 +150,105 @@ export default function Exports() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
+            <div className="space-y-2">
+              <span className="text-sm font-medium text-slate-700">Catégories</span>
+              <div className="flex flex-wrap gap-2">
+                {availableCategories.length === 0 ? (
+                  <span className="text-xs text-slate-400">Chargement des catégories…</span>
+                ) : (
+                  availableCategories.map((category) => {
+                    const value = category.name || category.title || category.slug || category.id;
+                    const label = category.name || category.title || value;
+                    return (
+                      <button
+                        type="button"
+                        key={value}
+                        onClick={() => toggleCategory(value)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          selectedCategories.includes(value)
+                            ? "border-blue-500 bg-blue-500/20 text-blue-200"
+                            : "border-white/20 bg-white/5 text-white/80"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <p className="text-xs text-slate-500">
+                Sélectionne les catégories à intégrer. Les exports sans catégorie remontent l’ensemble.
+              </p>
+              {selectedCategories.length > 0 && (
+                <p className="text-xs text-emerald-300">
+                  Catégories choisies : {selectedCategories.join(", ")}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            {[
+              {
+                label: "TVA",
+                state: includeTVA,
+                setter: setIncludeTVA,
+                helper: "Active les colonnes de TVA + marge.",
+              },
+              {
+                label: "DLC / DDM",
+                state: includeDLC,
+                setter: setIncludeDLC,
+                helper: "Ajoute les dates limites dans l’export.",
+              },
+              {
+                label: "Identifiant (code-barres / SKU)",
+                state: includeSKU,
+                setter: setIncludeSKU,
+                helper: "Ajoute les identifiants pour retrouver chaque article.",
+              },
+            ].map(({ label, state, setter, helper }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setter(!state)}
+                className={`w-full rounded-2xl border px-4 py-3 text-left text-sm font-semibold transition ${
+                  state ? "border-blue-400 bg-blue-500/10 text-blue-100" : "border-white/10 bg-white/5 text-white/70"
+                }`}
+              >
+                {state ? "Inclu" : "Exclu"} {label}
+                <div className="text-xs font-normal text-slate-400">{helper}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Extras graphiques</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
+                    includeCharts ? "bg-green-500/20 text-green-200" : "bg-white/5 text-white/60"
+                  }`}
+                  onClick={() => setIncludeCharts((prev) => !prev)}
+                >
+                  {includeCharts ? "Graphiques ON" : "Graphiques OFF"}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
+                    includeSummary ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-white/60"
+                  }`}
+                  onClick={() => setIncludeSummary((prev) => !prev)}
+                >
+                  {includeSummary ? "Synthèse ON" : "Synthèse OFF"}
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Les graphiques & la synthèse sont inclus dans un onglet Excel dédié (non disponibles en CSV).
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-3">

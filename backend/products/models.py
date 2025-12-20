@@ -9,6 +9,9 @@ class Product(models.Model):
 
     # catégorie libre afin de supporter les catégories par service dynamiques
     category = models.CharField(max_length=50, null=True, blank=True)
+    brand = models.CharField(max_length=120, null=True, blank=True)
+    supplier = models.CharField(max_length=120, null=True, blank=True)
+    notes = models.TextField(blank=True, default="")
 
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='products')
 

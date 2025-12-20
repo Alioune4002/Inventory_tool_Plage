@@ -57,7 +57,7 @@ class ProductSerializer(serializers.ModelSerializer):
             warnings.append("Prix d'achat manquant : stats moins précises.")
         if prices_cfg.get("selling_enabled") and selling_price is None and prices_cfg.get("recommended"):
             warnings.append("Prix de vente manquant : export ventes moins précis.")
-        if dlc_cfg.get("enabled") and not dlc and dlc_cfg.get("recommended"):
+        if "dlc" in attrs and dlc_cfg.get("enabled") and not dlc and dlc_cfg.get("recommended"):
             warnings.append("DLC manquante pour ce service.")
         if barcode_cfg.get("enabled") is False and barcode:
             warnings.append("Code-barres fourni alors que non requis pour ce service.")

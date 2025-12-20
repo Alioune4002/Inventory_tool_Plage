@@ -5,567 +5,388 @@ import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
 
-/**
- * 3-step premium onboarding:
- * 0) Activité + mono/multi
- * 1) Services (pré-remplis + éditables)
- * 2) Compte + CGU
- */
+const servicePresets = (family, isMulti, linkedMode = "separate") => {
+  const primary = {
+    retail: { service_type: "grocery_food", service_name: "Épicerie" },
+    mode: { service_type: "retail_general", service_name: "Boutique mode" },
+    bar: { service_type: "bar", service_name: "Bar" },
+    restauration: { service_type: "kitchen", service_name: "Cuisine" },
+    boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
+    pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
+  }[family] || { service_type: "other", service_name: "Service principal" };
 
-const businessOptions = [
-  { value: "restaurant", label: "Restaurant / Cuisine", hint: "Cuisine + salle, entamés, pertes, exports." },
-  { value: "bar", label: "Bar", hint: "Bouteilles entamées, volumes, inventaire rapide." },
-  { value: "bakery", label: "Boulangerie / Pâtisserie", hint: "Production, invendus, matières, pertes." },
-  { value: "grocery", label: "Épicerie / Food", hint: "EAN/SKU, prix achat/vente, stats." },
-  { value: "retail", label: "Boutique non-alimentaire", hint: "SKU conseillé, variantes, pas de DLC." },
-  { value: "pharmacy", label: "Pharmacie / Parapharmacie", hint: "Lots/péremption, traçabilité renforcée." },
-  { value: "hotel_camping", label: "Hôtel / Camping multi-services", hint: "Bar + épicerie + resto + boutique." },
-  { value: "other", label: "Autre", hint: "Configuration libre." },
-];
-
-const serviceTypeOptions = {
-  food: [
-    { value: "kitchen", label: "Cuisine / Production" },
-    { value: "bar", label: "Bar" },
-    { value: "grocery_food", label: "Épicerie / Alimentaire" },
-    { value: "bulk_food", label: "Vrac" },
-  ],
-  general: [
-    { value: "retail_general", label: "Boutique / Retail" },
-    { value: "pharmacy_parapharmacy", label: "Pharmacie / Parapharmacie" },
-    { value: "other", label: "Autre" },
-  ],
-};
-
-const domainOptions = [
-  { value: "food", label: "Alimentaire" },
-  { value: "general", label: "Non-alimentaire" },
-];
-
-const presets = (type, isMulti) => {
-  switch (type) {
-    case "restaurant":
-      return isMulti
-        ? [
-            { id: "svc-1", domain: "food", service_type: "kitchen", service_name: "Cuisine" },
-            { id: "svc-2", domain: "food", service_type: "bar", service_name: "Salle / Bar" },
-          ]
-        : [{ id: "svc-1", domain: "food", service_type: "kitchen", service_name: "Cuisine" }];
-
-    case "bar":
-      return isMulti
-        ? [
-            { id: "svc-1", domain: "food", service_type: "bar", service_name: "Bar" },
-            { id: "svc-2", domain: "food", service_type: "kitchen", service_name: "Cuisine / Snacking" },
-          ]
-        : [{ id: "svc-1", domain: "food", service_type: "bar", service_name: "Bar" }];
-
-    case "bakery":
-      return isMulti
-        ? [
-            { id: "svc-1", domain: "food", service_type: "kitchen", service_name: "Production" },
-            { id: "svc-2", domain: "general", service_type: "retail_general", service_name: "Boutique" },
-          ]
-        : [{ id: "svc-1", domain: "food", service_type: "kitchen", service_name: "Production" }];
-
-    case "grocery":
-      return isMulti
-        ? [
-            { id: "svc-1", domain: "food", service_type: "grocery_food", service_name: "Épicerie" },
-            { id: "svc-2", domain: "food", service_type: "bulk_food", service_name: "Vrac" },
-          ]
-        : [{ id: "svc-1", domain: "food", service_type: "grocery_food", service_name: "Épicerie" }];
-
-    case "retail":
-      return [{ id: "svc-1", domain: "general", service_type: "retail_general", service_name: "Boutique" }];
-
-    case "pharmacy":
-      return [{ id: "svc-1", domain: "general", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" }];
-
-    case "hotel_camping":
-      return isMulti
-        ? [
-            { id: "svc-1", domain: "food", service_type: "grocery_food", service_name: "Épicerie" },
-            { id: "svc-2", domain: "food", service_type: "bar", service_name: "Bar" },
-            { id: "svc-3", domain: "food", service_type: "kitchen", service_name: "Restauration" },
-            { id: "svc-4", domain: "general", service_type: "retail_general", service_name: "Boutique" },
-          ]
-        : [{ id: "svc-1", domain: "food", service_type: "grocery_food", service_name: "Épicerie" }];
-
-    default:
-      return [{ id: "svc-1", domain: "general", service_type: "other", service_name: "Principal" }];
+  if (!isMulti) {
+    return [{ id: "svc-1", ...primary }];
   }
+
+  if (family === "restauration") {
+    if (linkedMode === "merge") {
+      return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
+    }
+    return [
+      { id: "svc-1", service_type: "kitchen", service_name: "Cuisine" },
+      { id: "svc-2", service_type: "restaurant_dining", service_name: "Salle" },
+    ];
+  }
+
+  if (family === "boulangerie") {
+    if (linkedMode === "merge") {
+      return [{ id: "svc-1", service_type: "bakery", service_name: "Boulangerie & Pâtisserie" }];
+    }
+    return [
+      { id: "svc-1", service_type: "bakery", service_name: "Boulangerie" },
+      { id: "svc-2", service_type: "bakery", service_name: "Pâtisserie" },
+    ];
+  }
+
+  if (family === "pharmacie") {
+    if (linkedMode === "merge") {
+      return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
+    }
+    return [
+      { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
+      { id: "svc-2", service_type: "pharmacy_parapharmacy", service_name: "Parapharmacie" },
+    ];
+  }
+
+  return [
+    { id: "svc-1", ...primary },
+    { id: "svc-2", service_type: primary.service_type, service_name: "Secondaire" },
+  ];
 };
+
+const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
+  <div className="border border-slate-800 rounded-2xl p-3 flex items-start gap-3 bg-slate-900">
+    <button
+      type="button"
+      className={`w-10 h-10 rounded-full border ${active ? "bg-blue-500 border-blue-400" : "border-white/20"} flex items-center justify-center text-white`}
+      onClick={() => onToggle(moduleId)}
+    >
+      {active ? "✓" : "+"}
+    </button>
+    <div>
+      <div className="font-semibold text-white">{name}</div>
+      <div className="text-sm text-slate-400">{description}</div>
+    </div>
+  </div>
+);
 
 export default function Register() {
   const { register } = useAuth();
   const nav = useNavigate();
-
-  // 0..2
-  const [step, setStep] = useState(0);
-
-  // Step 0: activity + mode
-  const [businessType, setBusinessType] = useState("");
-  const [multiMode, setMultiMode] = useState("single"); // single | multi
-
-  // Step 1: services
-  const [services, setServices] = useState([]);
-
-  // Step 2: account
-  const [tenantName, setTenantName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [password2, setPassword2] = useState("");
-  const [accept, setAccept] = useState(false);
-
-  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    storeName: "",
+    email: "",
+    password: "",
+    passwordConfirm: "",
+  });
+  const [familyId, setFamilyId] = useState(FAMILLES[0].id);
+  const [isGroundedMulti, setIsGroundedMulti] = useState(false);
+  const [linkedMode, setLinkedMode] = useState("separate");
+  const [step, setStep] = useState(1);
+  const [modules, setModules] = useState(DEFAULT_MODULES[familyId] || []);
+  const [serviceList, setServiceList] = useState(() => servicePresets(familyId, false));
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const isMulti = multiMode === "multi";
+  const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
+  const linkedFamilies = new Set(["restauration", "boulangerie", "pharmacie"]);
 
-  const mainDomain = useMemo(
-    () => (services?.some((s) => s.domain === "food") ? "food" : "general"),
-    [services]
+  const moduleListForFamily = useMemo(
+    () => MODULES.filter((module) => module.families.includes(familyId)),
+    [familyId]
   );
 
-  const chosenBusiness = useMemo(
-    () => businessOptions.find((b) => b.value === businessType),
-    [businessType]
-  );
-
-  const applyPreset = (type, mode) => {
-    const list = presets(type || "other", mode === "multi");
-    setServices(list);
+  const handleFamilyChange = (id) => {
+    setFamilyId(id);
+    setModules(DEFAULT_MODULES[id] || []);
+    setIsGroundedMulti(false);
+    setLinkedMode("separate");
+    setServiceList(servicePresets(id, false));
   };
 
-  const updateService = (idx, field, value) => {
-    setServices((prev) => {
-      const next = [...prev];
-      const cur = { ...next[idx], [field]: value };
-      if (field === "domain") {
-        cur.service_type = serviceTypeOptions[value]?.[0]?.value || "other";
-      }
-      next[idx] = cur;
-      return next;
-    });
+  const handleToggleModule = (id) => {
+    setModules((prev) =>
+      prev.includes(id) ? prev.filter((module) => module !== id) : [...prev, id]
+    );
   };
 
-  const addService = () => {
-    const nextId = `svc-${services.length + 1}`;
-    setServices((prev) => [
-      ...prev,
-      { id: nextId, domain: "food", service_type: "grocery_food", service_name: "" },
-    ]);
+  const handleServiceNameChange = (idx, value) => {
+    setServiceList((prev) => prev.map((svc, index) => (index === idx ? { ...svc, service_name: value } : svc)));
   };
 
-  const removeService = (idx) => {
-    if (idx === 0) return;
-    setServices((prev) => prev.filter((_, i) => i !== idx));
+  const nextStep = () => {
+    if (step < 3) setStep(step + 1);
   };
 
-  const validateStep = (s = step) => {
-    if (s === 0) {
-      if (!businessType) return "Choisis ton activité pour préconfigurer l’expérience.";
-      return "";
-    }
-
-    if (s === 1) {
-      if (!services?.length) return "On n’a pas pu préparer tes services. Reviens à l’étape précédente.";
-      const missingName = services.some((svc) => !svc.service_name?.trim());
-      if (missingName) return "Renseigne le nom de chaque service.";
-      return "";
-    }
-
-    if (s === 2) {
-      if (!tenantName?.trim() || !email?.trim() || !password) return "Complète commerce, email et mot de passe.";
-      if (password.length < 8) return "Mot de passe : minimum 8 caractères.";
-      if (password !== password2) return "Les mots de passe ne correspondent pas.";
-      if (!accept) return "Merci d’accepter les CGU.";
-      return "";
-    }
-
-    return "";
+  const prevStep = () => {
+    if (step > 1) setStep(step - 1);
   };
 
-  const next = () => {
-    const msg = validateStep(step);
-    if (msg) {
-      setError(msg);
-      return;
-    }
-    setError("");
-
-    if (step === 0) {
-      // on prépare les services automatiquement avant d’arriver à l’étape 1
-      applyPreset(businessType, multiMode);
-    }
-
-    if (step < 2) setStep((v) => v + 1);
-  };
-
-  const back = () => setStep((v) => Math.max(0, v - 1));
-
-  const submit = async (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
-    const msg = validateStep(2);
-    if (msg) {
-      setError(msg);
+    setError("");
+    if (!form.storeName || !form.email || !form.password || form.password !== form.passwordConfirm) {
+      setError("Il manque un champ ou les mots de passe ne correspondent pas.");
       return;
     }
-    setError("");
     setLoading(true);
-
     try {
-      const main = services[0];
-      const extras = isMulti ? services.slice(1).filter((s) => s.service_name?.trim()) : [];
-
-      const slugify = (value) =>
-        (value || "")
-          .toLowerCase()
-          .normalize("NFKD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "");
-      const username = slugify(tenantName) || slugify(email.split("@")[0]) || "stockscan-user";
-
+      const [primaryService, ...extraServices] = serviceList;
+      const businessTypeByFamily = {
+        retail: "grocery",
+        mode: "retail",
+        bar: "bar",
+        restauration: "restaurant",
+        boulangerie: "other",
+        pharmacie: "pharmacy",
+      };
+      const domainByFamily = {
+        retail: "food",
+        bar: "food",
+        restauration: "food",
+        boulangerie: "food",
+        mode: "general",
+        pharmacie: "general",
+      };
       await register({
-        username,
-        tenant_name: tenantName.trim(),
-        email: email.trim(),
-        password,
-        password_confirm: password,
-        domain: mainDomain,
-        business_type: businessType || "other",
-        service_type: main?.service_type,
-        service_name: main?.service_name,
-        extra_services: extras.map((s) => ({
-          name: s.service_name,
-          service_type: s.service_type,
-          domain: s.domain,
+        password: form.password,
+        email: form.email,
+        tenant_name: form.storeName,
+        domain: domainByFamily[familyId] || "food",
+        business_type: businessTypeByFamily[familyId] || "other",
+        service_type: primaryService?.service_type || "other",
+        service_name: primaryService?.service_name || "Principal",
+        extra_services: extraServices.map((svc) => ({
+          service_type: svc.service_type || "other",
+          name: svc.service_name || "Secondaire",
         })),
       });
-
-      nav("/app/dashboard", { replace: true });
+      nav("/app/dashboard");
     } catch (err) {
-      setError(err?.message || "Création impossible. Vérifie les champs.");
+      setError(err?.message || "Impossible de créer le compte pour le moment.");
     } finally {
       setLoading(false);
     }
   };
 
-  const StepHeader = () => (
-    <div className="flex items-start justify-between gap-3">
-      <div>
-        <div className="text-sm uppercase tracking-[0.2em] text-white/60">Inscription</div>
-        <h1 className="text-3xl font-black leading-tight">Créer mon espace</h1>
-        <p className="text-white/70 mt-1">
-          Parcours rapide, configuré selon ton métier.
-        </p>
-      </div>
-      <div className="text-sm text-white/70 bg-white/10 rounded-full px-3 py-1">
-        Étape {step + 1} / 3
-      </div>
-    </div>
-  );
-
-  const SummaryBar = () => (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 flex flex-wrap gap-2 items-center justify-between">
-      <div className="text-sm text-white/80">
-        <span className="text-white/60">Activité :</span>{" "}
-        <span className="font-semibold">{chosenBusiness?.label || "—"}</span>
-        <span className="text-white/30"> · </span>
-        <span className="text-white/60">Mode :</span>{" "}
-        <span className="font-semibold">{isMulti ? "Multi-services" : "Un seul service"}</span>
-        <span className="text-white/30"> · </span>
-        <span className="text-white/60">Services :</span>{" "}
-        <span className="font-semibold">{services?.length || 0}</span>
-      </div>
-
-      {step >= 1 ? (
-        <div className="text-xs text-white/60">
-          Service principal : <span className="text-white/80 font-semibold">{services?.[0]?.service_name || "—"}</span>
-        </div>
-      ) : null}
-    </div>
-  );
-
-  const renderStep0 = () => (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="text-xl font-bold">Votre activité</h2>
-        <p className="text-white/70 text-sm">
-          On préconfigure les champs (DLC, prix, entamés, lots…) selon ton métier.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {businessOptions.map((opt) => {
-          const active = businessType === opt.value;
-          return (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setBusinessType(opt.value)}
-              className={[
-                "rounded-2xl border px-4 py-3 text-left transition",
-                active ? "bg-white text-slate-900 border-white" : "bg-white/5 border-white/20 text-white hover:bg-white/10",
-              ].join(" ")}
-            >
-              <div className="font-semibold">{opt.label}</div>
-              <div className={`text-xs mt-1 ${active ? "text-slate-600" : "text-white/70"}`}>{opt.hint}</div>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="pt-2 space-y-2">
-        <h3 className="text-lg font-bold">Organisation</h3>
-        <p className="text-white/70 text-sm">
-          Un service = une zone d’inventaire (ex : Salle, Cuisine, Bar, Boutique…).
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => setMultiMode("single")}
-            className={[
-              "rounded-2xl border px-4 py-3 text-left transition",
-              multiMode === "single"
-                ? "bg-white text-slate-900 border-white"
-                : "bg-white/5 border-white/20 text-white hover:bg-white/10",
-            ].join(" ")}
-          >
-            <div className="font-semibold">Un seul service</div>
-            <div className={`text-xs mt-1 ${multiMode === "single" ? "text-slate-600" : "text-white/70"}`}>
-              Idéal si tu as une seule zone (ex : boutique seule, bar seul).
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMultiMode("multi")}
-            className={[
-              "rounded-2xl border px-4 py-3 text-left transition",
-              multiMode === "multi"
-                ? "bg-white text-slate-900 border-white"
-                : "bg-white/5 border-white/20 text-white hover:bg-white/10",
-            ].join(" ")}
-          >
-            <div className="font-semibold">Multi-services</div>
-            <div className={`text-xs mt-1 ${multiMode === "multi" ? "text-slate-600" : "text-white/70"}`}>
-              Camping/hôtel : Bar + Cuisine + Épicerie + Boutique, chacun son inventaire.
-            </div>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep1 = () => (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h2 className="text-xl font-bold">Vos services</h2>
-        <p className="text-white/70 text-sm">
-          Le service principal est utilisé par défaut. Tu peux renommer et ajuster le type.
-        </p>
-      </div>
-
-      <div className="space-y-4">
-        {services.map((svc, idx) => {
-          const typeOpts = serviceTypeOptions[svc.domain] || serviceTypeOptions.food;
-          const placeholder = svc.domain === "food" ? "Ex. Cuisine, Bar, Épicerie" : "Ex. Boutique, Téléphonie";
-
-          return (
-            <div key={svc.id} className="rounded-2xl border border-white/10 bg-white/5 p-3 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold text-white/80">
-                  {idx === 0 ? "Service principal" : `Service ${idx + 1}`}
-                </div>
-                {idx > 0 && (
-                  <button
-                    type="button"
-                    className="text-xs text-white/60 hover:text-white underline"
-                    onClick={() => removeService(idx)}
-                  >
-                    Supprimer
-                  </button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label className="space-y-1 block">
-                  <span className="text-sm font-medium text-white/90">Domaine</span>
-                  <select
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 text-white px-3 py-2.5"
-                    value={svc.domain}
-                    onChange={(e) => updateService(idx, "domain", e.target.value)}
-                  >
-                    {domainOptions.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="space-y-1 block">
-                  <span className="text-sm font-medium text-white/90">Type</span>
-                  <select
-                    className="w-full rounded-2xl border border-white/20 bg-white/10 text-white px-3 py-2.5"
-                    value={svc.service_type}
-                    onChange={(e) => updateService(idx, "service_type", e.target.value)}
-                  >
-                    {typeOpts.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <Input
-                label="Nom du service"
-                placeholder={placeholder}
-                value={svc.service_name}
-                onChange={(e) => updateService(idx, "service_name", e.target.value)}
-                required
-              />
-            </div>
-          );
-        })}
-
-        {isMulti ? (
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={addService}>
-              Ajouter un service
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => applyPreset(businessType, multiMode)}
-            >
-              Recharger preset
-            </Button>
-          </div>
-        ) : (
-          <div className="flex">
-            <Button type="button" variant="ghost" onClick={() => applyPreset(businessType, multiMode)}>
-              Recharger preset
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderStep2 = () => (
-    <div className="space-y-4">
-      <div className="space-y-2">
-        <h2 className="text-xl font-bold">Compte & accès</h2>
-        <p className="text-white/70 text-sm">Ton espace est sauvegardé et synchronisé. Tu pourras inviter des membres ensuite.</p>
-      </div>
-
-      <Input
-        label={isMulti ? "Nom de l’établissement" : "Nom du commerce"}
-        placeholder={isMulti ? "Ex. Camping de la Plage" : "Ex. Boutique Avenue"}
-        value={tenantName}
-        onChange={(e) => setTenantName(e.target.value)}
-        required
-      />
-
-      <Input
-        label="Email"
-        type="email"
-        placeholder="vous@exemple.fr"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-      />
-
-      <Input
-        label="Mot de passe"
-        type="password"
-        placeholder="Minimum 8 caractères"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        required
-        helper="Astuce : 1 majuscule + 1 chiffre = plus sûr."
-      />
-
-      <Input
-        label="Confirmer le mot de passe"
-        type="password"
-        placeholder="Retape le mot de passe"
-        value={password2}
-        onChange={(e) => setPassword2(e.target.value)}
-        required
-      />
-
-      <label className="flex items-start gap-2 text-sm text-white/80">
-        <input
-          type="checkbox"
-          className="mt-1 accent-blue-500"
-          checked={accept}
-          onChange={(e) => setAccept(e.target.checked)}
-        />
-        <span>
-          J’ai lu et j’accepte les <Link to="/terms" className="underline">CGU</Link>.
-        </span>
-      </label>
-
-      <Button type="submit" loading={loading} className="w-full justify-center">
-        Créer mon espace
-      </Button>
-
-      <div className="text-sm text-white/70">
-        Déjà un compte ? <Link to="/login" className="underline">Se connecter</Link>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center py-10 px-4">
       <Helmet>
-        <title>Créer mon compte | StockScan</title>
-        <meta name="description" content="Créez un espace StockScan adapté à votre métier et vos services." />
+        <title>Créer mon espace | StockScan</title>
       </Helmet>
 
-      <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-blue-600 blur-[120px] opacity-40" />
-      <div className="absolute -bottom-24 right-0 h-72 w-72 rounded-full bg-cyan-400 blur-[120px] opacity-30" />
+      <h1 className="text-3xl font-black mb-2 text-center">Créer mon espace</h1>
+      <p className="text-center text-slate-400 max-w-xl">
+        Choisis ta famille métier, active les modules qui te parlent, et réserve les champs
+        interprétés pour ton aventure StockScan.
+      </p>
 
-      <Card className="w-full max-w-3xl bg-white/5 border-white/10 text-white glass">
-        <div className="p-6 space-y-6">
-          <StepHeader />
+      <div className="w-full max-w-4xl mt-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-6">
+        <Card className="bg-slate-900 border border-slate-800 p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm uppercase tracking-widest text-slate-500">Étape {step}/3</span>
+            <Button variant="secondary" size="sm" onClick={prevStep} disabled={step === 1}>
+              Précédent
+            </Button>
+          </div>
 
-          {/* Summary */}
-          <SummaryBar />
-
-          {error && (
-            <div className="rounded-2xl bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-100">
-              {error}
-            </div>
+          {step === 1 && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Famille métier</h2>
+                <p className="text-sm text-slate-400">{familyMeta.copy.subline}</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {FAMILLES.map((family) => (
+                  <button
+                    key={family.id}
+                    type="button"
+                    onClick={() => handleFamilyChange(family.id)}
+                    className={`border rounded-2xl p-4 text-left transition ${
+                      family.id === familyId
+                        ? "border-blue-500 bg-slate-900 shadow-[0_0_30px_rgba(15,118,255,0.25)]"
+                        : "border-white/10 hover:border-white/30"
+                    }`}
+                  >
+                    <div className="font-semibold text-white">{family.name}</div>
+                    <div className="text-sm text-slate-400">{family.copy.headline}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="text-sm text-slate-300">
+                  Multi-services ?
+                </label>
+                <Button
+                  variant={isGroundedMulti ? "secondary" : "outline"}
+                  size="sm"
+                  onClick={() => {
+                    const nextIsMulti = !isGroundedMulti;
+                    setIsGroundedMulti(nextIsMulti);
+                    setServiceList(servicePresets(familyId, nextIsMulti, linkedMode));
+                  }}
+                >
+                  {isGroundedMulti ? "Multi activé" : "Mono (par défaut)"}
+                </Button>
+              </div>
+              {linkedFamilies.has(familyId) && isGroundedMulti && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-slate-300">Regrouper ou séparer ?</label>
+                  <select
+                    value={linkedMode}
+                    onChange={(event) => {
+                      setLinkedMode(event.target.value);
+                      setServiceList(servicePresets(familyId, true, event.target.value));
+                    }}
+                    className="rounded-full bg-slate-900 border border-white/10 px-3 py-1 text-sm"
+                  >
+                    <option value="separate">Séparer (ex : Cuisine vs Salle)</option>
+                    <option value="merge">Regrouper (ex : Restaurant & Cuisine)</option>
+                  </select>
+                </div>
+              )}
+            </section>
           )}
 
-          <form onSubmit={submit} className="space-y-4">
-            {step === 0 ? renderStep0() : step === 1 ? renderStep1() : renderStep2()}
-
-            <div className="flex items-center justify-between gap-3 pt-2">
-              <Button type="button" variant="ghost" onClick={back} disabled={step === 0}>
-                Retour
+          {step === 2 && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Services</h2>
+                <p className="text-sm text-slate-400">
+                  Personnalise chaque service, modifie le nom ou ajoute un service à la main.
+                </p>
+              </div>
+              <div className="space-y-3">
+                {serviceList.map((service, index) => (
+                  <Input
+                    key={service.id}
+                    label={`Service ${index + 1}`}
+                    value={service.service_name}
+                    placeholder={`${familyMeta.defaults.categoryLabel || "Service"} ${index + 1}`}
+                    onChange={(event) => handleServiceNameChange(index, event.target.value)}
+                  />
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  setServiceList((prev) => [
+                    ...prev,
+                    { id: `svc-${Date.now()}`, service_type: "other", service_name: "Nouveau service" },
+                  ])
+                }
+              >
+                Ajouter un service
               </Button>
+            </section>
+          )}
 
-              {step < 2 ? (
-                <Button type="button" onClick={next} variant="primary">
-                  Continuer
+          {step === 3 && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Compte & accès</h2>
+                <p className="text-sm text-slate-400">
+                  Crée ton espace {familyMeta.name.toLowerCase()} et débloque les modules recommandés.
+                </p>
+              </div>
+              <form onSubmit={handleRegister} className="space-y-3">
+                <Input
+                  label="Nom du commerce"
+                  placeholder={familyMeta.copy.headline}
+                  value={form.storeName}
+                  onChange={(event) => setForm({ ...form, storeName: event.target.value })}
+                />
+                <Input
+                  label="Email professionnel"
+                  placeholder={`contact@${familyMeta.name.toLowerCase().replace(/\s+/g, "")}.com`}
+                  type="email"
+                  value={form.email}
+                  onChange={(event) => setForm({ ...form, email: event.target.value })}
+                />
+                <Input
+                  label="Mot de passe"
+                  type="password"
+                  value={form.password}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                />
+                <Input
+                  label="Confirme le mot de passe"
+                  type="password"
+                  value={form.passwordConfirm}
+                  onChange={(event) => setForm({ ...form, passwordConfirm: event.target.value })}
+                />
+                {error && (
+                  <div className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100">
+                    {error}
+                  </div>
+                )}
+                <Button type="submit" className="w-full" loading={loading}>
+                  Créer mon espace personnalisé
                 </Button>
-              ) : null}
+              </form>
+            </section>
+          )}
+
+          <div className="flex items-center justify-between mt-3">
+            <Button variant="secondary" onClick={nextStep} disabled={step === 3}>
+              {step === 3 ? "Réviser" : "Étape suivante"}
+            </Button>
+            <div>
+              {step > 1 && (
+                <Button variant="ghost" size="sm" onClick={prevStep}>
+                  ← Revenir
+                </Button>
+              )}
             </div>
-          </form>
-        </div>
-      </Card>
+          </div>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-6 space-y-5">
+          <div>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-500">
+              Configuration métier
+            </span>
+            <h2 className="text-2xl font-black mt-1">{familyMeta.name}</h2>
+            <p className="text-slate-300">{familyMeta.copy.headline}</p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="text-sm text-slate-400">Modules recommandés</div>
+            {moduleListForFamily.map((module) => (
+              <ModuleToggle
+                key={module.id}
+                moduleId={module.id}
+                name={module.name}
+                description={module.description}
+                active={modules.includes(module.id)}
+                onToggle={handleToggleModule}
+              />
+            ))}
+          </div>
+
+          <div className="text-sm text-slate-500">
+            <p>Personnalise les champs disponibles et garde une expérience cible “famille métier”.</p>
+            <p className="mt-2">
+              Besoin de changer la famille ou de réactiver le guide ? Tu peux revenir en arrière sans perdre ton avance.
+            </p>
+          </div>
+
+          <div className="border border-dashed border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-300 bg-slate-900/40">
+            <p>Copy system activé :</p>
+            <p className="text-xs text-slate-500">
+              {modules.length === 0 ? "Active un module pour voir les champs visibles." : modules.join(", ")}
+            </p>
+          </div>
+
+          <Link to="/login" className="text-sm text-blue-400">
+            Déjà un compte ? Connecte-toi →
+          </Link>
+        </Card>
+      </div>
     </div>
   );
 }

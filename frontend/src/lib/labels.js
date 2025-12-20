@@ -17,9 +17,9 @@ export function getWording(serviceType, domain) {
 
     case "retail_general":
       return {
-        itemLabel: "Article",
-        itemPlural: "Articles",
-        categoryLabel: "Catégorie",
+        itemLabel: "Article mode",
+        itemPlural: "Articles mode",
+        categoryLabel: "Collection",
         skuLabel: "SKU / Réf.",
         barcodeLabel: "Code-barres (optionnel)",
       };
@@ -28,7 +28,7 @@ export function getWording(serviceType, domain) {
       return {
         itemLabel: "Référence bar",
         itemPlural: "Références bar",
-        categoryLabel: "Famille (bar)",
+        categoryLabel: "Famille",
         skuLabel: "SKU bar",
         barcodeLabel: "Code-barres (optionnel)",
       };
@@ -37,7 +37,7 @@ export function getWording(serviceType, domain) {
       return {
         itemLabel: "Produit cuisine",
         itemPlural: "Produits cuisine",
-        categoryLabel: "Famille",
+        categoryLabel: "Poste",
         skuLabel: "SKU interne",
         barcodeLabel: "Code-barres (optionnel)",
       };
@@ -46,7 +46,7 @@ export function getWording(serviceType, domain) {
       return {
         itemLabel: "Produit boulangerie",
         itemPlural: "Produits boulangerie",
-        categoryLabel: "Famille (boulangerie)",
+        categoryLabel: "Fournée",
         skuLabel: "SKU boulangerie",
         barcodeLabel: "Code-barres (optionnel)",
       };
@@ -55,7 +55,7 @@ export function getWording(serviceType, domain) {
       return {
         itemLabel: "Produit",
         itemPlural: "Produits",
-        categoryLabel: "Catégorie",
+        categoryLabel: "Rayon",
         skuLabel: "SKU interne",
         barcodeLabel: "Code-barres",
       };
@@ -64,7 +64,7 @@ export function getWording(serviceType, domain) {
       return {
         itemLabel: "Produit vrac",
         itemPlural: "Produits vrac",
-        categoryLabel: "Catégorie",
+        categoryLabel: "Rayon",
         skuLabel: "SKU vrac",
         barcodeLabel: "Code-barres (optionnel)",
       };
@@ -100,9 +100,11 @@ export function getUxCopy(serviceType, domain) {
     case "pharmacy_parapharmacy":
       return {
         // Titles / intros
-        productsTitle: "Gestion des produits santé",
+        productsTitle: "Catalogue santé",
         productsIntro:
-          "Ajoutez vos produits avec CIP/Code-barres ou code interne. Stock mensuel clair, fiable et exportable.",
+          "Votre référentiel produits santé : CIP/Code-barres ou code interne, sans quantités.",
+        catalogueNote:
+          "Catalogue = référentiel. Les quantités, pertes et péremptions se font dans Inventaire.",
         inventoryTitle: "Inventaire pharmacie / parapharmacie",
         inventoryIntro:
           "Saisie rapide par CIP, suivi mensuel, export pour contrôle et pilotage.",
@@ -130,9 +132,11 @@ export function getUxCopy(serviceType, domain) {
 
     case "bar":
       return {
-        productsTitle: "Gestion des références bar",
+        productsTitle: "Catalogue bar",
         productsIntro:
-          "Ajoutez rapidement vos bouteilles, fûts et boissons. Suivi simple et exploitable.",
+          "Référentiel bar : bouteilles, fûts, softs. Aucun stock ici.",
+        catalogueNote:
+          "Catalogue = base des références. Le comptage se fait dans Inventaire.",
         inventoryTitle: "Inventaire bar",
         inventoryIntro:
           "Pensé pour les bouteilles et références : rapide, clair et exploitable.",
@@ -157,9 +161,11 @@ export function getUxCopy(serviceType, domain) {
 
     case "bakery":
       return {
-        productsTitle: "Gestion des produits boulangerie",
+        productsTitle: "Catalogue boulangerie",
         productsIntro:
-          "Ajoutez pains, viennoiseries, pâtisseries et ingrédients. DLC utile pour les produits sensibles.",
+          "Référentiel pains, viennoiseries, ingrédients. Aucun stock ici.",
+        catalogueNote:
+          "Catalogue = base des produits. Les quantités et pertes sont gérées dans Inventaire.",
         inventoryTitle: "Inventaire boulangerie",
         inventoryIntro:
           "Produits, ingrédients et stocks du mois. Objectif : rapidité + fiabilité.",
@@ -184,9 +190,11 @@ export function getUxCopy(serviceType, domain) {
 
     case "kitchen":
       return {
-        productsTitle: "Gestion des produits cuisine",
+        productsTitle: "Catalogue cuisine",
         productsIntro:
-          "Ajoutez vos matières premières. Pensé pour un inventaire rapide : quantités, unités, DLC si besoin.",
+          "Référentiel matières premières et préparations. Sans quantités.",
+        catalogueNote:
+          "Catalogue = liste de base. Le comptage mensuel est dans Inventaire.",
         inventoryTitle: "Inventaire cuisine",
         inventoryIntro:
           "Matières premières suivies au mois. Rapide, simple, sans friction.",
@@ -211,9 +219,11 @@ export function getUxCopy(serviceType, domain) {
     case "bulk_food":
       return {
         productsTitle:
-          serviceType === "bulk_food" ? "Gestion des produits vrac" : "Gestion des produits alimentaires",
+          serviceType === "bulk_food" ? "Catalogue vrac" : "Catalogue alimentaire",
         productsIntro:
-          "Ajoutez vos produits avec scan si possible. DLC recommandée pour limiter les pertes et garder un inventaire fiable.",
+          "Référentiel alimentaire : scan si possible, sans stock ici.",
+        catalogueNote:
+          "Catalogue = référentiel. Inventaire gère les quantités, pertes et DLC.",
         inventoryTitle:
           serviceType === "bulk_food" ? "Inventaire vrac" : "Inventaire alimentaire",
         inventoryIntro:
@@ -242,37 +252,41 @@ export function getUxCopy(serviceType, domain) {
 
     case "retail_general":
       return {
-        productsTitle: "Gestion des articles boutique",
+        productsTitle: "Catalogue mode & accessoires",
         productsIntro:
-          "Ajoutez vos articles avec SKU / référence. Code-barres optionnel selon vos besoins.",
-        inventoryTitle: "Inventaire boutique",
+          "Référentiel mode : SKU, collections, variantes. Pas de stock ici.",
+        catalogueNote:
+          "Catalogue = fiches articles. Le comptage et les pertes sont dans Inventaire.",
+        inventoryTitle: "Inventaire mode",
         inventoryIntro:
-          "Suivi mensuel simple : SKU, catégories et quantités. Scan optionnel.",
+          "Suivi mensuel propre : SKU, collections et quantités. Scan optionnel.",
 
         quickAddTitle: "Ajout rapide",
         scanButton: "Chercher / préremplir",
         scanHint:
-          "Pour une boutique, le SKU est votre identifiant principal. Le code-barres peut rester optionnel.",
-        searchHint: "Nom, code-barres ou SKU",
+          "Le SKU reste votre identifiant principal. Le code-barres peut rester optionnel.",
+        searchHint: "Nom, SKU ou code-barres",
 
-        emptyProducts: "Aucun article boutique pour ce mois sur ce service.",
+        emptyProducts: "Aucune pièce enregistrée pour ce mois sur ce service.",
         emptyInventoryTitle: "Inventaire vide",
         emptyInventoryText:
-          "Ajoutez un article pour ce mois. SKU recommandé pour éviter les doublons.",
+          "Ajoutez une pièce pour ce mois. SKU recommandé pour éviter les doublons.",
 
         barcodeHelper:
           "Optionnel : utile si vous scannez à la réception ou en caisse.",
         skuHelper:
-          "Recommandé : SKU = base stable pour gérer vos articles.",
-        categoryHelper: "Ex. Vêtements, Accessoires, Bijoux…",
+          "Recommandé : SKU = base stable pour gérer vos collections.",
+        categoryHelper: "Ex. Collection été, Accessoires, Bijoux…",
       };
 
     default:
       if (isGeneral) {
         return {
-          productsTitle: "Gestion des articles",
+          productsTitle: "Catalogue articles",
           productsIntro:
-            "Ajoutez vos articles et suivez votre stock par mois. Scan optionnel, SKU recommandé.",
+            "Référentiel articles sans quantités. SKU recommandé.",
+          catalogueNote:
+            "Catalogue = base articles. Les quantités se saisissent dans Inventaire.",
           inventoryTitle: "Inventaire",
           inventoryIntro:
             "Suivi du mois : articles, quantités, catégories et identifiants.",
@@ -292,9 +306,11 @@ export function getUxCopy(serviceType, domain) {
         };
       }
       return {
-        productsTitle: "Gestion des produits",
+        productsTitle: "Catalogue produits",
         productsIntro:
-          "Ajoutez vos produits et suivez votre stock par mois. Adapté à votre métier et exportable.",
+          "Référentiel produits par métier. Aucun stock ici.",
+        catalogueNote:
+          "Catalogue = base produits. Le comptage se fait dans Inventaire.",
         inventoryTitle: "Inventaire",
         inventoryIntro:
           "Suivi mensuel adapté à votre activité. Simple, rapide, exportable.",
@@ -327,6 +343,9 @@ export function getPlaceholders(serviceType, domain) {
       name: "Ex. Doliprane 1g",
       category: "Ex. Antalgique / Hygiène",
       sku: "Ex. SKU-PHA-001",
+      brand: "Ex. Sanofi",
+      supplier: "Ex. Centrale pharma",
+      notes: "Ex. Nécessite suivi lot",
     };
   }
 
@@ -335,6 +354,9 @@ export function getPlaceholders(serviceType, domain) {
       name: "Ex. Gin 70cl",
       category: "Ex. Spiritueux / Bières",
       sku: "Ex. SKU-BAR-GIN-001",
+      brand: "Ex. Distillerie X",
+      supplier: "Ex. Grossiste boissons",
+      notes: "Ex. Rotation lente",
     };
   }
 
@@ -343,6 +365,9 @@ export function getPlaceholders(serviceType, domain) {
       name: "Ex. Farine T55 25kg",
       category: "Ex. Ingrédients / Viennoiseries",
       sku: "Ex. SKU-BAK-001",
+      brand: "Ex. Moulin X",
+      supplier: "Ex. Fournisseur farine",
+      notes: "Ex. Allergènes: gluten",
     };
   }
 
@@ -351,22 +376,31 @@ export function getPlaceholders(serviceType, domain) {
       name: "Ex. Filet de poulet",
       category: "Ex. Viandes / Légumes",
       sku: "Ex. SKU-KIT-001",
+      brand: "Ex. Maison",
+      supplier: "Ex. Marché local",
+      notes: "Ex. Prépa maison",
     };
   }
 
   if (serviceType === "grocery_food" || serviceType === "bulk_food") {
     return {
       name: "Ex. Coca 33cl",
-      category: serviceType === "bulk_food" ? "Ex. Vrac / Épicerie" : "Ex. Boissons / Frais",
+      category: serviceType === "bulk_food" ? "Ex. Rayon vrac" : "Ex. Rayon frais",
       sku: serviceType === "bulk_food" ? "Ex. SKU-VRAC-001" : "Ex. SKU-FOOD-001",
+      brand: "Ex. Marque X",
+      supplier: "Ex. Centrale / grossiste",
+      notes: "Ex. Produit saisonnier",
     };
   }
 
   if (serviceType === "retail_general" || isGeneral) {
     return {
       name: "Ex. T-shirt coton",
-      category: "Ex. Vêtements / Bijoux",
+      category: "Ex. Collection été / Accessoires",
       sku: "Ex. SKU-TSH-001",
+      brand: "Ex. Atelier X",
+      supplier: "Ex. Grossiste mode",
+      notes: "Ex. Série limitée",
     };
   }
 
@@ -374,6 +408,9 @@ export function getPlaceholders(serviceType, domain) {
     name: "Ex. Produit A",
     category: "Ex. Catégorie A",
     sku: "Ex. SKU-001",
+    brand: "Ex. Marque A",
+    supplier: "Ex. Fournisseur A",
+    notes: "Ex. Infos internes",
   };
 }
 

@@ -7,6 +7,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.chart import BarChart, Reference
 from datetime import datetime
 import logging
 import csv
@@ -433,6 +434,8 @@ def export_advanced(request):
     include_tva = data.get('include_tva', data.get('includeTVA', True))
     include_dlc = data.get('include_dlc', data.get('includeDLC', True))
     include_sku = data.get('include_sku', data.get('includeSKU', True))
+    include_summary = data.get('include_summary', data.get('includeSummary', True))
+    include_charts = data.get('include_charts', data.get('includeCharts', False))
     export_format = data.get('format', data.get('exportFormat', 'xlsx'))
 
     qs = Product.objects.filter(tenant=tenant)
@@ -538,6 +541,67 @@ def export_advanced(request):
             cell.value = val
             cell.alignment = Alignment(horizontal='center', vertical='center')
             cell.border = thin_border
+
+    if include_summary or include_charts:
+        summary = wb.create_sheet("Synthèse")
+        summary["A1"] = "Synthèse export"
+        summary["A1"].font = Font(bold=True, size=14)
+
+        products_list = list(qs)
+        total_products = len(products_list)
+        total_qty = sum(float(p.quantity or 0) for p in products_list)
+        total_purchase = sum(float(p.purchase_price or 0) * float(p.quantity or 0) for p in products_list)
+        total_selling = sum(float(p.selling_price or 0) * float(p.quantity or 0) for p in products_list)
+        dlc_count = sum(1 for p in products_list if p.dlc)
+
+        info_rows = [
+            ("Produits", total_products),
+            ("Quantité totale", total_qty),
+            ("Valeur stock achat (€)", total_purchase),
+            ("Valeur stock vente (€)", total_selling),
+        ]
+        if include_dlc:
+            info_rows.append(("Produits avec DLC/DDM", dlc_count))
+
+        row_cursor = 3
+        for label, value in info_rows:
+            summary.cell(row=row_cursor, column=1, value=label).font = Font(bold=True)
+            summary.cell(row=row_cursor, column=2, value=value)
+            row_cursor += 1
+
+        row_cursor += 1
+        summary.cell(row=row_cursor, column=1, value="Par catégorie").font = Font(bold=True)
+        row_cursor += 1
+        headers_summary = ["Catégorie", "Quantité", "Valeur achat (€)", "Valeur vente (€)"]
+        for col_num, header in enumerate(headers_summary, 1):
+            summary.cell(row=row_cursor, column=col_num, value=header).font = Font(bold=True)
+        row_cursor += 1
+
+        category_totals = {}
+        for p in products_list:
+            cat = p.category or "Sans catégorie"
+            category_totals.setdefault(cat, {"qty": 0, "purchase": 0, "selling": 0})
+            category_totals[cat]["qty"] += float(p.quantity or 0)
+            category_totals[cat]["purchase"] += float(p.purchase_price or 0) * float(p.quantity or 0)
+            category_totals[cat]["selling"] += float(p.selling_price or 0) * float(p.quantity or 0)
+
+        start_category_row = row_cursor
+        for cat, totals in sorted(category_totals.items()):
+            summary.cell(row=row_cursor, column=1, value=cat)
+            summary.cell(row=row_cursor, column=2, value=totals["qty"])
+            summary.cell(row=row_cursor, column=3, value=totals["purchase"])
+            summary.cell(row=row_cursor, column=4, value=totals["selling"])
+            row_cursor += 1
+
+        if include_charts and category_totals:
+            chart = BarChart()
+            chart.title = "Valeur stock achat par catégorie"
+            chart.y_axis.title = "€"
+            data = Reference(summary, min_col=3, min_row=start_category_row - 1, max_row=row_cursor - 1)
+            categories_ref = Reference(summary, min_col=1, min_row=start_category_row, max_row=row_cursor - 1)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(categories_ref)
+            summary.add_chart(chart, "F4")
 
     for col in ws.columns:
         max_length = 0
