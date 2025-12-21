@@ -198,6 +198,9 @@ def inventory_stats(request):
     month = request.query_params.get('month', None)
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
+    features = getattr(service, "features", {}) or {}
+    item_type_cfg = features.get("item_type", {}) or {}
+    item_type_enabled = bool(item_type_cfg.get("enabled", False))
     products = Product.objects.filter(tenant=tenant, service=service)
     if month:
         products = products.filter(inventory_month=month)
@@ -233,6 +236,10 @@ def inventory_stats(request):
         loss_qty = loss_by_product.get(p.id, 0)
         purchase_price = float(p.purchase_price or 0)
         selling_price = float(p.selling_price or 0)
+        is_raw_material = item_type_enabled and p.product_role == "raw_material"
+        selling_value_current = 0
+        if selling_price and not is_raw_material:
+            selling_value_current = selling_price * stock_final
 
         quantity_sold = None
         ca_estime = None
@@ -241,6 +248,8 @@ def inventory_stats(request):
         notes = []
         if purchase_price or selling_price:
             notes.append("Calculs complets limités: stock_initial/entrées/sorties non suivis.")
+        if is_raw_material:
+            notes.append("Matière première: valeur de vente potentielle non comptée.")
 
         by_product.append({
             "name": p.name,
@@ -248,10 +257,11 @@ def inventory_stats(request):
             "unit": p.unit,
             "stock_final": stock_final,
             "losses_qty": loss_qty,
+            "product_role": p.product_role,
             "purchase_price": purchase_price,
             "selling_price": selling_price,
             "purchase_value_current": purchase_price * stock_final if purchase_price else 0,
-            "selling_value_current": selling_price * stock_final if selling_price else 0,
+            "selling_value_current": selling_value_current,
             "quantity_sold_est": quantity_sold,
             "ca_estime": ca_estime,
             "cout_matiere": cout_matiere,
@@ -266,7 +276,11 @@ def inventory_stats(request):
         cat_products = products.filter(category=cat)
         total_qty = sum(float(p.quantity or 0) for p in cat_products)
         total_purchase_value = sum((float(p.purchase_price or 0) * float(p.quantity or 0)) for p in cat_products)
-        total_selling_value = sum((float(p.selling_price or 0) * float(p.quantity or 0)) for p in cat_products)
+        total_selling_value = 0
+        for p in cat_products:
+            if item_type_enabled and p.product_role == "raw_material":
+                continue
+            total_selling_value += float(p.selling_price or 0) * float(p.quantity or 0)
         cat_losses = sum(loss_by_product.get(p.id, 0) for p in cat_products)
         by_category.append({
             "category": cat,
@@ -278,7 +292,11 @@ def inventory_stats(request):
 
     # Totaux service
     total_purchase_value = sum((float(p.purchase_price or 0) * float(p.quantity or 0)) for p in products)
-    total_selling_value = sum((float(p.selling_price or 0) * float(p.quantity or 0)) for p in products)
+    total_selling_value = 0
+    for p in products:
+        if item_type_enabled and p.product_role == "raw_material":
+            continue
+        total_selling_value += float(p.selling_price or 0) * float(p.quantity or 0)
 
     response = {
         "total_value": total_purchase_value,
@@ -288,7 +306,14 @@ def inventory_stats(request):
             "selling_value": total_selling_value,
             "losses_qty": losses_total_qty,
             "losses_cost": losses_total_cost,
-            "notes": ["Quantité vendue et marge estimée limitées : pas de stock initial/entrées/sorties enregistrés."],
+            "notes": (
+                [
+                    "Quantité vendue et marge estimée limitées : pas de stock initial/entrées/sorties enregistrés.",
+                    "Si le module Matière première / Produit fini est actif, la valeur de vente exclut les matières premières.",
+                ]
+                if item_type_enabled
+                else ["Quantité vendue et marge estimée limitées : pas de stock initial/entrées/sorties enregistrés."]
+            ),
         },
         "by_product": by_product,
         "by_category": by_category,
@@ -437,6 +462,9 @@ def export_advanced(request):
     include_summary = data.get('include_summary', data.get('includeSummary', True))
     include_charts = data.get('include_charts', data.get('includeCharts', False))
     export_format = data.get('format', data.get('exportFormat', 'xlsx'))
+    fields = data.get('fields') or data.get('columns')
+    if isinstance(fields, str):
+        fields = [value.strip() for value in fields.split(',') if value.strip()]
 
     qs = Product.objects.filter(tenant=tenant)
 
@@ -470,37 +498,65 @@ def export_advanced(request):
     if stock_min is not None:
         qs = qs.filter(quantity__gte=stock_min)
 
-    headers = ['Nom', 'Catégorie', 'Prix achat (€)', 'Prix vente (€)']
-    if include_tva:
-        headers.append('TVA (%)')
-    if include_dlc:
-        headers.append('DLC')
-    headers.append('Quantité')
-    if include_sku:
-        headers.append('Code-barres / SKU')
-    headers.append('Mois')
-    headers.append('Service')
+    field_map = {
+        "name": ("Nom", lambda p: p.name or ""),
+        "category": ("Catégorie", lambda p: p.category or ""),
+        "purchase_price": ("Prix achat (€)", lambda p: float(p.purchase_price) if p.purchase_price else 0),
+        "selling_price": ("Prix vente (€)", lambda p: float(p.selling_price) if p.selling_price else 0),
+        "tva": ("TVA (%)", lambda p: float(p.tva) if p.tva else ""),
+        "dlc": ("DLC", lambda p: p.dlc or ""),
+        "quantity": ("Quantité", lambda p: p.quantity or 0),
+        "identifier": ("Code-barres / SKU", lambda p: p.internal_sku if p.no_barcode else (p.barcode or "")),
+        "inventory_month": ("Mois", lambda p: p.inventory_month or ""),
+        "service": ("Service", lambda p: p.service.name if p.service else ""),
+        "unit": ("Unité", lambda p: p.unit or ""),
+        "brand": ("Marque", lambda p: p.brand or ""),
+        "supplier": ("Fournisseur", lambda p: p.supplier or ""),
+        "notes": ("Notes", lambda p: p.notes or ""),
+        "product_role": ("Type produit", lambda p: p.product_role or ""),
+    }
+
+    selected_fields = []
+    if isinstance(fields, list):
+        selected_fields = [field for field in fields if field in field_map]
+
+    if selected_fields:
+        headers = [field_map[field][0] for field in selected_fields]
+    else:
+        headers = ['Nom', 'Catégorie', 'Prix achat (€)', 'Prix vente (€)']
+        if include_tva:
+            headers.append('TVA (%)')
+        if include_dlc:
+            headers.append('DLC')
+        headers.append('Quantité')
+        if include_sku:
+            headers.append('Code-barres / SKU')
+        headers.append('Mois')
+        headers.append('Service')
 
     if export_format == 'csv':
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(headers)
         for p in qs.select_related("service"):
-            row = [
-                p.name,
-                p.category,
-                float(p.purchase_price) if p.purchase_price else 0,
-                float(p.selling_price) if p.selling_price else 0,
-            ]
-            if include_tva:
-                row.append(float(p.tva) if p.tva else '')
-            if include_dlc:
-                row.append(p.dlc or '')
-            row.append(p.quantity or 0)
-            if include_sku:
-                row.append(p.internal_sku if p.no_barcode else p.barcode or '')
-            row.append(p.inventory_month)
-            row.append(p.service.name if p.service else '')
+            if selected_fields:
+                row = [field_map[field][1](p) for field in selected_fields]
+            else:
+                row = [
+                    p.name,
+                    p.category,
+                    float(p.purchase_price) if p.purchase_price else 0,
+                    float(p.selling_price) if p.selling_price else 0,
+                ]
+                if include_tva:
+                    row.append(float(p.tva) if p.tva else '')
+                if include_dlc:
+                    row.append(p.dlc or '')
+                row.append(p.quantity or 0)
+                if include_sku:
+                    row.append(p.internal_sku if p.no_barcode else p.barcode or '')
+                row.append(p.inventory_month)
+                row.append(p.service.name if p.service else '')
             writer.writerow(row)
         response = HttpResponse(buffer.getvalue(), content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="export_avance.csv"'
@@ -520,21 +576,24 @@ def export_advanced(request):
         cell.border = thin_border
 
     for row_num, p in enumerate(qs.select_related("service"), 2):
-        values = [
-            p.name,
-            p.category,
-            float(p.purchase_price) if p.purchase_price else 0,
-            float(p.selling_price) if p.selling_price else 0,
-        ]
-        if include_tva:
-            values.append(float(p.tva) if p.tva else '')
-        if include_dlc:
-            values.append(p.dlc or '')
-        values.append(p.quantity or 0)
-        if include_sku:
-            values.append(p.internal_sku if p.no_barcode else p.barcode or '')
-        values.append(p.inventory_month)
-        values.append(p.service.name if p.service else '')
+        if selected_fields:
+            values = [field_map[field][1](p) for field in selected_fields]
+        else:
+            values = [
+                p.name,
+                p.category,
+                float(p.purchase_price) if p.purchase_price else 0,
+                float(p.selling_price) if p.selling_price else 0,
+            ]
+            if include_tva:
+                values.append(float(p.tva) if p.tva else '')
+            if include_dlc:
+                values.append(p.dlc or '')
+            values.append(p.quantity or 0)
+            if include_sku:
+                values.append(p.internal_sku if p.no_barcode else p.barcode or '')
+            values.append(p.inventory_month)
+            values.append(p.service.name if p.service else '')
 
         for col_num, val in enumerate(values, 1):
             cell = ws.cell(row=row_num, column=col_num)
@@ -547,12 +606,23 @@ def export_advanced(request):
         summary["A1"] = "Synthèse export"
         summary["A1"].font = Font(bold=True, size=14)
 
-        products_list = list(qs)
+        products_list = list(qs.select_related("service"))
         total_products = len(products_list)
         total_qty = sum(float(p.quantity or 0) for p in products_list)
         total_purchase = sum(float(p.purchase_price or 0) * float(p.quantity or 0) for p in products_list)
-        total_selling = sum(float(p.selling_price or 0) * float(p.quantity or 0) for p in products_list)
+        total_selling = 0
+        for p in products_list:
+            features = getattr(p.service, "features", {}) or {}
+            item_cfg = features.get("item_type", {}) or {}
+            if item_cfg.get("enabled") and p.product_role == "raw_material":
+                continue
+            total_selling += float(p.selling_price or 0) * float(p.quantity or 0)
         dlc_count = sum(1 for p in products_list if p.dlc)
+
+        has_item_type_enabled = any(
+            (getattr(p.service, "features", {}) or {}).get("item_type", {}).get("enabled")
+            for p in products_list
+        )
 
         info_rows = [
             ("Produits", total_products),
@@ -560,8 +630,10 @@ def export_advanced(request):
             ("Valeur stock achat (€)", total_purchase),
             ("Valeur stock vente (€)", total_selling),
         ]
-        if include_dlc:
+        if include_dlc and (not selected_fields or "dlc" in selected_fields):
             info_rows.append(("Produits avec DLC/DDM", dlc_count))
+        if has_item_type_enabled:
+            info_rows.append(("Note", "Valeur de vente exclut les matières premières."))
 
         row_cursor = 3
         for label, value in info_rows:
@@ -583,7 +655,10 @@ def export_advanced(request):
             category_totals.setdefault(cat, {"qty": 0, "purchase": 0, "selling": 0})
             category_totals[cat]["qty"] += float(p.quantity or 0)
             category_totals[cat]["purchase"] += float(p.purchase_price or 0) * float(p.quantity or 0)
-            category_totals[cat]["selling"] += float(p.selling_price or 0) * float(p.quantity or 0)
+            features = getattr(p.service, "features", {}) or {}
+            item_cfg = features.get("item_type", {}) or {}
+            if not (item_cfg.get("enabled") and p.product_role == "raw_material"):
+                category_totals[cat]["selling"] += float(p.selling_price or 0) * float(p.quantity or 0)
 
         start_category_row = row_cursor
         for cat, totals in sorted(category_totals.items()):

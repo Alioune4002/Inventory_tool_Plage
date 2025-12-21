@@ -87,6 +87,10 @@ def default_service_features():
         "dlc": {"enabled": True, "recommended": False},
         "tva": {"enabled": True, "recommended": False},
         "suppliers": {"enabled": False},
+        "lot": {"enabled": False, "recommended": False},
+        "multi_unit": {"enabled": False, "recommended": False},
+        "variants": {"enabled": False, "recommended": False},
+        "open_container_tracking": {"enabled": False},
         "item_type": {"enabled": False, "recommended": False},
     }
 
