@@ -146,8 +146,10 @@ export function AuthProvider({ children }) {
 
         const userId = data?.user?.id || data?.user_id || data?.id;
         if (userId) {
-          localStorage.removeItem(getTourKey(userId));
-          localStorage.setItem(getTourPendingKey(userId), "1");
+          const tourKey = getTourKey(userId);
+          if (localStorage.getItem(tourKey) !== "done") {
+            localStorage.setItem(getTourPendingKey(userId), "1");
+          }
         }
 
         await refreshMe();
@@ -167,7 +169,9 @@ export function AuthProvider({ children }) {
             : null) ||
           e.response?.data?.non_field_errors?.[0] ||
           "Connexion impossible. Vérifiez vos identifiants.";
-        throw new Error(detail);
+        const err = new Error(detail);
+        err.code = e.response?.data?.code;
+        throw err;
       }
     },
     [fetchServices, refreshMe]
@@ -214,6 +218,14 @@ export function AuthProvider({ children }) {
 
         storeToken(data.access);
         setToken(data.access);
+
+        const userId = data?.user?.id || data?.user_id || data?.id;
+        if (userId) {
+          const tourKey = getTourKey(userId);
+          if (localStorage.getItem(tourKey) !== "done") {
+            localStorage.setItem(getTourPendingKey(userId), "1");
+          }
+        }
 
         await refreshMe();
         await fetchServices();
