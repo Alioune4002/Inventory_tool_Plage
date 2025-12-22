@@ -1,10 +1,10 @@
 import json
 import logging
-from datetime import datetime
 from uuid import uuid4
 from django.conf import settings
 from django.db.models import Sum, Count, Q, Value, DecimalField
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 import time
 import uuid
 
@@ -32,8 +32,9 @@ Rules:
 - Never invent data; rely strictly on provided CONTEXT.
 - If data is sparse, provide short usage guidance (ex: créer des catégories, utiliser SKU interne, tester l'export, scanner un code-barres).
 - Keep tool-help contextual (multi-services, catégories, SKU, export, pertes) and concise.
+- If USER_QUESTION is present, answer it first in `message` in 1-3 sentences, then add insights.
 - If data quality is low (ex: categories_count faible, sku_missing_count > 0, very few movements), propose at most 3 recommendations, each with: benefit in 1 sentence, an example (ex format SKU, liste de catégories, routine hebdo), and cite evidence using counters from CONTEXT (ex: "categories_count=0").
-- Do not invent features; if a feature is not in CONTEXT, speak au conditionnel ("si vous avez l’option export/scan…").
+- Do not invent features; if FEATURES indicate a module is disabled, speak au conditionnel ("si vous activez l’option export/scan…").
 - If data is missing or uncertain, ask a concise clarification in `question`.
 - Keep `suggested_actions` empty if no safe action.
 - Use French for message/insights/question.
@@ -48,7 +49,7 @@ ACTION_TEMPLATES = {
 }
 
 
-def build_context(user, scope=None, period_start=None, period_end=None, filters=None):
+def build_context(user, scope=None, period_start=None, period_end=None, filters=None, user_question=None):
     filters = filters or {}
     tenant = getattr(user, "profile", None) and user.profile.tenant
     if tenant is None:
@@ -56,6 +57,9 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
 
     service_id = filters.get("service")
     month = filters.get("month") or period_start
+    service = None
+    if service_id and service_id != "all":
+        service = tenant.services.filter(id=service_id).first()
 
     def decimal_zero():
         return Value(0, output_field=DecimalField(max_digits=14, decimal_places=4))
@@ -106,8 +110,19 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     )
 
     missing_id_count = products_qs.filter(barcode__isnull=True, internal_sku__isnull=True).count()
+    question = (user_question or "").strip()[:500]
     context = {
         "tenant": {"id": tenant.id, "name": tenant.name, "business_type": tenant.business_type, "domain": tenant.domain},
+        "service": (
+            {
+                "id": service.id,
+                "name": service.name,
+                "service_type": service.service_type,
+            }
+            if service
+            else None
+        ),
+        "features": service.features if service else {},
         "scope": scope or "inventory",
         "period": {"start": period_start, "end": period_end, "month": month},
         "inventory_summary": {
@@ -163,7 +178,8 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
             }
             for i in items
         ],
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "user_question": question or None,
+        "generated_at": timezone.now().isoformat(),
     }
     return context
 
@@ -173,12 +189,19 @@ def _local_assistant_summary(context):
     inv = ctx.get("inventory_summary", {})
     losses = ctx.get("losses", {})
     usage = ctx.get("usage", {})
+    user_question = ctx.get("user_question")
     message = (
         f"{ctx.get('tenant', {}).get('name', 'Votre organisation')} : "
         f"{inv.get('total_skus', 0)} SKU(s), {inv.get('low_stock_count', 0)} (<3 unités), "
         f"{inv.get('out_of_stock_count', 0)} épuisés. "
         f"{losses.get('total_qty', 0)} pertes depuis {ctx.get('period', {}).get('month') or 'le mois actif'}."
     )
+    if user_question:
+        message = (
+            f"Question reçue : {user_question}. "
+            f"{message} "
+            "L’IA est temporairement indisponible, mais ces repères peuvent déjà aider."
+        )
 
     insights = []
     if inv.get("low_stock_count", 0) > 0:
@@ -246,12 +269,15 @@ def call_llm(system_prompt, context_json, context=None):
 
     try:
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"CONTEXT:\n{context_json}"},
+        ]
+        if context and context.get("user_question"):
+            messages.append({"role": "user", "content": f"USER_QUESTION:\n{context['user_question']}"})
         response = client.chat.completions.create(
             model=getattr(settings, "AI_MODEL", "gpt-4o-mini"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"CONTEXT:\n{context_json}"},
-            ],
+            messages=messages,
             temperature=0.2,
         )
         content = response.choices[0].message.content

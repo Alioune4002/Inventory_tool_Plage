@@ -1,5 +1,5 @@
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
@@ -33,6 +33,12 @@ export default function Login() {
     }
   };
 
+  useEffect(() => {
+    if (!err) return undefined;
+    const timer = window.setTimeout(() => setErr(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [err]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
       <Helmet>
@@ -62,7 +68,10 @@ export default function Login() {
               label="Nom d’utilisateur ou email"
               placeholder="vous@commerce.fr"
               value={form.username}
-              onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))}
+              onChange={(e) => {
+                setForm((p) => ({ ...p, username: e.target.value }));
+                if (err) setErr("");
+              }}
               autoComplete="username"
             />
 
@@ -71,7 +80,10 @@ export default function Login() {
               type={show ? "text" : "password"}
               placeholder="••••••••"
               value={form.password}
-              onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}
+              onChange={(e) => {
+                setForm((p) => ({ ...p, password: e.target.value }));
+                if (err) setErr("");
+              }}
               autoComplete="current-password"
               rightSlot={
                 <button

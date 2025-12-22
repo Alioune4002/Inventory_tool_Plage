@@ -33,8 +33,16 @@ class AiAssistantView(APIView):
         period_start = payload.get("period_start")
         period_end = payload.get("period_end")
         filters = payload.get("filters") or {}
+        question = payload.get("question") or payload.get("user_question")
 
-        context = build_context(request.user, scope, period_start, period_end, filters)
+        context = build_context(
+            request.user,
+            scope,
+            period_start,
+            period_end,
+            filters,
+            user_question=question,
+        )
         context_json = json.dumps(context, ensure_ascii=False)
         raw = call_llm(SYSTEM_PROMPT, context_json, context)
         data, invalid_json = validate_llm_json(raw)

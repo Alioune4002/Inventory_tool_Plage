@@ -6,12 +6,14 @@ import Card from "../ui/Card";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import Skeleton from "../ui/Skeleton";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import AIAssistantPanel from "../components/AIAssistantPanel";
 import BillingBanners from "../components/BillingBanners";
 import useEntitlements from "../app/useEntitlements";
+import { getWording, getUxCopy } from "../lib/labels";
 
 const fmtCurrency = (n) =>
   typeof n === "number" ? n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : "—";
@@ -26,21 +28,22 @@ const fmtDateTime = (v) => {
   }
 };
 
-function getDashboardCopy(serviceType, tenantDomain, isAll) {
+function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wording) {
   const isGeneral = tenantDomain === "general" || serviceType === "retail_general";
   const isPharma = serviceType === "pharmacy_parapharmacy";
   const isBar = serviceType === "bar";
   const isBakery = serviceType === "bakery";
   const isKitchen = serviceType === "kitchen";
   const isDining = serviceType === "restaurant_dining";
+  const itemPlural = (wording?.itemPlural || "Produits").toLowerCase();
 
   const title = isAll ? "Dashboard (multi-services)" : "Dashboard";
   const subtitle = isAll
     ? "Vue consolidée : valeurs, catégories et pertes sur tous les services."
-    : "Valeur de stock, catégories, pertes et aperçu des produits.";
+    : "Valeur de stock, catégories, pertes et comptage du mois.";
 
   const stockLabel = isPharma ? "Valeur stock (achat)" : isGeneral ? "Valeur stock (achat)" : "Valeur stock (achat)";
-  const sellingLabel = isGeneral ? "Valeur stock (vente)" : "Valeur stock (vente)";
+  const sellingLabel = itemTypeEnabled ? "Valeur stock (vente potentielle)" : "Valeur stock (vente)";
   const marginHelper =
     isKitchen || isDining || isBakery
       ? "Marge estimée selon prix d'achat/vente saisis (hors ventes réelles)."
@@ -54,7 +57,9 @@ function getDashboardCopy(serviceType, tenantDomain, isAll) {
     ? "Pertes : casse / offerts / erreurs (déclaré)"
     : "Pertes : casse / DLC / vol (déclaré)";
 
-  const productsHelper = isAll ? "Total sur tous les services (mois sélectionné)" : "Mois et service sélectionnés";
+  const productsHelper = isAll
+    ? "Total des comptages sur tous les services (mois sélectionné)"
+    : "Comptages du mois et service sélectionnés";
 
   return {
     title,
@@ -65,12 +70,22 @@ function getDashboardCopy(serviceType, tenantDomain, isAll) {
     lossHelper,
     productsHelper,
     categoryTitle: isAll ? "Répartition par catégorie (global)" : "Répartition par catégorie",
-    productsTitle: isAll ? "Produits (aperçu global)" : "Produits suivis",
+    productsTitle: isAll ? `Comptages (${itemPlural})` : `Comptages ${itemPlural}`,
+    inventoryCountLabel: `Comptages ${itemPlural}`,
   };
 }
 
 export default function Dashboard() {
-  const { services, serviceId, selectService, tenant, currentService, isAllServices, serviceProfile } = useAuth();
+  const {
+    services,
+    serviceId,
+    selectService,
+    tenant,
+    currentService,
+    isAllServices,
+    serviceProfile,
+    serviceFeatures,
+  } = useAuth();
   const { data: entitlements } = useEntitlements();
   const pushToast = useToast();
 
@@ -97,10 +112,23 @@ export default function Dashboard() {
 
   const tenantDomain = tenant?.domain || "food";
   const serviceType = serviceProfile?.service_type || currentService?.service_type || "other";
+  const serviceDomain = serviceType === "retail_general" ? "general" : tenantDomain;
+  const wording = useMemo(
+    () => getWording(serviceType, serviceDomain),
+    [serviceType, serviceDomain]
+  );
+  const ux = useMemo(
+    () => getUxCopy(serviceType, serviceDomain),
+    [serviceType, serviceDomain]
+  );
+
+  const priceCfg = serviceFeatures?.prices || {};
+  const sellingEnabled = priceCfg.selling_enabled !== false;
+  const itemTypeEnabled = serviceFeatures?.item_type?.enabled === true;
 
   const copy = useMemo(
-    () => getDashboardCopy(serviceType, tenantDomain, isAllServices),
-    [serviceType, tenantDomain, isAllServices]
+    () => getDashboardCopy(serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording),
+    [serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording]
   );
 
   const badgeText = useMemo(() => {
@@ -270,7 +298,7 @@ export default function Dashboard() {
 
   const purchaseValue = stats.service_totals?.purchase_value ?? stats.total_value ?? 0;
   const sellingValue = stats.service_totals?.selling_value ?? stats.total_selling_value ?? 0;
-  const marginValue = (sellingValue || 0) - (purchaseValue || 0);
+  const marginValue = sellingEnabled ? (sellingValue || 0) - (purchaseValue || 0) : null;
 
   const lossesCost = stats.losses_total_cost || 0;
   const lossesQty = stats.losses_total_qty || 0;
@@ -283,16 +311,20 @@ export default function Dashboard() {
     },
     {
       label: copy.sellingLabel,
-      value: fmtCurrency(sellingValue),
-      helper: "Projection prix de vente (si renseigné)",
+      value: sellingEnabled ? fmtCurrency(sellingValue) : "—",
+      helper: itemTypeEnabled
+        ? "Exclut les matières premières si le type est renseigné."
+        : "Projection prix de vente (si renseigné).",
     },
     {
       label: "Marge potentielle",
-      value: fmtCurrency(marginValue),
-      helper: copy.marginHelper,
+      value: sellingEnabled ? fmtCurrency(marginValue) : "—",
+      helper: sellingEnabled
+        ? copy.marginHelper
+        : "Activez Prix de vente dans Settings → Modules pour estimer la marge.",
     },
     {
-      label: "Produits suivis",
+      label: copy.inventoryCountLabel,
       value: productsCount,
       helper: copy.productsHelper,
     },
@@ -314,7 +346,7 @@ export default function Dashboard() {
     <PageTransition>
       <Helmet>
         <title>{copy.title} | StockScan</title>
-        <meta name="description" content="Dashboard inventaire : valeur de stock, catégories, pertes, aperçu produits." />
+        <meta name="description" content={ux.inventoryIntro || "Dashboard inventaire : valeur, catégories, pertes."} />
       </Helmet>
 
       <div className="grid gap-4">
@@ -349,7 +381,7 @@ export default function Dashboard() {
                 {membersLoading ? (
                   <div className="grid gap-2">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                      <Skeleton key={i} className="h-12 w-full" />
                     ))}
                   </div>
                 ) : members.length ? (
@@ -394,7 +426,7 @@ export default function Dashboard() {
                 {membersLoading ? (
                   <div className="grid gap-2">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-10 w-full animate-pulse rounded-2xl bg-slate-100" />
+                      <Skeleton key={i} className="h-10 w-full" />
                     ))}
                   </div>
                 ) : recentActivity.length ? (
@@ -493,7 +525,7 @@ export default function Dashboard() {
           {loading ? (
             <div className="grid gap-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
           ) : categories.length ? (
@@ -526,7 +558,9 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">Aucune donnée pour ce mois. Ajoutez des produits (ou changez de mois/service).</div>
+            <div className="text-sm text-slate-500">
+              Aucune donnée pour ce mois. Lancez un comptage (ou changez de mois/service).
+            </div>
           )}
         </Card>
 
@@ -540,7 +574,7 @@ export default function Dashboard() {
           {loading ? (
             <div className="grid gap-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-10 w-full animate-pulse rounded-2xl bg-slate-100" />
+                <Skeleton key={i} className="h-10 w-full" />
               ))}
             </div>
           ) : lossesByReason.length ? (
@@ -581,7 +615,7 @@ export default function Dashboard() {
           {loading ? (
             <div className="grid gap-2">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                <Skeleton key={i} className="h-12 w-full" />
               ))}
             </div>
           ) : products.length ? (
@@ -615,7 +649,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="text-sm text-slate-500">
-              Ajoutez des produits pour voir les valeurs et pertes. Le dashboard devient utile dès 10–20 lignes.
+              Ajoutez des comptages pour voir les valeurs et pertes. Le dashboard devient utile dès 10–20 lignes.
             </div>
           )}
         </Card>

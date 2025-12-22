@@ -3,13 +3,39 @@ const FAMILLES = [
     id: "retail",
     name: "Retail alimentaire",
     copy: {
-      headline: "Épicerie & magasin généraliste : stock clair et rapide",
-      subline: "Rayons lisibles, barcode par défaut, DLC activable.",
-      seoKeywords: ["épicerie", "magasin généraliste", "inventaire alimentaire", "stock retail"],
+      headline: "Epicerie & magasin generaliste : stock clair et rapide",
+      subline: "Rayons lisibles, code-barres par defaut, DLC activable.",
+      seoKeywords: ["epicerie", "magasin generaliste", "inventaire alimentaire", "stock retail"],
       landing: {
         title: "Inventaire retail alimentaire",
-        description: "Gérez vos rayons et vos stocks alimentaires avec une expérience pensée pour l’épicerie.",
+        description: "Gerez vos rayons et vos stocks alimentaires avec une experience pensee pour l'epicerie.",
       },
+      faq: [
+        {
+          q: "Le scan est-il obligatoire ?",
+          a: "Non. Vous pouvez aussi utiliser un SKU interne, mais le scan evite les doublons.",
+        },
+        {
+          q: "Peut-on suivre les DLC/DDM ?",
+          a: "Oui, activez le module DLC/DDM pour afficher les dates limites.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Produit",
+      itemPlural: "Produits",
+      categoryLabel: "Rayon",
+      skuLabel: "SKU interne",
+      barcodeLabel: "Code-barres",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. Coca 33cl",
+      category: "Ex. Rayon frais",
+      sku: "Ex. SKU-FOOD-001",
+      brand: "Ex. Marque X",
+      supplier: "Ex. Centrale / grossiste",
+      notes: "Ex. Produit saisonnier",
     },
     identifiers: {
       barcode: true,
@@ -19,24 +45,50 @@ const FAMILLES = [
     modules: ["pricing", "identifier", "expiry", "multiUnit"],
     defaults: {
       categoryLabel: "Rayon",
-      unitLabel: "unité",
+      unitLabel: "unite",
     },
     examples: {
-      categories: ["Frais", "Épicerie", "Boissons"],
-      products: ["Lait demi-écrémé", "Pâtes", "Eau 1,5L"],
+      categories: ["Frais", "Epicerie", "Boissons", "Surgeles"],
+      products: ["Lait demi-ecreme", "Pates", "Eau 1,5L"],
     },
   },
   {
     id: "mode",
     name: "Mode & accessoires",
     copy: {
-      headline: "Collections et références mode sans champs inutiles",
-      subline: "SKU prioritaire, variantes tailles/couleurs, pricing activé.",
-      seoKeywords: ["mode", "boutique", "vêtements", "accessoires", "SKU"],
+      headline: "Collections et references mode sans champs inutiles",
+      subline: "SKU prioritaire, variantes tailles/couleurs, pricing active.",
+      seoKeywords: ["mode", "boutique", "vetements", "accessoires", "SKU"],
       landing: {
         title: "Inventaire mode & accessoires",
-        description: "SKU, collections, variantes : tout est taillé pour les boutiques mode.",
+        description: "SKU, collections, variantes : tout est taille pour les boutiques mode.",
       },
+      faq: [
+        {
+          q: "Le code-barres est-il utile en mode ?",
+          a: "Il est optionnel. Le SKU reste l'identifiant principal des collections.",
+        },
+        {
+          q: "Puis-je suivre les tailles/couleurs ?",
+          a: "Oui, activez le module Variantes pour tailles, couleurs et formats.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Article",
+      itemPlural: "Articles",
+      categoryLabel: "Collection",
+      skuLabel: "SKU / Ref.",
+      barcodeLabel: "Code-barres (optionnel)",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. T-shirt coton",
+      category: "Ex. Collection ete / Accessoires",
+      sku: "Ex. SKU-TSH-001",
+      brand: "Ex. Atelier X",
+      supplier: "Ex. Grossiste mode",
+      notes: "Ex. Serie limitee",
     },
     identifiers: {
       barcode: false,
@@ -46,11 +98,11 @@ const FAMILLES = [
     modules: ["pricing", "identifier", "variants"],
     defaults: {
       categoryLabel: "Collection",
-      unitLabel: "pièce",
+      unitLabel: "piece",
     },
     examples: {
-      categories: ["Capsule été", "Accessoires", "Maroquinerie"],
-      products: ["T-shirt coton", "Ceinture cuir", "Sac bandoulière"],
+      categories: ["Capsule ete", "Accessoires", "Maroquinerie"],
+      products: ["T-shirt coton", "Ceinture cuir", "Sac bandouliere"],
     },
   },
   {
@@ -58,12 +110,38 @@ const FAMILLES = [
     name: "Bar & boissons",
     copy: {
       headline: "Bouteilles, softs et caves suivis sans friction",
-      subline: "Entamé, lots et unités adaptées aux boissons.",
+      subline: "Entame, lots et unites adaptees aux boissons.",
       seoKeywords: ["bar", "boissons", "cave", "inventaire bar"],
       landing: {
         title: "Inventaire bar & cave",
-        description: "Suivi des bouteilles, pertes et contenants entamés en un clin d’œil.",
+        description: "Suivi des bouteilles, pertes et contenants entames en un clin d'oeil.",
       },
+      faq: [
+        {
+          q: "Puis-je suivre les bouteilles entamees ?",
+          a: "Oui, activez le module Ouvert / Entame.",
+        },
+        {
+          q: "Peut-on gerer les lots ?",
+          a: "Oui, le module Lot/Batch est disponible pour la tracabilite.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Reference bar",
+      itemPlural: "References bar",
+      categoryLabel: "Famille",
+      skuLabel: "SKU bar",
+      barcodeLabel: "Code-barres",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. Gin 70cl",
+      category: "Ex. Spiritueux / Bieres",
+      sku: "Ex. SKU-BAR-GIN-001",
+      brand: "Ex. Distillerie X",
+      supplier: "Ex. Grossiste boissons",
+      notes: "Ex. Rotation lente",
     },
     identifiers: {
       barcode: true,
@@ -76,7 +154,7 @@ const FAMILLES = [
       unitLabel: "bouteille",
     },
     examples: {
-      categories: ["Spiritueux", "Bières", "Softs"],
+      categories: ["Spiritueux", "Bieres", "Softs"],
       products: ["Gin 70cl", "IPA 33cl", "Tonic"],
     },
   },
@@ -84,13 +162,39 @@ const FAMILLES = [
     id: "restauration",
     name: "Restauration",
     copy: {
-      headline: "Matières premières & produits finis, sans complexité",
-      subline: "Inventaires séparés ou regroupés selon vos équipes.",
+      headline: "Matieres premieres & produits finis, sans complexite",
+      subline: "Inventaires separes ou regroupes selon vos equipes.",
       seoKeywords: ["restauration", "cuisine", "stock cuisine", "inventaire restaurant"],
       landing: {
         title: "Inventaire restauration",
-        description: "Cuisine et salle alignées avec des modules pensés pour la restauration.",
+        description: "Cuisine et salle alignees avec des modules penses pour la restauration.",
       },
+      faq: [
+        {
+          q: "Cuisine et salle peuvent-elles etre separees ?",
+          a: "Oui, vous choisissez regrouper ou separer lors de l'onboarding.",
+        },
+        {
+          q: "Peut-on distinguer matieres premieres et produits finis ?",
+          a: "Oui, activez le module Matiere premiere / Produit fini.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Produit cuisine",
+      itemPlural: "Produits cuisine",
+      categoryLabel: "Poste",
+      skuLabel: "SKU interne",
+      barcodeLabel: "Code-barres",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. Filet de poulet",
+      category: "Ex. Prep froide / Grill",
+      sku: "Ex. SKU-KIT-001",
+      brand: "Ex. Maison",
+      supplier: "Ex. Marche local",
+      notes: "Ex. Preparation maison",
     },
     identifiers: {
       barcode: true,
@@ -103,21 +207,47 @@ const FAMILLES = [
       unitLabel: "portion",
     },
     examples: {
-      categories: ["Cuisine", "Salle", "Prépa froide"],
+      categories: ["Cuisine", "Salle", "Prepa froide"],
       products: ["Filet de poulet", "Sauce maison", "Garniture"],
     },
   },
   {
     id: "boulangerie",
-    name: "Boulangerie & pâtisserie",
+    name: "Boulangerie & patisserie",
     copy: {
-      headline: "Fournées et préparations maison suivies proprement",
-      subline: "Lots + DLC + multi-unités pour pains et pâtisseries.",
-      seoKeywords: ["boulangerie", "pâtisserie", "fournées", "inventaire"],
+      headline: "Fournees et preparations maison suivies proprement",
+      subline: "Lots + DLC + multi-unites pour pains et patisseries.",
+      seoKeywords: ["boulangerie", "patisserie", "fournees", "inventaire"],
       landing: {
-        title: "Inventaire boulangerie & pâtisserie",
-        description: "Des champs adaptés aux fournées, lots et produits finis.",
+        title: "Inventaire boulangerie & patisserie",
+        description: "Des champs adaptes aux fournees, lots et produits finis.",
       },
+      faq: [
+        {
+          q: "Peut-on suivre les fournees et la production ?",
+          a: "Oui, les categories et modules sont adaptes aux fournees.",
+        },
+        {
+          q: "Le suivi des lots est-il disponible ?",
+          a: "Oui, activez Lot/Batch pour la tracabilite.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Produit boulangerie",
+      itemPlural: "Produits boulangerie",
+      categoryLabel: "Fournee",
+      skuLabel: "SKU boulangerie",
+      barcodeLabel: "Code-barres",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. Farine T55 25kg",
+      category: "Ex. Ingrédients / Viennoiseries",
+      sku: "Ex. SKU-BAK-001",
+      brand: "Ex. Moulin X",
+      supplier: "Ex. Fournisseur farine",
+      notes: "Ex. Allergènes: gluten",
     },
     identifiers: {
       barcode: true,
@@ -126,11 +256,11 @@ const FAMILLES = [
     },
     modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
     defaults: {
-      categoryLabel: "Fournée",
-      unitLabel: "pièce",
+      categoryLabel: "Fournee",
+      unitLabel: "piece",
     },
     examples: {
-      categories: ["Pains", "Viennoiseries", "Pâtisseries"],
+      categories: ["Pains", "Viennoiseries", "Patisseries"],
       products: ["Baguette tradition", "Croissant", "Tarte pommes"],
     },
   },
@@ -138,13 +268,39 @@ const FAMILLES = [
     id: "pharmacie",
     name: "Pharmacie & parapharmacie",
     copy: {
-      headline: "Traçabilité et lots pour le stock santé",
-      subline: "Barcode + SKU + DLC/DDM pour rester conforme.",
-      seoKeywords: ["pharmacie", "parapharmacie", "traçabilité", "DLC", "DDM"],
+      headline: "Tracabilite et lots pour le stock sante",
+      subline: "Code-barres + SKU + DLC/DDM pour rester conforme.",
+      seoKeywords: ["pharmacie", "parapharmacie", "tracabilite", "DLC", "DDM"],
       landing: {
         title: "Inventaire pharmacie & parapharmacie",
-        description: "Traçabilité renforcée pour médicaments, soins et parapharmacie.",
+        description: "Tracabilite renforcee pour medicaments, soins et parapharmacie.",
       },
+      faq: [
+        {
+          q: "Le CIP est-il gere ?",
+          a: "Oui, le code-barres est prioritaire pour retrouver vos produits.",
+        },
+        {
+          q: "Lots et dates limites sont-ils disponibles ?",
+          a: "Oui, activez les modules Lot et DLC/DDM.",
+        },
+      ],
+    },
+    labels: {
+      itemLabel: "Produit sante",
+      itemPlural: "Produits sante",
+      categoryLabel: "Rayon",
+      skuLabel: "Code interne",
+      barcodeLabel: "CIP / Code-barres",
+      serviceLabel: "Service",
+    },
+    placeholders: {
+      name: "Ex. Doliprane 1g",
+      category: "Ex. Antalgique / Hygiene",
+      sku: "Ex. SKU-PHA-001",
+      brand: "Ex. Sanofi",
+      supplier: "Ex. Centrale pharma",
+      notes: "Ex. Necessite suivi lot",
     },
     identifiers: {
       barcode: true,
@@ -154,11 +310,11 @@ const FAMILLES = [
     modules: ["pricing", "identifier", "expiry", "lot"],
     defaults: {
       categoryLabel: "Rayon",
-      unitLabel: "boîte",
+      unitLabel: "boite",
     },
     examples: {
-      categories: ["Dermocosmétique", "Hygiène", "Soins"],
-      products: ["Doliprane 1g", "Crème mains", "Shampooing"],
+      categories: ["Dermocosmetique", "Hygiene", "Soins"],
+      products: ["Doliprane 1g", "Creme mains", "Shampooing"],
     },
   },
 ];

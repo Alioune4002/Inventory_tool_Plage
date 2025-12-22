@@ -6,9 +6,10 @@ import PageTransition from "../components/PageTransition";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Card from "../ui/Card";
+import Skeleton from "../ui/Skeleton";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
-import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
+import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 
 export default function Inventory() {
@@ -37,9 +38,10 @@ export default function Inventory() {
   const [quick, setQuick] = useState({
     name: "",
     category: "",
-    quantity: 1,
+    quantity: "",
     barcode: "",
     internal_sku: "",
+    product_role: "",
     dlc: "",
     unit: "pcs",
     container_status: "SEALED",
@@ -71,9 +73,16 @@ export default function Inventory() {
   };
 
   const wording = getWording(serviceType, serviceDomain);
+  const itemLabel = wording.itemLabel || "Élément";
+  const itemLabelLower = itemLabel.toLowerCase();
+  const barcodeLabel = wording.barcodeLabel || "code-barres";
   const ux = getUxCopy(serviceType, serviceDomain);
   const placeholders = getPlaceholders(serviceType, serviceDomain);
   const helpers = getFieldHelpers(serviceType, serviceDomain);
+  const lossReasons = useMemo(
+    () => getLossReasons(serviceType, serviceDomain, serviceFeatures),
+    [serviceType, serviceDomain, serviceFeatures]
+  );
   const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
   const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
 
@@ -89,7 +98,15 @@ export default function Inventory() {
   const dlcRecommended = !!dlcCfg.recommended;
 
   const openEnabled = getFeatureFlag("open_container_tracking", familyModules.includes("opened"));
+  const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
   const showOpenFields = openEnabled;
+
+  const productRoleOptions = [
+    { value: "", label: "Non précisé" },
+    { value: "raw_material", label: "Matière première" },
+    { value: "finished_product", label: "Produit fini" },
+    { value: "homemade_prep", label: "Préparation maison" },
+  ];
 
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
@@ -108,6 +125,14 @@ export default function Inventory() {
       return next;
     });
   }, [countingMode]);
+
+  useEffect(() => {
+    if (!lossReasons.length) return;
+    setQuick((prev) => {
+      if (lossReasons.some((r) => r.value === prev.loss_reason)) return prev;
+      return { ...prev, loss_reason: lossReasons[0].value };
+    });
+  }, [lossReasons]);
 
   // charger catégories du service sélectionné
   useEffect(() => {
@@ -183,6 +208,12 @@ export default function Inventory() {
       setPage(totalPages);
     }
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (!err) return undefined;
+    const timer = window.setTimeout(() => setErr(""), 7000);
+    return () => window.clearTimeout(timer);
+  }, [err]);
   useEffect(() => {
     setPage(1);
   }, [search, totalPages]);
@@ -195,9 +226,10 @@ export default function Inventory() {
     setQuick({
       name: "",
       category: "",
-      quantity: 1,
+      quantity: "",
       barcode: "",
       internal_sku: "",
+      product_role: "",
       dlc: "",
       unit: unitOptions[0],
       container_status: "SEALED",
@@ -218,11 +250,15 @@ export default function Inventory() {
     e.preventDefault();
 
     if (isAllServices) {
-      pushToast?.({ message: "Sélectionnez un service pour ajouter un produit.", type: "warn" });
+      pushToast?.({ message: `Sélectionnez un service pour ajouter un ${itemLabelLower}.`, type: "warn" });
       return;
     }
     if (!serviceId || !quick.name.trim()) {
       pushToast?.({ message: "Nom et service requis.", type: "error" });
+      return;
+    }
+    if (quick.quantity === "" || Number.isNaN(Number(quick.quantity))) {
+      pushToast?.({ message: "Veuillez renseigner une quantité comptée.", type: "error" });
       return;
     }
 
@@ -235,7 +271,7 @@ export default function Inventory() {
     const payload = {
       name: quick.name.trim(),
       category: quick.category || "",
-      quantity: Number(quick.quantity) || 0,
+      quantity: Number(quick.quantity),
       inventory_month: month,
       service: serviceId,
       unit: quick.unit || "pcs",
@@ -249,6 +285,7 @@ export default function Inventory() {
     else payload.internal_sku = "";
     if (dlcEnabled) payload.dlc = quick.dlc || null;
     if (lotEnabled) payload.lot_number = quick.lotNumber || null;
+    if (itemTypeEnabled) payload.product_role = quick.product_role || null;
 
     if (showOpenFields) {
       payload.container_status = quick.container_status || "SEALED";
@@ -312,7 +349,7 @@ export default function Inventory() {
 
   const lookupBarcode = async () => {
     if (!quick.barcode) {
-      pushToast?.({ message: "Scannez ou saisissez un code-barres d’abord.", type: "warn" });
+      pushToast?.({ message: `Scannez ou saisissez un ${wording.barcodeLabel || "code-barres"} d’abord.`, type: "warn" });
       return;
     }
     try {
@@ -324,6 +361,7 @@ export default function Inventory() {
             name: p.name || prev.name,
             category: p.category || prev.category,
             internal_sku: p.internal_sku || prev.internal_sku,
+            product_role: p.product_role || prev.product_role,
             dlc: p.dlc || prev.dlc,
             unit: p.unit || prev.unit,
             lotNumber: p.lot_number || prev.lotNumber,
@@ -334,7 +372,7 @@ export default function Inventory() {
           recent: res.data.recent || [],
           history: res.data.history || [],
         });
-        pushToast?.({ message: "Produit trouvé : champs pré-remplis.", type: "success" });
+        pushToast?.({ message: `Fiche ${itemLabelLower} pré-remplie.`, type: "success" });
       } else if (res?.data?.suggestion) {
         setLastFound({ type: "external", suggestion: res.data.suggestion });
         pushToast?.({ message: "Suggestion trouvée : vérifiez puis complétez.", type: "info" });
@@ -344,7 +382,7 @@ export default function Inventory() {
       }
     } catch (e) {
       setLastFound(null);
-      pushToast?.({ message: "Aucun produit trouvé pour ce code.", type: "info" });
+      pushToast?.({ message: `Aucun ${itemLabelLower} trouvé pour ce ${barcodeLabel}.`, type: "info" });
     }
   };
 
@@ -389,7 +427,10 @@ export default function Inventory() {
               label="Recherche"
               placeholder={ux.searchHint}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                if (err) setErr("");
+              }}
             />
           </div>
 
@@ -438,10 +479,31 @@ export default function Inventory() {
                     />
                   )}
 
+                  {itemTypeEnabled && (
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium text-[var(--text)]">Type d’article</span>
+                      <select
+                        value={quick.product_role}
+                        onChange={(e) => setQuick((p) => ({ ...p, product_role: e.target.value }))}
+                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
+                      >
+                        {productRoleOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-[var(--muted)]">
+                        {helpers.productRole || "Classez pour distinguer coûts matière et valeur de vente."}
+                      </p>
+                    </label>
+                  )}
+
                   <Input
                     label="Comptage (quantité)"
                     type="number"
                     min={0}
+                    required
                     value={quick.quantity}
                     onChange={(e) => setQuick((p) => ({ ...p, quantity: e.target.value }))}
                     helper="Quantité comptée pour ce mois."
@@ -450,7 +512,7 @@ export default function Inventory() {
                   {barcodeEnabled && (
                     <Input
                       label={wording.barcodeLabel}
-                      placeholder="Scannez ou saisissez"
+                      placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
                       value={quick.barcode}
                       onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
                       helper={helpers.barcode}
@@ -614,12 +676,11 @@ export default function Inventory() {
                         onChange={(e) => setQuick((p) => ({ ...p, loss_reason: e.target.value }))}
                         className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
                       >
-                        <option value="breakage">Casse</option>
-                        <option value="expired">DLC dépassée</option>
-                        <option value="theft">Vol</option>
-                        <option value="free">Offert</option>
-                        <option value="mistake">Erreur</option>
-                        <option value="other">Autre</option>
+                        {lossReasons.map((reason) => (
+                          <option key={reason.value} value={reason.value}>
+                            {reason.label}
+                          </option>
+                        ))}
                       </select>
                     </label>
                     <Input
@@ -634,7 +695,7 @@ export default function Inventory() {
                   <div className="md:col-span-3 flex flex-wrap gap-3 items-center">
                     {showIdentifierWarning && (
                       <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
-                        Conseil : ajoutez un identifiant (EAN/SKU) pour éviter les doublons.
+                        Conseil : ajoutez un identifiant ({wording.identifierLabel || "code-barres ou SKU"}) pour éviter les doublons.
                       </div>
                     )}
                     <Button type="submit" loading={loading}>
@@ -659,21 +720,21 @@ export default function Inventory() {
         {lastFound && (
           <Card className="p-4 bg-blue-50 border border-blue-100 space-y-2">
             <div className="text-sm font-semibold text-blue-700">
-              {lastFound.type === "local" ? "Produit existant" : "Suggestion"}
+              {lastFound.type === "local" ? `Fiche ${itemLabelLower} existante` : "Suggestion"}
             </div>
 
             {lastFound.type === "local" ? (
               <div className="text-sm text-slate-700">
                 <div>
                   <span className="font-semibold">{lastFound.product?.name}</span> —{" "}
-                  {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — dernier comptage{" "}
-                  {lastFound.product?.quantity} {lastFound.product?.unit || "pcs"} (
+                  {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — dernier comptage (
                   {lastFound.product?.inventory_month || "—"})
+                  <span className="text-xs text-slate-500"> · info non reprise automatiquement</span>
                 </div>
 
                 {lastFound.recent?.length ? (
                   <div className="mt-2 text-xs text-slate-600 space-y-1">
-                    <div className="font-semibold">Derniers produits saisis :</div>
+                    <div className="font-semibold">Dernières fiches {itemLabelLower} saisies :</div>
                     {lastFound.recent.map((r) => (
                       <div key={r.id}>
                         • {r.name} ({r.inventory_month})
@@ -684,7 +745,7 @@ export default function Inventory() {
 
                 {lastFound.history?.length ? (
                   <div className="mt-2 text-xs text-slate-600 space-y-1">
-                    <div className="font-semibold">Historique de ce code :</div>
+                    <div className="font-semibold">Historique (quantites non reprises) :</div>
                     {lastFound.history.slice(0, 5).map((h) => (
                       <div key={h.id}>
                         • {h.inventory_month} — {h.quantity} {h.unit || "pcs"}
@@ -721,7 +782,7 @@ export default function Inventory() {
           {authLoading || loading ? (
             <div className="grid gap-2">
               {Array.from({ length: 3 }).map((_, idx) => (
-                <div key={idx} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                <Skeleton key={idx} className="h-12 w-full" />
               ))}
             </div>
           ) : err ? (

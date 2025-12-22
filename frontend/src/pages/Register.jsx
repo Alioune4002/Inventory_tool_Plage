@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
@@ -6,6 +6,7 @@ import Card from "../ui/Card";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
+import { api } from "../lib/api";
 
 const servicePresets = (family, isMulti, linkedMode = "separate") => {
   const primary = {
@@ -43,7 +44,9 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
 
   if (family === "pharmacie") {
     if (linkedMode === "merge") {
-      return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
+      return [
+        { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" },
+      ];
     }
     return [
       { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
@@ -61,7 +64,9 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
   <div className="border border-slate-800 rounded-2xl p-3 flex items-start gap-3 bg-slate-900">
     <button
       type="button"
-      className={`w-10 h-10 rounded-full border ${active ? "bg-blue-500 border-blue-400" : "border-white/20"} flex items-center justify-center text-white`}
+      className={`w-10 h-10 rounded-full border ${
+        active ? "bg-blue-500 border-blue-400" : "border-white/20"
+      } flex items-center justify-center text-white`}
       onClick={() => onToggle(moduleId)}
     >
       {active ? "✓" : "+"}
@@ -85,44 +90,134 @@ export default function Register() {
   const [familyId, setFamilyId] = useState(FAMILLES[0].id);
   const [isGroundedMulti, setIsGroundedMulti] = useState(false);
   const [linkedMode, setLinkedMode] = useState("separate");
-  const [step, setStep] = useState(1);
+  const [stepIndex, setStepIndex] = useState(0);
   const [modules, setModules] = useState(DEFAULT_MODULES[familyId] || []);
   const [serviceList, setServiceList] = useState(() => servicePresets(familyId, false));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
-  const linkedFamilies = new Set(["restauration", "boulangerie", "pharmacie"]);
+  const linkedFamilies = useMemo(() => new Set(["restauration", "boulangerie", "pharmacie"]), []);
 
   const moduleListForFamily = useMemo(
     () => MODULES.filter((module) => module.families.includes(familyId)),
     [familyId]
   );
 
+  const flowSteps = useMemo(() => {
+    const steps = ["mode", "family"];
+    if (isGroundedMulti && linkedFamilies.has(familyId)) steps.push("combo");
+    if (isGroundedMulti) steps.push("services");
+    steps.push("account");
+    return steps;
+  }, [familyId, isGroundedMulti, linkedFamilies]);
+
+  const currentStep = flowSteps[stepIndex];
+
+  useEffect(() => {
+    if (stepIndex > flowSteps.length - 1) {
+      setStepIndex(flowSteps.length - 1);
+    }
+  }, [flowSteps, stepIndex]);
+
+  useEffect(() => {
+    if (!error) return undefined;
+    const timer = window.setTimeout(() => setError(""), 7000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
   const handleFamilyChange = (id) => {
     setFamilyId(id);
     setModules(DEFAULT_MODULES[id] || []);
-    setIsGroundedMulti(false);
-    setLinkedMode("separate");
-    setServiceList(servicePresets(id, false));
+    setServiceList(servicePresets(id, isGroundedMulti, linkedMode));
   };
 
   const handleToggleModule = (id) => {
-    setModules((prev) =>
-      prev.includes(id) ? prev.filter((module) => module !== id) : [...prev, id]
-    );
+    setModules((prev) => (prev.includes(id) ? prev.filter((module) => module !== id) : [...prev, id]));
   };
 
   const handleServiceNameChange = (idx, value) => {
-    setServiceList((prev) => prev.map((svc, index) => (index === idx ? { ...svc, service_name: value } : svc)));
+    setServiceList((prev) =>
+      prev.map((svc, index) => (index === idx ? { ...svc, service_name: value } : svc))
+    );
   };
 
   const nextStep = () => {
-    if (step < 3) setStep(step + 1);
+    setStepIndex((prev) => Math.min(prev + 1, flowSteps.length - 1));
   };
 
   const prevStep = () => {
-    if (step > 1) setStep(step - 1);
+    setStepIndex((prev) => Math.max(prev - 1, 0));
+  };
+
+  const updateForm = (key) => (event) => {
+    setForm((prev) => ({ ...prev, [key]: event.target.value }));
+    if (error) setError("");
+  };
+
+  const applyModuleDefaults = async () => {
+    if (!modules?.length) return;
+    try {
+      const res = await api.get("/api/auth/services/");
+      const services = Array.isArray(res?.data) ? res.data : [];
+      if (!services.length) return;
+      const moduleSet = new Set(modules);
+      const identifiers = familyMeta?.identifiers || {};
+
+      await Promise.all(
+        services.map(async (svc) => {
+          const nextFeatures = { ...(svc.features || {}) };
+          const identifierEnabled = moduleSet.has("identifier");
+          const pricingEnabled = moduleSet.has("pricing");
+
+          nextFeatures.barcode = {
+            ...(nextFeatures.barcode || {}),
+            enabled: identifierEnabled ? Boolean(identifiers.barcode) : false,
+          };
+          nextFeatures.sku = {
+            ...(nextFeatures.sku || {}),
+            enabled: identifierEnabled ? Boolean(identifiers.sku) : false,
+          };
+          nextFeatures.dlc = {
+            ...(nextFeatures.dlc || {}),
+            enabled: moduleSet.has("expiry"),
+          };
+          nextFeatures.lot = {
+            ...(nextFeatures.lot || {}),
+            enabled: moduleSet.has("lot"),
+          };
+          nextFeatures.variants = {
+            ...(nextFeatures.variants || {}),
+            enabled: moduleSet.has("variants"),
+          };
+          nextFeatures.multi_unit = {
+            ...(nextFeatures.multi_unit || {}),
+            enabled: moduleSet.has("multiUnit"),
+          };
+          nextFeatures.open_container_tracking = {
+            ...(nextFeatures.open_container_tracking || {}),
+            enabled: moduleSet.has("opened"),
+          };
+          nextFeatures.item_type = {
+            ...(nextFeatures.item_type || {}),
+            enabled: moduleSet.has("itemType"),
+          };
+          nextFeatures.prices = {
+            ...(nextFeatures.prices || {}),
+            purchase_enabled: pricingEnabled,
+            selling_enabled: pricingEnabled,
+          };
+          nextFeatures.tva = {
+            ...(nextFeatures.tva || {}),
+            enabled: pricingEnabled,
+          };
+
+          await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
+        })
+      );
+    } catch (e) {
+      // On ne bloque pas l'inscription si un preset de module échoue.
+    }
   };
 
   const handleRegister = async (e) => {
@@ -140,7 +235,7 @@ export default function Register() {
         mode: "retail",
         bar: "bar",
         restauration: "restaurant",
-        boulangerie: "retail",
+        boulangerie: "grocery",
         pharmacie: "pharmacy",
       };
       const domainByFamily = {
@@ -149,7 +244,7 @@ export default function Register() {
         restauration: "food",
         boulangerie: "food",
         mode: "general",
-        pharmacie: "food",
+        pharmacie: "general",
       };
       await register({
         password: form.password,
@@ -164,6 +259,7 @@ export default function Register() {
           name: svc.service_name || "Secondaire",
         })),
       });
+      await applyModuleDefaults();
       nav("/app/dashboard");
     } catch (err) {
       setError(err?.message || "Impossible de créer le compte pour le moment.");
@@ -171,6 +267,12 @@ export default function Register() {
       setLoading(false);
     }
   };
+
+  const comboSummary = {
+    restauration: "Restaurant + Cuisine",
+    boulangerie: "Boulangerie + Pâtisserie",
+    pharmacie: "Pharmacie + Parapharmacie",
+  }[familyId];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center py-10 px-4">
@@ -180,20 +282,65 @@ export default function Register() {
 
       <h1 className="text-3xl font-black mb-2 text-center">Créer mon espace</h1>
       <p className="text-center text-slate-400 max-w-xl">
-        Choisis ta famille métier, active les modules qui te parlent, et réserve les champs
-        interprétés pour ton aventure StockScan.
+        Choisis ta famille métier, active les modules qui te parlent, et garde un onboarding pensé pour
+        ton quotidien.
       </p>
 
       <div className="w-full max-w-4xl mt-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-6">
         <Card className="bg-slate-900 border border-slate-800 p-6 space-y-5">
           <div className="flex items-center justify-between">
-            <span className="text-sm uppercase tracking-widest text-slate-500">Étape {step}/3</span>
-            <Button variant="secondary" size="sm" onClick={prevStep} disabled={step === 1}>
+            <span className="text-sm uppercase tracking-widest text-slate-500">
+              Étape {stepIndex + 1}/{flowSteps.length}
+            </span>
+            <Button variant="secondary" size="sm" onClick={prevStep} disabled={stepIndex === 0}>
               Précédent
             </Button>
           </div>
 
-          {step === 1 && (
+          {currentStep === "mode" && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Un service ou plusieurs ?</h2>
+                <p className="text-sm text-slate-400">
+                  Choisis si tu veux suivre un seul inventaire ou séparer plusieurs espaces.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGroundedMulti(false);
+                    setServiceList(servicePresets(familyId, false, linkedMode));
+                  }}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    !isGroundedMulti
+                      ? "border-blue-500 bg-slate-900 shadow-[0_0_30px_rgba(15,118,255,0.25)]"
+                      : "border-white/10 hover:border-white/30"
+                  }`}
+                >
+                  <div className="font-semibold">Un seul service</div>
+                  <div className="text-sm text-slate-400">Simple, rapide, parfait pour une équipe compacte.</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsGroundedMulti(true);
+                    setServiceList(servicePresets(familyId, true, linkedMode));
+                  }}
+                  className={`rounded-2xl border p-4 text-left transition ${
+                    isGroundedMulti
+                      ? "border-blue-500 bg-slate-900 shadow-[0_0_30px_rgba(15,118,255,0.25)]"
+                      : "border-white/10 hover:border-white/30"
+                  }`}
+                >
+                  <div className="font-semibold">Multi-services</div>
+                  <div className="text-sm text-slate-400">Cuisine + Salle, rayons, équipes… tout reste clair.</div>
+                </button>
+              </div>
+            </section>
+          )}
+
+          {currentStep === "family" && (
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Famille métier</h2>
@@ -216,21 +363,34 @@ export default function Register() {
                   </button>
                 ))}
               </div>
-              <div className="flex items-center gap-4">
-                <label className="text-sm text-slate-300">
-                  Multi-services ?
-                </label>
-                <Button
-                  variant={isGroundedMulti ? "secondary" : "outline"}
-                  size="sm"
-                  onClick={() => {
-                    const nextIsMulti = !isGroundedMulti;
-                    setIsGroundedMulti(nextIsMulti);
-                    setServiceList(servicePresets(familyId, nextIsMulti, linkedMode));
-                  }}
-                >
-                  {isGroundedMulti ? "Multi activé" : "Mono (par défaut)"}
-                </Button>
+            </section>
+          )}
+
+          {currentStep === "combo" && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Combinaisons intelligentes</h2>
+                <p className="text-sm text-slate-400">
+                  On te propose une organisation adaptée à {familyMeta.name.toLowerCase()}.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                <div className="text-sm text-slate-400">Combo conseillé</div>
+                <div className="text-lg font-semibold text-white">{comboSummary}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Tu pourras choisir regrouper ou séparer à l’étape suivante.
+                </div>
+              </div>
+            </section>
+          )}
+
+          {currentStep === "services" && (
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-xl font-semibold">Organisation des services</h2>
+                <p className="text-sm text-slate-400">
+                  Ajuste les noms et choisis si tu veux regrouper ou séparer les inventaires.
+                </p>
               </div>
               {linkedFamilies.has(familyId) && isGroundedMulti && (
                 <div className="flex items-center gap-3">
@@ -248,25 +408,6 @@ export default function Register() {
                   </select>
                 </div>
               )}
-              <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">
-                <div className="font-semibold">Identifiants recommandés</div>
-                <div className="text-slate-400">
-                  {familyMeta.identifiers?.barcode ? "Code-barres activé" : "Code-barres désactivé"} ·{" "}
-                  {familyMeta.identifiers?.sku ? "SKU activé" : "SKU désactivé"}
-                </div>
-                <div className="text-xs text-slate-500">Modifiable ensuite dans Settings → Modules.</div>
-              </div>
-            </section>
-          )}
-
-          {step === 2 && (
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-xl font-semibold">Services</h2>
-                <p className="text-sm text-slate-400">
-                  Personnalise chaque service, modifie le nom ou ajoute un service à la main.
-                </p>
-              </div>
               <div className="space-y-3">
                 {serviceList.map((service, index) => (
                   <Input
@@ -278,27 +419,33 @@ export default function Register() {
                   />
                 ))}
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setServiceList((prev) => [
-                    ...prev,
-                    { id: `svc-${Date.now()}`, service_type: "other", service_name: "Nouveau service" },
-                  ])
-                }
-              >
-                Ajouter un service
-              </Button>
+              {isGroundedMulti && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() =>
+                    setServiceList((prev) => [
+                      ...prev,
+                      {
+                        id: `svc-${Date.now()}`,
+                        service_type: servicePresets(familyId, false)[0]?.service_type || "other",
+                        service_name: "Nouveau service",
+                      },
+                    ])
+                  }
+                >
+                  Ajouter un service
+                </Button>
+              )}
             </section>
           )}
 
-          {step === 3 && (
+          {currentStep === "account" && (
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Compte & accès</h2>
                 <p className="text-sm text-slate-400">
-                  Crée ton espace {familyMeta.name.toLowerCase()} et débloque les modules recommandés.
+                  Crée ton espace {familyMeta.name.toLowerCase()} et active les modules utiles dès le départ.
                 </p>
               </div>
               <form onSubmit={handleRegister} className="space-y-3">
@@ -306,26 +453,26 @@ export default function Register() {
                   label="Nom du commerce"
                   placeholder={familyMeta.copy.headline}
                   value={form.storeName}
-                  onChange={(event) => setForm({ ...form, storeName: event.target.value })}
+                  onChange={updateForm("storeName")}
                 />
                 <Input
                   label="Email professionnel"
                   placeholder={`contact@${familyMeta.name.toLowerCase().replace(/\s+/g, "")}.com`}
                   type="email"
                   value={form.email}
-                  onChange={(event) => setForm({ ...form, email: event.target.value })}
+                  onChange={updateForm("email")}
                 />
                 <Input
                   label="Mot de passe"
                   type="password"
                   value={form.password}
-                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                  onChange={updateForm("password")}
                 />
                 <Input
                   label="Confirme le mot de passe"
                   type="password"
                   value={form.passwordConfirm}
-                  onChange={(event) => setForm({ ...form, passwordConfirm: event.target.value })}
+                  onChange={updateForm("passwordConfirm")}
                 />
                 {error && (
                   <div className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100">
@@ -340,11 +487,15 @@ export default function Register() {
           )}
 
           <div className="flex items-center justify-between mt-3">
-            <Button variant="secondary" onClick={nextStep} disabled={step === 3}>
-              {step === 3 ? "Réviser" : "Étape suivante"}
+            <Button
+              variant="secondary"
+              onClick={nextStep}
+              disabled={stepIndex === flowSteps.length - 1}
+            >
+              {stepIndex === flowSteps.length - 1 ? "Réviser" : "Étape suivante"}
             </Button>
             <div>
-              {step > 1 && (
+              {stepIndex > 0 && (
                 <Button variant="ghost" size="sm" onClick={prevStep}>
                   ← Revenir
                 </Button>
@@ -376,10 +527,20 @@ export default function Register() {
             ))}
           </div>
 
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/50 p-3 text-sm text-slate-300">
+            <div className="font-semibold">Identifiants recommandés</div>
+            <div className="text-slate-400">
+              {familyMeta.identifiers?.barcode ? "Code-barres activé" : "Code-barres désactivé"} ·{" "}
+              {familyMeta.identifiers?.sku ? "SKU activé" : "SKU désactivé"}
+            </div>
+            <div className="text-xs text-slate-500">Modifiable ensuite dans Settings → Modules.</div>
+          </div>
+
           <div className="text-sm text-slate-500">
             <p>Personnalise les champs disponibles et garde une expérience cible “famille métier”.</p>
             <p className="mt-2">
-              Besoin de changer la famille ou de réactiver le guide ? Tu peux revenir en arrière sans perdre ton avance.
+              Besoin de changer la famille ou de réactiver le guide ? Tu peux revenir en arrière sans perdre
+              ton avance.
             </p>
           </div>
 

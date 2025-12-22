@@ -3,8 +3,17 @@ import Card from "../ui/Card";
 import Divider from "../ui/Divider";
 import Button from "../ui/Button";
 import { Helmet } from "react-helmet-async";
+import { useAuth } from "../app/AuthProvider";
+import { getWording } from "../lib/labels";
 
 export default function Support() {
+  const { tenant, currentService, serviceProfile } = useAuth();
+  const serviceType = serviceProfile?.service_type || currentService?.service_type;
+  const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+  const wording = getWording(serviceType, serviceDomain);
+  const itemLabelLower = (wording.itemLabel || "élément").toLowerCase();
+  const identifierLabelLower = (wording.identifierLabel || "identifiant").toLowerCase();
+
   return (
     <PageTransition>
       <Helmet>
@@ -24,7 +33,10 @@ export default function Support() {
           <div>
             <div className="font-semibold text-slate-900">FAQ express</div>
             <ul className="mt-2 text-sm text-slate-600 space-y-2">
-              <li>• Comment ajouter un produit sans code-barres ? → onglet Produits, laissez “Code-barres” vide.</li>
+              <li>
+                • Comment ajouter un {itemLabelLower} sans {identifierLabelLower} ? → onglet Produits, laissez
+                l’identifiant vide si vous n’en avez pas.
+              </li>
               <li>• Comment changer de service ? → menu en haut (sélecteur service).</li>
               <li>• Comment exporter ? → page Exports, choisissez CSV/Excel.</li>
             </ul>

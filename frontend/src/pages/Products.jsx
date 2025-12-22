@@ -4,6 +4,7 @@ import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Input from "../ui/Input";
 import Button from "../ui/Button";
+import Skeleton from "../ui/Skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
@@ -50,6 +51,18 @@ export default function Products() {
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const familyIdentifiers = familyMeta?.identifiers ?? {};
   const familyModules = familyMeta?.modules ?? [];
+  const brandLabelByFamily = {
+    pharmacie: "Laboratoire / marque",
+    bar: "Marque / distillerie",
+    restauration: "Marque / origine",
+    boulangerie: "Marque / moulin",
+  };
+  const supplierLabelByFamily = {
+    pharmacie: "Grossiste / centrale",
+    bar: "Grossiste boissons",
+  };
+  const brandLabel = brandLabelByFamily[familyId] || "Marque";
+  const supplierLabel = supplierLabelByFamily[familyId] || "Fournisseur";
 
   const getFeatureFlag = (key, fallback = false) => {
     const cfg = serviceFeatures?.[key];
@@ -60,6 +73,8 @@ export default function Products() {
   };
 
   const wording = getWording(serviceType, serviceDomain);
+  const itemLabel = wording.itemLabel || "Élément";
+  const itemLabelLower = itemLabel.toLowerCase();
   const ux = getUxCopy(serviceType, serviceDomain);
   const placeholders = getPlaceholders(serviceType, serviceDomain);
   const helpers = getFieldHelpers(serviceType, serviceDomain);
@@ -74,6 +89,7 @@ export default function Products() {
   const purchaseEnabled = priceCfg.purchase_enabled !== false;
   const sellingEnabled = priceCfg.selling_enabled !== false;
   const priceRecommended = priceCfg.recommended === true;
+  const tvaEnabled = serviceFeatures?.tva?.enabled !== false;
 
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
@@ -196,7 +212,6 @@ export default function Products() {
       const payload = {
         name: form.name.trim(),
         category: form.category || "",
-        quantity: 0,
         inventory_month: editMonth || currentMonth,
         service: serviceId,
         unit: form.unit || "pcs",
@@ -220,7 +235,7 @@ export default function Products() {
 
       if (purchaseEnabled) payload.purchase_price = form.purchase_price || null;
       if (sellingEnabled) payload.selling_price = form.selling_price || null;
-      if (purchaseEnabled || sellingEnabled) {
+      if (tvaEnabled && (purchaseEnabled || sellingEnabled)) {
         payload.tva = form.tva === "" ? null : Number(form.tva);
       }
       if (itemTypeEnabled) payload.product_role = form.product_role || null;
@@ -233,7 +248,10 @@ export default function Products() {
       if (warnings.length) {
         pushToast?.({ message: warnings.join(" "), type: "warn" });
       } else {
-        pushToast?.({ message: editId ? "Produit mis à jour." : "Produit ajouté.", type: "success" });
+        pushToast?.({
+          message: editId ? `${itemLabel} mis à jour.` : `${itemLabel} ajouté.`,
+          type: "success",
+        });
       }
 
       resetForm();
@@ -303,6 +321,12 @@ export default function Products() {
       setPage(totalPages);
     }
   }, [page, totalPages]);
+
+  useEffect(() => {
+    if (!err) return undefined;
+    const timer = window.setTimeout(() => setErr(""), 7000);
+    return () => window.clearTimeout(timer);
+  }, [err]);
   useEffect(() => {
     setPage(1);
   }, [search, totalPages]);
@@ -350,7 +374,10 @@ export default function Products() {
               label="Recherche"
               placeholder={ux.searchHint}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                if (err) setErr("");
+              }}
             />
 
             <div className="flex gap-2">
@@ -455,7 +482,7 @@ export default function Products() {
               {barcodeEnabled && (
                 <Input
                   label={wording.barcodeLabel}
-                  placeholder="Scannez ou saisissez"
+                  placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
                   value={form.barcode}
                   onChange={(e) => setForm((p) => ({ ...p, barcode: e.target.value }))}
                   helper={helpers.barcode}
@@ -473,15 +500,15 @@ export default function Products() {
               )}
 
               <Input
-                label="Marque / laboratoire"
-                placeholder={placeholders.brand || "Ex. Sanofi, Nike, Brasserie X"}
+                label={brandLabel}
+                placeholder={placeholders.brand || "Ex. Marque X"}
                 value={form.brand}
                 onChange={(e) => setForm((p) => ({ ...p, brand: e.target.value }))}
               />
 
               <Input
-                label="Fournisseur"
-                placeholder={placeholders.supplier || "Ex. Metro, Promocash, Centrale"}
+                label={supplierLabel}
+                placeholder={placeholders.supplier || "Ex. Fournisseur X"}
                 value={form.supplier}
                 onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
               />
@@ -510,7 +537,7 @@ export default function Products() {
                 />
               )}
 
-              {(purchaseEnabled || sellingEnabled) && (
+              {(purchaseEnabled || sellingEnabled) && tvaEnabled && (
                 <label className="space-y-1.5">
                   <span className="text-sm font-medium text-slate-700">TVA</span>
                   <select
@@ -571,7 +598,7 @@ export default function Products() {
           {loading ? (
             <div className="space-y-2">
               {Array.from({ length: 4 }).map((_, idx) => (
-                <div key={idx} className="h-12 rounded-2xl bg-slate-100 animate-pulse" />
+                <Skeleton key={idx} className="h-12 w-full" />
               ))}
             </div>
           ) : filteredItems.length === 0 ? (
@@ -588,7 +615,7 @@ export default function Products() {
                       {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
                     </th>
                     {(purchaseEnabled || sellingEnabled) && (
-                      <th className="text-left px-4 py-3">Prix & TVA</th>
+                      <th className="text-left px-4 py-3">{tvaEnabled ? "Prix & TVA" : "Prix"}</th>
                     )}
                     {showUnit && <th className="text-left px-4 py-3">Unité</th>}
                     {!isAllServices && <th className="text-left px-4 py-3">Actions</th>}
@@ -632,7 +659,8 @@ export default function Products() {
                             )}
                             {sellingEnabled && (
                               <div className="text-xs text-slate-500">
-                                Vente: {p.selling_price ? `${p.selling_price} €` : "—"} · TVA {p.tva ?? "—"}%
+                                Vente: {p.selling_price ? `${p.selling_price} €` : "—"}
+                                {tvaEnabled ? ` · TVA ${p.tva ?? "—"}%` : ""}
                               </div>
                             )}
                           </div>
@@ -663,7 +691,10 @@ export default function Products() {
                                 tva: p.tva === null || p.tva === undefined ? "20" : String(p.tva),
                                 unit: p.unit || unitOptions[0],
                               });
-                              pushToast?.({ message: "Produit pré-rempli : modifiez puis validez.", type: "info" });
+                              pushToast?.({
+                                message: `Fiche ${itemLabelLower} pré-remplie : modifiez puis validez.`,
+                                type: "info",
+                              });
                             }}
                           >
                             Pré-remplir

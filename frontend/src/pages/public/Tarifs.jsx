@@ -1,24 +1,21 @@
-// frontend/src/pages/public/Tarifs.jsx
 import React, { useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import PublicShell from "../../components/public/PublicShell";
 import { api, setAuthToken } from "../../lib/api";
 import { getStoredToken } from "../../lib/auth";
 
 export default function Tarifs() {
-  const [cycle, setCycle] = useState("MONTHLY"); // MONTHLY | YEARLY
+  const [cycle, setCycle] = useState("MONTHLY");
   const [loadingPlan, setLoadingPlan] = useState("");
   const stripeEnabled = import.meta.env.VITE_STRIPE_ENABLED === "true";
 
   const plans = useMemo(() => buildPlans(cycle), [cycle]);
 
   const startCheckout = async (planCode) => {
-    // Enterprise / Free / invalid
     if (!planCode || planCode === "ESSENTIEL" || planCode === "ENTREPRISE") {
       if (planCode === "ESSENTIEL") {
-        // démarrer gratuitement => login/register
         window.location.href = "/register";
       } else {
-        // entreprise => contact
         window.location.href = "/contact";
       }
       return;
@@ -31,7 +28,6 @@ export default function Tarifs() {
 
     const token = getStoredToken();
     if (!token) {
-      // pas connecté -> login puis revenir
       const next = encodeURIComponent("/tarifs");
       window.location.href = `/login?next=${next}`;
       return;
@@ -43,7 +39,7 @@ export default function Tarifs() {
 
       const res = await api.post("/api/auth/billing/checkout/", {
         plan: planCode,
-        cycle, // MONTHLY|YEARLY
+        cycle,
       });
 
       const url = res?.data?.url;
@@ -61,12 +57,12 @@ export default function Tarifs() {
   };
 
   return (
-    <div className="public-shell">
+    <PublicShell>
       <Helmet>
         <title>Tarifs | StockScan</title>
         <meta
           name="description"
-          content="Plans Essentiel (gratuit), Boutique, Pro et Entreprise : multi-services, pertes, exports, IA, conformité. Downgrade sans perte de données, exports toujours accessibles."
+          content="Plans Essentiel, Boutique, Pro et Entreprise. Catalogue propre, inventaire métier, exports premium, IA coach."
         />
       </Helmet>
 
@@ -75,8 +71,8 @@ export default function Tarifs() {
           <p className="text-sm font-semibold text-blue-300 uppercase tracking-wide">Tarifs</p>
           <h1 className="text-3xl md:text-4xl font-bold">Tarifs transparents, sans surprise</h1>
           <p className="text-lg text-slate-200">
-            Essentiel gratuit pour démarrer, Boutique et Pro pour les équipes multi-services, Entreprise sur devis.
-            Downgrade sans perte de données, lecture/export toujours possibles.
+            Essentiel gratuit pour démarrer. Boutique et Pro pour les équipes multi-services. Entreprise pour les
+            contraintes réglementées ou multi-sites.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -141,12 +137,12 @@ export default function Tarifs() {
                 disabled={!stripeEnabled || (Boolean(loadingPlan) && loadingPlan !== plan.planCode)}
                 type="button"
               >
-              {loadingPlan === plan.planCode ? "Redirection…" : plan.cta}
-            </button>
+                {loadingPlan === plan.planCode ? "Redirection…" : plan.cta}
+              </button>
 
-            <p className="text-xs text-slate-300">{plan.note}</p>
-          </article>
-        ))}
+              <p className="text-xs text-slate-300">{plan.note}</p>
+            </article>
+          ))}
         </section>
 
         <section className="public-card p-6 space-y-4">
@@ -154,27 +150,27 @@ export default function Tarifs() {
           <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-100">
             <div>
               <p className="font-semibold">Puis-je tester avant de payer ?</p>
-              <p>Oui, la démo publique montre l’outil. Un essai (Boutique ou Pro) peut être activé sur demande.</p>
+              <p>Oui, l’essentiel est gratuit. Les plans payants sont activables à tout moment.</p>
             </div>
             <div>
               <p className="font-semibold">Comment sont gérés les multi-services ?</p>
-              <p>Chaque service a ses règles (food/non-food, pesée, entamé). Boutique : 2 services, Pro : 5 services.</p>
+              <p>Boutique : 2 services. Pro : 5 services. Le regroupement est configurable dans les paramètres.</p>
             </div>
             <div>
               <p className="font-semibold">L’assistant IA est-il inclus ?</p>
-              <p>Inclus en Pro (IA basique). Désactivable à tout moment. Non inclus en Essentiel/Boutique.</p>
+              <p>Inclus en Pro (IA coach). Désactivable à tout moment. Non inclus en Essentiel/Boutique.</p>
             </div>
             <div>
-              <p className="font-semibold">Exports et partage e-mail ?</p>
-              <p>Essentiel : 1 CSV/jour. Boutique : CSV illimités. Pro : CSV + PDF + partage e-mail illimité.</p>
+              <p className="font-semibold">Exports et partage email ?</p>
+              <p>Essentiel : CSV limité. Boutique : CSV illimités. Pro : CSV + XLSX + partage email.</p>
             </div>
             <div>
               <p className="font-semibold">Que se passe-t-il si je dépasse les limites ?</p>
-              <p>Lecture/export restent possibles. L’ajout est bloqué au-delà des quotas. Un message clair propose l’upgrade.</p>
+              <p>Lecture/export restent possibles. L’ajout est bloqué au-delà des quotas.</p>
             </div>
             <div>
               <p className="font-semibold">Et en cas d’impayé ?</p>
-              <p>Grâce de quelques jours, puis retour Essentiel. Aucune donnée supprimée. Exports toujours accessibles.</p>
+              <p>Grâce de quelques jours, puis retour Essentiel. Aucune donnée supprimée.</p>
             </div>
           </div>
         </section>
@@ -183,8 +179,7 @@ export default function Tarifs() {
           <section className="rounded-2xl border border-amber-500/40 bg-amber-900/30 text-white p-6 space-y-2">
             <div className="text-sm font-semibold">Paiements désactivés</div>
             <p className="text-xs text-amber-100">
-              Stripe n’est pas configuré sur cette instance. Vérifiez `VITE_STRIPE_ENABLED` et les clés Stripe
-              (clé API + webhook). Les boutons seront activés automatiquement dès que Stripe sera prêt.
+              Stripe n’est pas configuré sur cette instance. Vérifiez `VITE_STRIPE_ENABLED` et les clés Stripe.
             </p>
           </section>
         )}
@@ -203,7 +198,7 @@ export default function Tarifs() {
           </button>
         </section>
       </main>
-    </div>
+    </PublicShell>
   );
 }
 
@@ -212,7 +207,7 @@ function buildPlans(cycle) {
 
   return [
     {
-      name: "Essentiel (Free)",
+      name: "Essentiel",
       planCode: "ESSENTIEL",
       subtitle: "Pour démarrer gratuitement",
       price: "0€",
@@ -221,7 +216,7 @@ function buildPlans(cycle) {
         "1 service, 1 utilisateur, 100 produits",
         "Historique mouvements 14 jours",
         "Exports CSV (1/jour)",
-        "Inventaire de base (avec/sans code-barres)",
+        "Inventaire de base (barcode/SKU)",
         "Lecture/export même en dépassement",
       ],
       cta: "Démarrer gratuitement",
@@ -230,34 +225,34 @@ function buildPlans(cycle) {
     {
       name: "Boutique",
       planCode: "BOUTIQUE",
-      subtitle: "Pour petites équipes multi-services",
+      subtitle: "Petites équipes & commerce de proximité",
       price: isYearly ? "90€" : "9€",
       cycleLabel: isYearly ? "/an" : "/mois",
       yearly: isYearly ? "Économie ≈ 2 mois" : "ou 90€ / an",
       features: [
         "2 services, 3 utilisateurs, 1 000 produits",
         "Exports CSV illimités",
-        "Pertes + alertes stock par e-mail",
+        "Pertes + alertes stock",
         "Rôles par service",
         "Support prioritaire e-mail",
       ],
       cta: "Passer au plan Boutique",
-      note: "Idéal pour boutiques/épiceries multi-stands ou multi-zones.",
+      note: "Idéal pour retail, mode, bar mono-zone.",
     },
     {
       name: "Pro",
       planCode: "PRO",
-      subtitle: "Pour hôtels, campings, groupes",
+      subtitle: "Multi-services & équipes",
       price: isYearly ? "190€" : "19€",
       cycleLabel: isYearly ? "/an" : "/mois",
       yearly: isYearly ? "Économie ≈ 2 mois" : "ou 190€ / an",
       popular: true,
       features: [
         "5 services, 10 utilisateurs, produits illimités",
-        "Profils métiers automatiques (food/non-food)",
-        "Pertes + entamé/non entamé + lots/DLC",
-        "Exports CSV + PDF, partage e-mail",
-        "Assistant IA (basique), automations, analytics multi-services",
+        "Modules métiers complets (DLC, lots, entamés)",
+        "Exports CSV + XLSX, partage e-mail",
+        "Assistant IA (coach) et analytics",
+        "Automations & alertes avancées",
       ],
       cta: "Choisir le plan Pro",
       note: "Pour structures multi-services exigeantes.",
@@ -265,7 +260,7 @@ function buildPlans(cycle) {
     {
       name: "Entreprise",
       planCode: "ENTREPRISE",
-      subtitle: "Sur-mesure et conformité",
+      subtitle: "Sur-mesure & conformité",
       price: "Sur devis",
       cycleLabel: "",
       features: [

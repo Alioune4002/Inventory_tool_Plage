@@ -1,234 +1,258 @@
-import React, { useEffect, useRef, useState } from "react";
-import { motion, AnimatePresence, useInView } from "framer-motion";
-import DemoProvider, { useDemo } from "./context/DemoProvider";
-import DemoSidebar from "./components/DemoSidebar";
-import DemoTopbar from "./components/DemoTopbar";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import Card from "../ui/Card";
-import DemoDashboard from "./pages/DemoDashboard";
-import DemoInventory from "./pages/DemoInventory";
-import DemoExports from "./pages/DemoExports";
-import DemoLosses from "./pages/DemoLosses";
 
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== "false";
 
-const navItems = [
-  ["dashboard", "Dashboard"],
-  ["inventory", "Inventaire"],
-  ["losses", "Pertes"],
-  ["exports", "Exports"],
+const SCENES = [
+  {
+    id: "catalogue",
+    label: "Catalogue",
+    title: "Produits = catalogue",
+    subtitle: "Un référentiel unique : catégories, identifiants, TVA, notes.",
+    helper: "Zéro stock ici. Le comptage se fait côté Inventaire.",
+  },
+  {
+    id: "inventory",
+    label: "Inventaire",
+    title: "Inventaire = comptage",
+    subtitle: "Quantités du mois, pertes optionnelles, champs métier activés.",
+    helper: "Comptage rapide + pré-remplissage des champs non quantité.",
+  },
+  {
+    id: "exports",
+    label: "Exports",
+    title: "Exports sur mesure",
+    subtitle: "Choisissez vos champs, vos catégories et les graphiques.",
+    helper: "CSV/XLSX prêts pour la compta et les équipes.",
+  },
 ];
 
-function useDesktopBreakpoint() {
-  const [isDesktop, setIsDesktop] = useState(() => {
-    if (typeof window === "undefined") return true;
-    return window.innerWidth >= 1024;
-  });
+const MOTION = {
+  enter: { opacity: 0, y: 16, scale: 0.98 },
+  center: { opacity: 1, y: 0, scale: 1 },
+  exit: { opacity: 0, y: -12, scale: 0.98 },
+};
+
+const sampleRows = [
+  { name: "Article 102", category: "Rayon A", identifier: "SKU-102", price: "12,40 €" },
+  { name: "Article 244", category: "Rayon B", identifier: "EAN 356...", price: "6,90 €" },
+  { name: "Article 556", category: "Rayon C", identifier: "SKU-556", price: "3,60 €" },
+];
+
+const StatCard = ({ label, value }) => (
+  <Card className="p-3 border-white/10 bg-white/5">
+    <div className="text-xs text-white/60">{label}</div>
+    <div className="text-lg font-semibold text-white">{value}</div>
+  </Card>
+);
+
+const CataloguePanel = () => (
+  <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 space-y-4">
+    <div className="flex items-center justify-between text-xs text-white/60">
+      <span>Catalogue</span>
+      <span>Mis à jour</span>
+    </div>
+    <div className="grid grid-cols-3 gap-3">
+      <StatCard label="Références" value="326" />
+      <StatCard label="Catégories" value="12" />
+      <StatCard label="TVA active" value="Oui" />
+    </div>
+    <div className="space-y-2">
+      {sampleRows.map((row) => (
+        <div
+          key={row.name}
+          className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 flex items-center justify-between"
+        >
+          <div>
+            <div className="font-semibold text-white">{row.name}</div>
+            <div className="text-xs text-white/50">
+              {row.category} · {row.identifier}
+            </div>
+          </div>
+          <div className="text-xs font-semibold text-white/70">{row.price}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const InventoryPanel = () => (
+  <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 space-y-3">
+    <div className="flex items-center justify-between text-xs text-white/60">
+      <span>Comptage · Décembre</span>
+      <span>Pertes activées</span>
+    </div>
+    <div className="space-y-2">
+      {sampleRows.map((row) => (
+        <div key={row.name} className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+          <div className="flex items-center justify-between text-sm text-white">
+            <span className="font-semibold">{row.name}</span>
+            <span className="text-xs text-white/60">PCS</span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-white/70">
+              Quantité · —
+            </div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-2 py-1 text-white/60">
+              Pertes · 0
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
+const ExportPanel = () => (
+  <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-4 space-y-4">
+    <div className="flex items-center justify-between text-xs text-white/60">
+      <span>Exports</span>
+      <span>Excel / CSV</span>
+    </div>
+    <div className="grid grid-cols-2 gap-2 text-xs text-white/70">
+      {["Nom", "Catégorie", "Identifiant", "Quantité", "TVA", "Service"].map((label) => (
+        <div key={label} className="rounded-xl border border-white/10 bg-white/5 px-2 py-1">
+          ✓ {label}
+        </div>
+      ))}
+    </div>
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80">
+      Graphiques & synthèse inclus
+    </div>
+    <button
+      type="button"
+      className="w-full rounded-2xl bg-blue-500/90 py-2 text-sm font-semibold text-white shadow-[0_15px_35px_rgba(59,130,246,0.35)]"
+    >
+      Télécharger l’export
+    </button>
+  </div>
+);
+
+const ScenePanel = ({ sceneId }) => {
+  if (sceneId === "inventory") return <InventoryPanel />;
+  if (sceneId === "exports") return <ExportPanel />;
+  return <CataloguePanel />;
+};
+
+const PhonePreview = ({ sceneId }) => (
+  <div className="rounded-[36px] border border-white/10 bg-slate-950 p-3 shadow-[0_20px_40px_rgba(15,23,42,0.55)]">
+    <div className="rounded-[28px] overflow-hidden border border-white/10 bg-slate-950">
+      <div className="h-7 bg-slate-900 flex items-center justify-center">
+        <div className="h-2 w-16 rounded-full bg-white/20" />
+      </div>
+      <div className="p-3 space-y-2">
+        <div className="text-[11px] text-white/60">UI mobile (démo)</div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+          {sceneId === "inventory" ? "Comptage rapide" : sceneId === "exports" ? "Exports" : "Catalogue"}
+        </div>
+        <div className="space-y-2">
+          {sampleRows.slice(0, 2).map((row) => (
+            <div key={row.name} className="rounded-xl border border-white/10 bg-white/5 px-2 py-2 text-xs text-white/80">
+              <div className="font-semibold">{row.name}</div>
+              <div className="text-white/50">{row.category}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+export default function AutoDemoShowcase() {
+  if (!DEMO_MODE) return null;
+
+  const reduceMotion = useReducedMotion();
+  const [active, setActive] = useState(0);
+  const containerRef = useRef(null);
+  const isInView = useInView(containerRef, { margin: "-30% 0px -30% 0px" });
+
+  const activeScene = useMemo(() => SCENES[active] || SCENES[0], [active]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const handler = () => setIsDesktop(window.innerWidth >= 1024);
-    handler();
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, []);
-
-  return isDesktop;
-}
-
-function ScreenRenderer({ route }) {
-  if (route === "inventory") return <DemoInventory />;
-  if (route === "exports") return <DemoExports />;
-  if (route === "losses") return <DemoLosses />;
-  return <DemoDashboard />;
-}
-
-function DesktopDemo() {
-  const { route, setRoute, highlight, toast, setAutoActive } = useDemo();
-  const shellRef = useRef(null);
-  const isVisible = useInView(shellRef, { margin: "-30% 0px -30% 0px" });
-
-  useEffect(() => {
-    if (isVisible) {
-      setAutoActive(true);
-    }
-  }, [isVisible, setAutoActive]);
+    if (!isInView || reduceMotion) return undefined;
+    const timer = window.setInterval(() => {
+      setActive((prev) => (prev + 1) % SCENES.length);
+    }, 7500);
+    return () => window.clearInterval(timer);
+  }, [isInView, reduceMotion]);
 
   return (
-    <div ref={shellRef} className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950/95 via-slate-900/90 to-slate-950/95 text-white shadow-[0_30px_70px_rgba(15,23,42,0.65)] overflow-hidden">
-      <div className="hidden lg:block">
-        <DemoTopbar />
-      </div>
+    <section
+      ref={containerRef}
+      className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6 text-white shadow-[0_30px_80px_rgba(15,23,42,0.6)]"
+    >
+      <div className="pointer-events-none absolute inset-0 bg-grid opacity-10" />
+      <div className="pointer-events-none absolute -top-32 -right-40 h-72 w-72 rounded-full bg-blue-500/20 blur-[120px]" />
+      <div className="pointer-events-none absolute -bottom-32 -left-40 h-72 w-72 rounded-full bg-cyan-400/20 blur-[120px]" />
 
-      <div className="grid lg:grid-cols-[288px_1fr_360px] min-h-[520px]">
-        <DemoSidebar />
+      <div className="grid lg:grid-cols-[1.1fr_1fr] gap-6 items-start">
+        <div className="space-y-4">
+          <div className="text-xs uppercase tracking-[0.35em] text-white/60">Auto-démo</div>
+          <h3 className="text-3xl font-black tracking-tight">{activeScene.title}</h3>
+          <p className="text-white/70">{activeScene.subtitle}</p>
+          <p className="text-sm text-white/50">{activeScene.helper}</p>
 
-        <div className="p-4 lg:p-6 bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/90 relative overflow-hidden">
-          <div className="flex flex-wrap gap-2 mb-4 text-slate-100">
-            {navItems.map(([k, label]) => (
-              <motion.button
-                key={k}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.96 }}
-                onClick={() => setRoute(k)}
-                className={`px-3 py-2 rounded-2xl text-sm font-semibold border border-[var(--border)]
-                ${route === k ? "bg-slate-900 text-white shadow-[0_0_20px_rgba(15,23,42,0.45)]" : "bg-[var(--surface)] text-[var(--text)]"}`}
+          <div className="flex flex-wrap gap-2 pt-2">
+            {SCENES.map((scene, idx) => (
+              <button
+                key={scene.id}
+                type="button"
+                onClick={() => setActive(idx)}
+                className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition ${
+                  idx === active
+                    ? "border-white/40 bg-white text-slate-900"
+                    : "border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
+                }`}
               >
-                {label}
-              </motion.button>
+                {scene.label}
+              </button>
             ))}
           </div>
 
-          <div className="relative">
+          <div className="grid sm:grid-cols-2 gap-3 pt-3">
+            {[
+              "Champs adaptés par métier",
+              "Inventaire sans doublon",
+              "Exports personnalisables",
+              "Modules activables à la carte",
+            ].map((item) => (
+              <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative">
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+            <div className="flex items-center justify-between text-xs text-white/60">
+              <span>StockScan · Démo</span>
+              <span>Données fictives</span>
+            </div>
             <AnimatePresence mode="wait">
               <motion.div
-                key={route}
-                initial={{ opacity: 0, y: 18, scale: 0.96 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -18, scale: 0.94 }}
-                transition={{ duration: 0.65, ease: "easeOut" }}
+                key={activeScene.id}
+                initial={MOTION.enter}
+                animate={MOTION.center}
+                exit={MOTION.exit}
+                transition={{ duration: 0.7, ease: "easeOut" }}
+                className="mt-4"
               >
-                <ScreenRenderer route={route} />
+                <ScenePanel sceneId={activeScene.id} />
               </motion.div>
             </AnimatePresence>
-
-            <AnimatePresence>
-              {highlight?.text && (
-                <motion.div
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  transition={{ duration: 0.35, ease: "easeOut" }}
-                  className="pointer-events-none absolute top-4 right-4 z-20 max-w-[280px] w-full"
-                >
-                  <Card className="p-4 bg-white/10 text-white border border-white/20 shadow-[0_40px_60px_rgba(2,6,23,0.55)]">
-                    <div className="text-xs uppercase tracking-wide text-white/70">Auto-démo</div>
-                    <div className="mt-1 text-sm font-semibold leading-tight">{highlight.text}</div>
-                    <div className="mt-2 text-xs text-white/70">
-                      Données fictives · UI identique au produit
-                    </div>
-                  </Card>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-              {toast && (
-                <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 12 }}
-                  transition={{ duration: 0.25, ease: "easeOut" }}
-                  className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2"
-                >
-                  <div className="px-5 py-3 rounded-2xl bg-white/90 border border-slate-200 shadow-soft text-sm font-semibold text-slate-900">
-                    {toast.message}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
-        </div>
 
-        <div className="hidden lg:block p-6">
-          <div className="sticky top-20 space-y-3">
-            <div className="text-sm font-semibold text-slate-400">Aperçu mobile</div>
-            <div className="rounded-[38px] border border-slate-700 bg-white shadow-[0_25px_60px_rgba(15,23,42,0.45)] p-3">
-              <div className="rounded-[30px] overflow-hidden border border-slate-200 bg-slate-950 text-white">
-                <div className="h-7 bg-slate-900 flex items-center justify-center">
-                  <div className="h-2 w-16 rounded-full bg-white/20" />
-                </div>
-                <div className="p-3">
-                  <div className="text-xs text-slate-400 mb-2">UI réelle (démo)</div>
-                  <div className="scale-[0.85] origin-top-left w-[120%]">
-                    <ScreenRenderer route={route} />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="text-xs text-slate-500">
-              Affichage simplifié pour montrer l’app sur téléphone (comme Stripe).
-            </div>
+          <div className="hidden lg:block absolute -right-6 top-10 w-44">
+            <PhonePreview sceneId={activeScene.id} />
+          </div>
+
+          <div className="mt-4 lg:hidden">
+            <PhonePreview sceneId={activeScene.id} />
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function MobileDemo() {
-  const { route, setRoute, highlight, toast, setAutoActive } = useDemo();
-  const shellRef = useRef(null);
-  const isVisible = useInView(shellRef, { margin: "-40% 0px -40% 0px" });
-
-  useEffect(() => {
-    if (isVisible) {
-      setAutoActive(true);
-    }
-  }, [isVisible, setAutoActive]);
-
-  return (
-    <div
-      ref={shellRef}
-      className="rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950/90 via-slate-900/80 to-slate-950/80 text-white shadow-[0_20px_60px_rgba(2,6,23,0.55)] p-5 overflow-hidden"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs uppercase tracking-[0.3em] text-white/60">Auto-démo</div>
-          <h3 className="text-2xl font-black tracking-tight text-white">Voyez StockScan en action</h3>
-        </div>
-        <div className="text-sm font-semibold text-white/60">Données fictives</div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2 items-center">
-        {navItems.map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setRoute(k)}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-full border border-white/10 transition
-              ${route === k ? "bg-white text-slate-900 shadow-[0_10px_30px_rgba(0,0,0,0.4)]" : "bg-white/5 text-white/80 hover:bg-white/10"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      <motion.div
-        className="mt-4 rounded-3xl border border-white/5 bg-white/5 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.35)]"
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: "easeOut" }}
-      >
-        <ScreenRenderer route={route} />
-      </motion.div>
-
-      {highlight?.text && (
-        <div className="mt-4 rounded-3xl border border-white/10 bg-white/10 p-3 text-sm text-white/80 shadow-soft">
-          <div className="text-xs uppercase tracking-widest text-white/60">Focus</div>
-          <div className="font-semibold">{highlight.text}</div>
-          <p className="text-xs text-white/60">
-            UI identique, aucun writing dans la base (données fictives).
-          </p>
-        </div>
-      )}
-
-      {toast && (
-        <div className="mt-3 rounded-2xl border border-white/10 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900">
-          {toast.message}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function AutoDemoShowcase() {
-  if (!DEMO_MODE) {
-    return null;
-  }
-  const isDesktop = useDesktopBreakpoint();
-  return (
-    <DemoProvider>
-      {isDesktop ? <DesktopDemo /> : <MobileDemo />}
-    </DemoProvider>
+    </section>
   );
 }

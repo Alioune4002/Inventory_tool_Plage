@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { BadgeCheck, MessageCircle } from "lucide-react";
 
-export default function AssistantCoach({ familyName, modules }) {
+export default function AssistantCoach({ familyName, modules, identifierLabel = "code-barres ou SKU" }) {
   const [open, setOpen] = useState(true);
   const [prompt, setPrompt] = useState("");
   const proRequired = !modules.includes("pricing") || !modules.includes("identifier");
 
   const cannedSuggestions = [
     "Active le module Pricing & TVA pour voir les marges approximatives.",
-    "Ajoute un identifiant (barcode ou SKU) pour éviter les doublons.",
+    `Ajoute un identifiant (${identifierLabel}) pour éviter les doublons.`,
     "Besoin d’un suivi de lots ? Active le module Lot / Batch dans Paramètres.",
   ];
 

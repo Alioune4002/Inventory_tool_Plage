@@ -4,6 +4,7 @@ import { LayoutDashboard, Boxes, Package, Tag, Download, Settings, HelpCircle, M
 import { cn } from "../lib/cn";
 import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
+import { getWording } from "../lib/labels";
 
 const items = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -16,10 +17,22 @@ const items = [
   { to: "/app/support", label: "Support", icon: HelpCircle },
 ];
 
+const tourTargets = {
+  "/app/dashboard": "tour-dashboard",
+  "/app/inventory": "tour-inventory",
+  "/app/products": "tour-products",
+  "/app/exports": "tour-exports",
+  "/app/settings": "tour-settings",
+};
+
 export default function Sidebar() {
-  const { tenant } = useAuth();
+  const { tenant, services, serviceId, serviceProfile } = useAuth();
   const tenantDomain = tenant?.domain || "food";
   const isGeneral = tenantDomain === "general";
+  const currentService = services?.find((s) => String(s.id) === String(serviceId));
+  const serviceType = serviceProfile?.service_type || currentService?.service_type;
+  const wording = getWording(serviceType, tenantDomain);
+  const identifierLabel = wording?.identifierLabel || "code-barres";
 
   const filtered = items.filter((it) => {
     // si besoin masquer certains items pour non-alimentaire
@@ -44,6 +57,7 @@ export default function Sidebar() {
               <NavLink
                 key={it.to}
                 to={it.to}
+                data-tour={tourTargets[it.to]}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition",
@@ -66,7 +80,7 @@ export default function Sidebar() {
         <div className="text-xs font-semibold text-slate-700">Conseil</div>
         <div className="mt-1 text-sm text-slate-600">
           {isGeneral
-            ? "Crée tes catégories, puis ajoute tes produits (SKU ou code-barres)."
+            ? `Crée tes catégories, puis ajoute tes produits (identifiant : ${identifierLabel}).`
             : "Commence par l’inventaire du mois, puis exporte en Excel."}
         </div>
       </Card>

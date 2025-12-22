@@ -4,25 +4,28 @@ import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Input from "../ui/Input";
 import Button from "../ui/Button";
+import Skeleton from "../ui/Skeleton";
 import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { formatApiError } from "../lib/errorUtils";
-
-const REASONS = [
-  { value: "breakage", label: "Casse" },
-  { value: "expired", label: "DLC dépassée" },
-  { value: "theft", label: "Vol" },
-  { value: "free", label: "Offert" },
-  { value: "mistake", label: "Erreur" },
-  { value: "other", label: "Autre" },
-];
+import { getWording, getUxCopy, getLossReasons } from "../lib/labels";
 
 export default function Losses() {
-  const { serviceId, services, selectService, countingMode } = useAuth();
+  const {
+    serviceId,
+    services,
+    selectService,
+    countingMode,
+    tenant,
+    currentService,
+    serviceProfile,
+    serviceFeatures,
+  } = useAuth();
   const pushToast = useToast();
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [items, setItems] = useState([]);
+  const [page, setPage] = useState(1);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
@@ -34,6 +37,15 @@ export default function Losses() {
     note: "",
   });
 
+  const serviceType = serviceProfile?.service_type || currentService?.service_type;
+  const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+  const wording = getWording(serviceType, serviceDomain);
+  const ux = getUxCopy(serviceType, serviceDomain);
+  const reasons = useMemo(
+    () => getLossReasons(serviceType, serviceDomain, serviceFeatures),
+    [serviceType, serviceDomain, serviceFeatures]
+  );
+
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
     if (countingMode === "volume") return ["l", "ml"];
@@ -44,6 +56,19 @@ export default function Losses() {
   useEffect(() => {
     setForm((prev) => ({ ...prev, unit: unitOptions[0] }));
   }, [unitOptions]);
+
+  const PAGE_SIZE = 10;
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  const paginatedItems = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return items.slice(start, start + PAGE_SIZE);
+  }, [items, page]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const load = async () => {
     if (!serviceId) return;
@@ -128,6 +153,9 @@ export default function Losses() {
         <Card className="p-6 space-y-3">
           <div className="text-sm text-slate-500">Optionnel</div>
           <div className="text-2xl font-black tracking-tight">Pertes du mois</div>
+          <div className="text-sm text-slate-600">
+            Inventaire = comptage. Les pertes servent a qualifier les ecarts du mois.
+          </div>
           <div className="grid sm:grid-cols-3 gap-3 items-end">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
             {services?.length > 0 && (
@@ -156,7 +184,9 @@ export default function Losses() {
           <div className="text-sm font-semibold text-slate-700">Déclarer une perte</div>
           <form className="grid md:grid-cols-2 lg:grid-cols-3 gap-3 items-end" onSubmit={submit}>
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Produit (optionnel)</span>
+              <span className="text-sm font-medium text-slate-700">
+                {wording.itemLabel} (optionnel)
+              </span>
               <select
                 value={form.product}
                 onChange={(e) => setForm((p) => ({ ...p, product: e.target.value }))}
@@ -198,7 +228,7 @@ export default function Losses() {
                 onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
               >
-                {REASONS.map((r) => (
+                {reasons.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
                   </option>
@@ -213,7 +243,7 @@ export default function Losses() {
             />
             <Input
               label="Note"
-              placeholder="Optionnel (ex: bouteille cassée)"
+              placeholder="Optionnel (ex: casse, erreur de comptage)"
               value={form.note}
               onChange={(e) => setForm((p) => ({ ...p, note: e.target.value }))}
             />
@@ -228,12 +258,18 @@ export default function Losses() {
             <div className="text-sm font-semibold text-slate-700">Historique des pertes</div>
             <div className="text-xs text-slate-500">{items.length} lignes</div>
           </div>
-          {items.length ? (
+          {loading ? (
+            <div className="grid gap-2">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <Skeleton key={idx} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : items.length ? (
             <div className="overflow-auto">
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="text-left text-slate-500 border-b">
-                    <th className="py-2 pr-3">Produit</th>
+                    <th className="py-2 pr-3">{wording.itemLabel}</th>
                     <th className="py-2 pr-3">Quantité</th>
                     <th className="py-2 pr-3">Raison</th>
                     <th className="py-2 pr-3">Date</th>
@@ -242,14 +278,14 @@ export default function Losses() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((l) => (
+                  {paginatedItems.map((l) => (
                     <tr key={l.id} className="border-b last:border-0">
                       <td className="py-2 pr-3">{l.product_name || l.product?.name || "—"}</td>
                       <td className="py-2 pr-3">
                         {l.quantity} {l.unit}
                       </td>
                       <td className="py-2 pr-3">
-                        {REASONS.find((r) => r.value === l.reason)?.label || l.reason}
+                        {reasons.find((r) => r.value === l.reason)?.label || l.reason}
                       </td>
                       <td className="py-2 pr-3">{l.occurred_at?.slice(0, 16) || "—"}</td>
                       <td className="py-2 pr-3 text-slate-500">{l.note || "—"}</td>
@@ -264,7 +300,35 @@ export default function Losses() {
               </table>
             </div>
           ) : (
-            <div className="text-sm text-slate-500">Aucune perte déclarée pour ce mois. Optionnel mais utile pour suivre la casse/DLC.</div>
+            <div className="text-sm text-slate-500">
+              Aucune perte déclarée pour ce mois. Optionnel mais utile pour suivre les ecarts.
+            </div>
+          )}
+
+          {!loading && items.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>
+                Page {page} / {totalPages} · {items.length} pertes
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                  disabled={page === 1}
+                >
+                  Précédent
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                  disabled={page === totalPages}
+                >
+                  Suivant
+                </Button>
+              </div>
+            </div>
           )}
         </Card>
       </div>

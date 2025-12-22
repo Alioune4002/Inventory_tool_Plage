@@ -13,7 +13,6 @@ import PourBoulangeriePatisserie from "../pages/public/PourBoulangeriePatisserie
 import PourEpicerie from "../pages/public/PourEpicerie.jsx";
 import PourPharmacie from "../pages/public/PourPharmacie.jsx";
 import PourBoutique from "../pages/public/PourBoutique.jsx";
-import PourHotelCamping from "../pages/public/PourHotelCamping.jsx";
 import Fonctionnalites from "../pages/public/Fonctionnalites.jsx";
 import Tarifs from "../pages/public/Tarifs.jsx";
 import PublicSupport from "../pages/public/PublicSupport.jsx";
@@ -46,7 +45,6 @@ export default function AppRoutes() {
       <Route path="/pour-epicerie" element={<PourEpicerie />} />
       <Route path="/pour-pharmacie" element={<PourPharmacie />} />
       <Route path="/pour-boutique" element={<PourBoutique />} />
-      <Route path="/pour-hotel-camping" element={<PourHotelCamping />} />
       <Route path="/fonctionnalites" element={<Fonctionnalites />} />
       <Route path="/tarifs" element={<Tarifs />} />
       <Route path="/support" element={<PublicSupport />} />

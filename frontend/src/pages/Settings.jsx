@@ -5,18 +5,36 @@ import Card from "../ui/Card";
 import Input from "../ui/Input";
 import Button from "../ui/Button";
 import PageTransition from "../components/PageTransition";
+import Skeleton from "../ui/Skeleton";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import Divider from "../ui/Divider";
 import useEntitlements from "../app/useEntitlements";
-import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
+const FeatureToggle = ({ label, description, helper, checked, onChange, disabled }) => (
+  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3">
+    <input
+      type="checkbox"
+      className="mt-1 accent-blue-600"
+      checked={checked}
+      onChange={onChange}
+      disabled={disabled}
+    />
+    <div className="space-y-1">
+      <div className="text-sm font-semibold text-slate-900">{label}</div>
+      {description ? <div className="text-xs text-slate-500">{description}</div> : null}
+      {helper ? <div className="text-xs text-slate-400">{helper}</div> : null}
+    </div>
+  </label>
+);
+
 export default function Settings() {
-  const { me, tenant, services, refreshServices, logout } = useAuth();
+  const { me, tenant, services, refreshServices, logout, serviceId, selectService, isAllServices } = useAuth();
   const { data: entitlements, loading: entLoading, refetch: refetchEntitlements } = useEntitlements();
   const pushToast = useToast();
 
@@ -49,6 +67,20 @@ export default function Settings() {
   });
 
   const serviceOptions = useMemo(() => safeArray(services), [services]);
+  const hasMultiServices = serviceOptions.length > 1;
+  const defaultServiceId = useMemo(() => {
+    if (serviceId && serviceId !== "all") return String(serviceId);
+    if (serviceOptions[0]) return String(serviceOptions[0].id);
+    return "";
+  }, [serviceId, serviceOptions]);
+  const moduleLookup = useMemo(
+    () =>
+      MODULES.reduce((acc, mod) => {
+        acc[mod.id] = mod;
+        return acc;
+      }, {}),
+    []
+  );
 
   const loadMembers = async () => {
     setMembersLoading(true);
@@ -161,8 +193,16 @@ export default function Settings() {
     setLoading(true);
     try {
       const nextFeatures = { ...(svc.features || {}) };
-      if (key === "open_container_tracking") {
-        nextFeatures[key] = { enabled: value };
+      if (key === "prices_purchase") {
+        const prices = { ...(nextFeatures.prices || {}) };
+        prices.purchase_enabled = value;
+        nextFeatures.prices = prices;
+      } else if (key === "prices_selling") {
+        const prices = { ...(nextFeatures.prices || {}) };
+        prices.selling_enabled = value;
+        nextFeatures.prices = prices;
+      } else if (key === "tva") {
+        nextFeatures.tva = { ...(nextFeatures.tva || {}), enabled: value };
       } else {
         nextFeatures[key] = { ...(nextFeatures[key] || {}), enabled: value };
       }
@@ -319,7 +359,7 @@ export default function Settings() {
                 {membersLoading ? (
                   <div className="grid gap-2">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-12 w-full animate-pulse rounded-2xl bg-slate-100" />
+                      <Skeleton key={i} className="h-12 w-full" />
                     ))}
                   </div>
                 ) : members.length ? (
@@ -396,7 +436,7 @@ export default function Settings() {
                 {membersLoading ? (
                   <div className="grid gap-2">
                     {[1, 2, 3].map((i) => (
-                      <div key={i} className="h-10 w-full animate-pulse rounded-2xl bg-slate-100" />
+                      <Skeleton key={i} className="h-10 w-full" />
                     ))}
                   </div>
                 ) : recentActivity.length ? (
@@ -571,10 +611,81 @@ export default function Settings() {
               <span className="text-xs text-slate-500">Persiste sur cet appareil.</span>
             </label>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                localStorage.removeItem("stockscan_tour_v1");
+                pushToast?.({ message: "Visite guidée réinitialisée. Retournez sur le dashboard pour la relancer.", type: "success" });
+              }}
+            >
+              Relancer la visite guidée
+            </Button>
+          </div>
         </Card>
 
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Services</div>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <div className="text-sm font-semibold text-slate-700">Services & modules</div>
+              <div className="text-sm text-slate-500">
+                Activez les modules métier : ils pilotent les champs visibles dans Produits, Inventaire et Exports.
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+            <div className="text-sm font-semibold text-slate-800">Regrouper ou séparer vos services</div>
+            <div className="text-xs text-slate-500">
+              Ce choix organise la navigation et les tableaux de bord (vue globale ou vue par service).
+            </div>
+            {hasMultiServices ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant={isAllServices ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() => selectService("all")}
+                  >
+                    Regrouper (vue globale)
+                  </Button>
+                  <Button
+                    variant={!isAllServices ? "primary" : "secondary"}
+                    size="sm"
+                    onClick={() => {
+                      if (defaultServiceId) selectService(defaultServiceId);
+                    }}
+                  >
+                    Séparer (par service)
+                  </Button>
+                </div>
+                {!isAllServices && defaultServiceId ? (
+                  <label className="space-y-1.5">
+                    <span className="text-xs font-semibold text-slate-600">Service par défaut</span>
+                    <select
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                      value={defaultServiceId}
+                      onChange={(e) => selectService(e.target.value)}
+                    >
+                      {serviceOptions.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <div className="text-xs text-slate-500">
+                  Vous pourrez toujours basculer depuis la barre supérieure.
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500">
+                Ajoutez un 2e service pour activer le regroupement multi-services.
+              </div>
+            )}
+          </div>
+
           <div className="grid md:grid-cols-3 gap-3 items-end">
             <Input label="Nouveau service" placeholder="Ex. Bar" value={newService} onChange={(e) => setNewService(e.target.value)} />
             <Button onClick={addService} loading={loading}>
@@ -583,68 +694,163 @@ export default function Settings() {
             {toast && <div className="text-sm text-slate-500">{toast}</div>}
           </div>
 
-          <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
             {(services || []).map((s) => {
               const features = s.features || {};
               const serviceType = s.service_type;
               const familyId = resolveFamilyId(serviceType, tenant?.domain);
               const familyMeta = FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0];
+              const modules = familyMeta?.modules || [];
+              const moduleNames = modules.map((id) => moduleLookup[id]?.name || id);
               const identifiers = familyMeta?.identifiers || {};
               const wording = getWording(serviceType, tenant?.domain);
+
               const recBarcode = typeof identifiers.barcode === "boolean" ? identifiers.barcode : true;
               const recSku = typeof identifiers.sku === "boolean" ? identifiers.sku : true;
+              const priceCfg = features.prices || {};
+              const purchaseEnabled = priceCfg.purchase_enabled !== false;
+              const sellingEnabled = priceCfg.selling_enabled !== false;
+              const tvaEnabled = features.tva?.enabled !== false;
+              const dlcEnabled = features.dlc?.enabled !== false && tenant?.domain !== "general";
+              const openEnabled = features.open_container_tracking?.enabled === true;
+              const lotEnabled = features.lot?.enabled === true;
+              const multiUnitEnabled = features.multi_unit?.enabled === true;
+              const variantsEnabled = features.variants?.enabled === true;
+              const itemTypeEnabled = features.item_type?.enabled === true;
+              const hasModule = (id) => modules.includes(id);
+
               return (
                 <Card key={s.id} className="p-4 space-y-3" hover>
-                  <div className="font-semibold text-slate-900">{s.name}</div>
-                  <div className="text-xs text-slate-500">Type: {s.service_type}</div>
-                  <Divider />
-                  <div className="space-y-2 text-sm">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={features.barcode?.enabled !== false}
-                        onChange={(e) => toggleFeature(s, "barcode", e.target.checked)}
-                      />
-                      <span>{wording?.barcodeLabel || "Code-barres"}</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={features.sku?.enabled !== false}
-                        onChange={(e) => toggleFeature(s, "sku", e.target.checked)}
-                      />
-                      <span>{wording?.skuLabel || "SKU interne"}</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={features.dlc?.enabled !== false && tenant?.domain !== "general"}
-                        onChange={(e) => toggleFeature(s, "dlc", e.target.checked)}
-                        disabled={tenant?.domain === "general"}
-                      />
-                      <span>DLC</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={features.open_container_tracking?.enabled === true}
-                        onChange={(e) => toggleFeature(s, "open_container_tracking", e.target.checked)}
-                      />
-                      <span>Suivi entamé (bars/resto)</span>
-                    </label>
-                    <div className="text-xs text-slate-500">
-                      Recommandé pour {familyMeta?.name || "ce métier"} :{" "}
-                      {recBarcode ? "code-barres activé" : "code-barres désactivé"} ·{" "}
-                      {recSku ? "SKU activé" : "SKU désactivé"}
+                  <div className="space-y-1">
+                    <div className="font-semibold text-slate-900">{s.name}</div>
+                    <div className="text-xs text-slate-500">Métier : {familyMeta?.name || "—"}</div>
+                    <div className="text-xs text-slate-400">
+                      Modules recommandés : {moduleNames.length ? moduleNames.join(", ") : "Base"}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => applyIdentifierDefaults(s, identifiers)}
-                      disabled={loading}
-                    >
-                      Appliquer la recommandation métier
-                    </Button>
+                  </div>
+                  <Divider />
+
+                  <div className="space-y-3 text-sm">
+                    {hasModule("identifier") && (
+                      <div className="space-y-2">
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Identifiants</div>
+                        <FeatureToggle
+                          label={wording?.barcodeLabel || "Code-barres"}
+                          description="Scan rapide pour retrouver un article et éviter les doublons."
+                          helper={`Recommandé : ${recBarcode ? "activé" : "désactivé"} pour ${familyMeta?.name || "ce métier"}.`}
+                          checked={features.barcode?.enabled !== false}
+                          onChange={(e) => toggleFeature(s, "barcode", e.target.checked)}
+                          disabled={loading}
+                        />
+                        <FeatureToggle
+                          label={wording?.skuLabel || "SKU interne"}
+                          description="Référence interne stable pour garder un catalogue propre."
+                          helper={`Recommandé : ${recSku ? "activé" : "désactivé"} pour ${familyMeta?.name || "ce métier"}.`}
+                          checked={features.sku?.enabled !== false}
+                          onChange={(e) => toggleFeature(s, "sku", e.target.checked)}
+                          disabled={loading}
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => applyIdentifierDefaults(s, identifiers)}
+                          disabled={loading}
+                        >
+                          Appliquer la recommandation métier
+                        </Button>
+                      </div>
+                    )}
+
+                    {hasModule("pricing") && (
+                      <div className="space-y-2">
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Pricing & TVA</div>
+                        <FeatureToggle
+                          label="Prix d’achat (HT)"
+                          description="Base de valeur de stock et coût des pertes."
+                          checked={purchaseEnabled}
+                          onChange={(e) => toggleFeature(s, "prices_purchase", e.target.checked)}
+                          disabled={loading}
+                        />
+                        <FeatureToggle
+                          label="Prix de vente (TTC par défaut)"
+                          description="Active les marges théoriques et le CA potentiel."
+                          checked={sellingEnabled}
+                          onChange={(e) => toggleFeature(s, "prices_selling", e.target.checked)}
+                          disabled={loading}
+                        />
+                        <FeatureToggle
+                          label="TVA"
+                          description="Taux exportables (0%, 5.5%, 10%, 20%)."
+                          checked={tvaEnabled}
+                          onChange={(e) => toggleFeature(s, "tva", e.target.checked)}
+                          disabled={loading}
+                        />
+                        <div className="text-xs text-slate-500">
+                          Sans prix de vente, la marge estimée reste indicative.
+                        </div>
+                      </div>
+                    )}
+
+                    {hasModule("expiry") && (
+                      <FeatureToggle
+                        label="DLC / DDM"
+                        description="Ajoute les dates limites dans Inventaire et Exports."
+                        checked={dlcEnabled}
+                        onChange={(e) => toggleFeature(s, "dlc", e.target.checked)}
+                        disabled={tenant?.domain === "general" || loading}
+                      />
+                    )}
+
+                    {hasModule("lot") && (
+                      <FeatureToggle
+                        label="Lot / Batch"
+                        description="Traçabilité renforcée, utile pour la conformité."
+                        checked={lotEnabled}
+                        onChange={(e) => toggleFeature(s, "lot", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
+
+                    {hasModule("variants") && (
+                      <FeatureToggle
+                        label="Variantes (taille, couleur)"
+                        description="Ajoute tailles/couleurs sur Produits et Inventaire."
+                        checked={variantsEnabled}
+                        onChange={(e) => toggleFeature(s, "variants", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
+
+                    {hasModule("opened") && (
+                      <FeatureToggle
+                        label="Ouvert / entamé"
+                        description="Suivi des contenants entamés (bar, cuisine, boulangerie)."
+                        checked={openEnabled}
+                        onChange={(e) => toggleFeature(s, "open_container_tracking", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
+
+                    {hasModule("multiUnit") && (
+                      <FeatureToggle
+                        label="Multi-unités & conversions"
+                        description="Conversions d’unités (kg ↔ pièce ↔ L)."
+                        checked={multiUnitEnabled}
+                        onChange={(e) => toggleFeature(s, "multi_unit", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
+
+                    {hasModule("itemType") && (
+                      <FeatureToggle
+                        label="Matières premières / produits finis"
+                        description="Active un type d’article pour séparer matières et ventes."
+                        helper="Les ventes/marges s’appuient sur les produits finis."
+                        checked={itemTypeEnabled}
+                        onChange={(e) => toggleFeature(s, "item_type", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
                   </div>
                 </Card>
               );

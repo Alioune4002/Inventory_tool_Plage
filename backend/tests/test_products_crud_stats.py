@@ -66,6 +66,46 @@ def test_stats_return_expected_aggregates(client_with_user):
 
 
 @pytest.mark.django_db
+def test_stats_excludes_raw_material_from_selling_when_item_type_enabled(client_with_user):
+    client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    features = service.features or {}
+    features["item_type"] = {"enabled": True, "recommended": True}
+    service.features = features
+    service.save()
+
+    ProductFactory(
+        tenant=tenant,
+        service=service,
+        quantity=3,
+        purchase_price="2",
+        selling_price="5",
+        product_role="raw_material",
+        barcode="raw-001",
+        inventory_month="2025-03",
+        category="sec",
+    )
+    ProductFactory(
+        tenant=tenant,
+        service=service,
+        quantity=2,
+        purchase_price="1",
+        selling_price="5",
+        product_role="finished_product",
+        barcode="fin-001",
+        inventory_month="2025-03",
+        category="sec",
+    )
+
+    res = client.get(f"/api/inventory-stats/?month=2025-03&service={service.id}")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["total_selling_value"] == 2 * 5
+    raw_product = next(p for p in data["by_product"] if p.get("product_role") == "raw_material")
+    assert raw_product["selling_value_current"] == 0
+
+
+@pytest.mark.django_db
 def test_no_barcode_requires_internal_sku(client_with_user):
     client, tenant, _ = client_with_user
     res = client.post(

@@ -60,10 +60,19 @@ def test_build_context_basic(django_user_model):
     tenant = Tenant.objects.create(name="Test", domain="general")
     user = django_user_model.objects.create_user(username="u2", password="pwd")
     UserProfile.objects.create(user=user, tenant=tenant)
-    service = Service.objects.create(tenant=tenant, name="Shop")
+    service = Service.objects.create(tenant=tenant, name="Shop", service_type="retail_general")
     Product.objects.create(name="P1", tenant=tenant, service=service, quantity=5, inventory_month="2025-12")
-    ctx = build_context(user, scope="inventory", period_start="2025-12", period_end="2025-12", filters={"service": service.id})
+    ctx = build_context(
+        user,
+        scope="inventory",
+        period_start="2025-12",
+        period_end="2025-12",
+        filters={"service": service.id},
+        user_question="Quels modules activer ?",
+    )
     assert ctx["inventory_summary"]["total_skus"] == 1
+    assert ctx["service"]["id"] == service.id
+    assert ctx["user_question"] == "Quels modules activer ?"
 
 
 @pytest.mark.django_db

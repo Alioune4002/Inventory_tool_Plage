@@ -9,6 +9,7 @@ import { ToastProvider } from "./ToastContext";
 import BillingBanners from "../components/BillingBanners";
 import useEntitlements from "./useEntitlements";
 import MobileNav from "../components/MobileNav";
+import GuidedTour from "../components/GuidedTour";
 
 export default function AppShell() {
   const location = useLocation();
@@ -65,6 +66,7 @@ export default function AppShell() {
             </main>
           </div>
         </div>
+        <GuidedTour />
         <Toast toast={toast} onClose={() => setToast(null)} />
         <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
       </div>
