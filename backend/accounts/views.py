@@ -612,7 +612,7 @@ def _set_tenant_plan_active(
 class CreateCheckoutSessionView(APIView):
     """
     POST /api/auth/billing/checkout/
-    Body: { "plan": "BOUTIQUE|PRO|DUO|MULTI", "cycle": "MONTHLY|YEARLY" }
+    Body: { "plan_code"|"plan": "BOUTIQUE|PRO|DUO|MULTI", "cycle": "MONTHLY|YEARLY" }
     Retour: { "url": "https://checkout.stripe.com/..." }
     """
     permission_classes = [permissions.IsAuthenticated]
@@ -622,7 +622,8 @@ class CreateCheckoutSessionView(APIView):
             return Response({"detail": "Stripe non configuré côté serveur."}, status=503)
 
         tenant = get_tenant_for_request(request)
-        plan_code = _normalize_checkout_plan(request.data.get("plan"))
+        plan_raw = request.data.get("plan_code") or request.data.get("plan")
+        plan_code = _normalize_checkout_plan(plan_raw)
         cycle = (request.data.get("cycle") or "MONTHLY").upper().strip()
 
         if plan_code not in ["BOUTIQUE", "PRO"]:
