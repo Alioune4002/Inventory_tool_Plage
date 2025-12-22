@@ -74,7 +74,6 @@ export default function BillingBanners({ entitlements }) {
   const {
     plan_source,
     expires_at,
-    over_limit,
     limits,
     usage,
     subscription_status,
@@ -170,14 +169,17 @@ export default function BillingBanners({ entitlements }) {
 
   // Limites dépassées
   const overProd =
-    over_limit?.products ||
-    (limits?.max_products != null && usage?.products_count != null && usage.products_count > limits.max_products);
+    limits?.max_products != null &&
+    usage?.products_count != null &&
+    usage.products_count > limits.max_products;
   const overSrv =
-    over_limit?.services ||
-    (limits?.max_services != null && usage?.services_count != null && usage.services_count > limits.max_services);
+    limits?.max_services != null &&
+    usage?.services_count != null &&
+    usage.services_count > limits.max_services;
   const overUsers =
-    over_limit?.users ||
-    (limits?.max_users != null && usage?.users_count != null && usage.users_count > limits.max_users);
+    limits?.max_users != null &&
+    usage?.users_count != null &&
+    usage.users_count > limits.max_users;
 
   if (overProd) {
     banners.push({

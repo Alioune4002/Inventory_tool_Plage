@@ -11,6 +11,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.db import transaction
 from django.utils import timezone
 from django.utils.encoding import force_bytes
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 
 from rest_framework import permissions, status, exceptions, viewsets
@@ -41,9 +42,12 @@ from .serializers import (
 )
 from .utils import get_tenant_for_request, get_user_role
 from .services.access import check_limit, get_usage
+from utils.sendgrid_email import send_email_with_sendgrid
 
 LOGGER = logging.getLogger(__name__)
 User = get_user_model()
+EMAIL_VERIFICATION_REQUIRED = getattr(settings, "EMAIL_VERIFICATION_REQUIRED", True)
+EMAIL_CHANGE_SIGNER = TimestampSigner(salt="stockscan.email.change")
 
 # Stripe (backend only)
 try:
@@ -83,6 +87,136 @@ def _audit(
         LOGGER.exception("AuditLog failed")
 
 
+def _send_verification_email(user):
+    if not user.email:
+        return False
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    verify_url = f"{settings.FRONTEND_URL}/verify-email?uid={uid}&token={token}"
+    subject = "Confirme ton email StockScan"
+    text = (
+        "Bonjour,\n\n"
+        "Pour activer votre compte StockScan, confirmez votre email :\n"
+        f"{verify_url}\n\n"
+        "— StockScan"
+    )
+    html = f"""
+<div style="font-family:Inter,system-ui;background:#f8fafc;padding:24px">
+  <div style="max-width:560px;margin:auto;background:#fff;border-radius:16px;border:1px solid #e5e7eb">
+    <div style="background:#111827;color:#fff;padding:16px;font-weight:800">
+      Confirme ton email
+    </div>
+    <div style="padding:20px">
+      <p>Bonjour,</p>
+      <p>Pour activer votre compte StockScan, confirmez votre email.</p>
+      <p style="margin:20px 0">
+        <a href="{verify_url}"
+           style="background:#2563eb;color:#fff;padding:12px 18px;
+                  border-radius:10px;text-decoration:none;font-weight:700">
+          Confirmer mon email
+        </a>
+      </p>
+      <p style="font-size:12px;color:#6b7280">
+        Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.
+      </p>
+    </div>
+  </div>
+</div>
+"""
+    return send_email_with_sendgrid(
+        to_email=user.email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+    )
+
+
+def _send_password_reset_email(user, uid, token):
+    if not user.email:
+        return False
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
+    subject = "Réinitialiser votre mot de passe StockScan"
+    text = (
+        "Bonjour,\n\n"
+        "Réinitialisez votre mot de passe via le lien :\n"
+        f"{reset_url}\n\n"
+        "— StockScan"
+    )
+    html = f"""
+<div style="font-family:Inter,system-ui;background:#f8fafc;padding:24px">
+  <div style="max-width:560px;margin:auto;background:#fff;border-radius:16px;border:1px solid #e5e7eb">
+    <div style="background:#111827;color:#fff;padding:16px;font-weight:800">
+      Réinitialiser le mot de passe
+    </div>
+    <div style="padding:20px">
+      <p>Bonjour,</p>
+      <p>Vous pouvez réinitialiser votre mot de passe.</p>
+      <p style="margin:20px 0">
+        <a href="{reset_url}"
+           style="background:#2563eb;color:#fff;padding:12px 18px;
+                  border-radius:10px;text-decoration:none;font-weight:700">
+          Créer un nouveau mot de passe
+        </a>
+      </p>
+      <p style="font-size:12px;color:#6b7280">
+        Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.
+      </p>
+    </div>
+  </div>
+</div>
+"""
+    return send_email_with_sendgrid(
+        to_email=user.email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+    )
+
+
+def _send_email_change_email(user, new_email, uid, token, email_token):
+    if not new_email:
+        return False
+    confirm_url = (
+        f"{settings.FRONTEND_URL}/confirm-email?uid={uid}&token={token}&email_token={email_token}"
+    )
+    subject = "Confirmer votre nouvelle adresse email"
+    text = (
+        "Bonjour,\n\n"
+        "Confirmez votre nouvelle adresse email StockScan :\n"
+        f"{confirm_url}\n\n"
+        "— StockScan"
+    )
+    html = f"""
+<div style="font-family:Inter,system-ui;background:#f8fafc;padding:24px">
+  <div style="max-width:560px;margin:auto;background:#fff;border-radius:16px;border:1px solid #e5e7eb">
+    <div style="background:#111827;color:#fff;padding:16px;font-weight:800">
+      Nouvelle adresse email
+    </div>
+    <div style="padding:20px">
+      <p>Bonjour,</p>
+      <p>Confirmez votre nouvelle adresse email pour StockScan.</p>
+      <p style="margin:20px 0">
+        <a href="{confirm_url}"
+           style="background:#2563eb;color:#fff;padding:12px 18px;
+                  border-radius:10px;text-decoration:none;font-weight:700">
+          Confirmer mon email
+        </a>
+      </p>
+      <p style="font-size:12px;color:#6b7280">
+        Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.
+      </p>
+    </div>
+  </div>
+</div>
+"""
+    return send_email_with_sendgrid(
+        to_email=new_email,
+        subject=subject,
+        text_body=text,
+        html_body=html,
+    )
+
+
 # --------------------------------
 # Auth / Account
 # --------------------------------
@@ -94,6 +228,19 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+
+        if EMAIL_VERIFICATION_REQUIRED:
+            user.is_active = False
+            user.save(update_fields=["is_active"])
+            _send_verification_email(user)
+            return Response(
+                {
+                    "detail": "email_verification_sent",
+                    "requires_verification": True,
+                    "email": user.email,
+                },
+                status=status.HTTP_201_CREATED,
+            )
 
         refresh = RefreshToken.for_user(user)
         profile = getattr(user, "profile", None)
@@ -368,7 +515,8 @@ class PasswordResetRequestView(APIView):
 
         uid = urlsafe_base64_encode(force_bytes(user.pk))
         token = default_token_generator.make_token(user)
-        return Response({"uid": uid, "token": token})
+        _send_password_reset_email(user, uid, token)
+        return Response({"detail": "Si le compte existe, un email a été envoyé."})
 
 
 class PasswordResetConfirmView(APIView):
@@ -393,6 +541,96 @@ class PasswordResetConfirmView(APIView):
         user.set_password(serializer.validated_data["new_password"])
         user.save()
         return Response({"detail": "Mot de passe réinitialisé."})
+
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        uid = request.query_params.get("uid")
+        token = request.query_params.get("token")
+        if not uid or not token:
+            return Response({"detail": "Lien incomplet."}, status=400)
+
+        try:
+            uid_int = urlsafe_base64_decode(uid).decode()
+            user = User.objects.get(pk=uid_int)
+        except (User.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Lien invalide."}, status=400)
+
+        if not default_token_generator.check_token(user, token):
+            return Response({"detail": "Lien expiré."}, status=400)
+
+        user.is_active = True
+        user.save(update_fields=["is_active"])
+        return Response({"detail": "Email vérifié.", "redirect": f"{settings.FRONTEND_URL}/login"})
+
+
+class ResendVerificationEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = (request.data.get("email") or "").strip()
+        if not email:
+            return Response({"detail": "Email requis."}, status=400)
+        user = User.objects.filter(email__iexact=email).first()
+        if not user:
+            return Response({"detail": "Si le compte existe, un email a été renvoyé."})
+        if user.is_active:
+            return Response({"detail": "Ce compte est déjà vérifié."})
+        _send_verification_email(user)
+        return Response({"detail": "Email de vérification renvoyé."})
+
+
+class EmailChangeRequestView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        new_email = (request.data.get("email") or "").strip().lower()
+        if not new_email:
+            return Response({"detail": "Nouvel email requis."}, status=400)
+        if User.objects.filter(email__iexact=new_email).exists():
+            return Response({"detail": "Email déjà utilisé."}, status=400)
+
+        uid = urlsafe_base64_encode(force_bytes(request.user.pk))
+        token = default_token_generator.make_token(request.user)
+        email_token = EMAIL_CHANGE_SIGNER.sign(new_email)
+        _send_email_change_email(request.user, new_email, uid, token, email_token)
+        return Response({"detail": "Un email de confirmation a été envoyé."})
+
+
+class EmailChangeConfirmView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        uid = request.query_params.get("uid")
+        token = request.query_params.get("token")
+        email_token = request.query_params.get("email_token")
+        if not uid or not token or not email_token:
+            return Response({"detail": "Lien incomplet."}, status=400)
+
+        try:
+            uid_int = urlsafe_base64_decode(uid).decode()
+            user = User.objects.get(pk=uid_int)
+        except (User.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Lien invalide."}, status=400)
+
+        if not default_token_generator.check_token(user, token):
+            return Response({"detail": "Lien expiré."}, status=400)
+
+        try:
+            new_email = EMAIL_CHANGE_SIGNER.unsign(email_token, max_age=60 * 60 * 24)
+        except SignatureExpired:
+            return Response({"detail": "Lien expiré."}, status=400)
+        except BadSignature:
+            return Response({"detail": "Lien invalide."}, status=400)
+
+        if User.objects.filter(email__iexact=new_email).exclude(pk=user.pk).exists():
+            return Response({"detail": "Email déjà utilisé."}, status=400)
+
+        user.email = new_email
+        user.save(update_fields=["email"])
+        return Response({"detail": "Email mis à jour.", "redirect": f"{settings.FRONTEND_URL}/login"})
 
 
 # --------------------------------

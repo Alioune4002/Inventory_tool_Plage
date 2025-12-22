@@ -10,6 +10,10 @@ from .views import (
     ServiceViewSet,
     PasswordResetRequestView,
     PasswordResetConfirmView,
+    VerifyEmailView,
+    ResendVerificationEmailView,
+    EmailChangeRequestView,
+    EmailChangeConfirmView,
     MembershipViewSet,
     EntitlementsView,
 
@@ -22,6 +26,7 @@ from .views import (
     MembersSummaryView,
 )
 from .views_delete import DeleteAccountView
+from .views_invitations import InvitationCreateView, InvitationAcceptView, InvitationDeclineView
 
 router = DefaultRouter()
 router.register(r"services", ServiceViewSet, basename="services")
@@ -38,6 +43,10 @@ urlpatterns = [
 
     path("password-reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
     path("password-reset/confirm/", PasswordResetConfirmView.as_view(), name="auth-password-reset-confirm"),
+    path("verify-email/", VerifyEmailView.as_view(), name="auth-verify-email"),
+    path("verify-email/resend/", ResendVerificationEmailView.as_view(), name="auth-verify-email-resend"),
+    path("email-change/", EmailChangeRequestView.as_view(), name="auth-email-change"),
+    path("email-change/confirm/", EmailChangeConfirmView.as_view(), name="auth-email-change-confirm"),
     path("delete-account/", DeleteAccountView.as_view(), name="auth-delete-account"),
 
     # Stripe Billing
@@ -47,6 +56,11 @@ urlpatterns = [
 
     # ✅ Members summary (owner)
     path("members/summary/", MembersSummaryView.as_view(), name="members-summary"),
+
+    # Invitations email (owner)
+    path("invitations/", InvitationCreateView.as_view(), name="invite-create"),
+    path("invitations/accept/", InvitationAcceptView.as_view(), name="invite-accept"),
+    path("invitations/decline/", InvitationDeclineView.as_view(), name="invite-decline"),
 
     path("", include(router.urls)),
 ]

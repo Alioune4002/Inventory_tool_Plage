@@ -1,3 +1,5 @@
+import io
+import openpyxl
 import pytest
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -63,6 +65,8 @@ def test_isolation_on_export(auth_client):
     res = client.get(f"/api/export-excel/?month=2025-01&service={service_a.id}")
     assert res.status_code == 200
     assert "spreadsheetml" in res["Content-Type"]
-    content = res.content.decode(errors="ignore")
-    assert "A-product" in content
-    assert "B-product" not in content
+    wb = openpyxl.load_workbook(io.BytesIO(res.content))
+    ws = wb.active
+    names = [row[0] for row in ws.iter_rows(min_row=2, values_only=True)]
+    assert "A-product" in names
+    assert "B-product" not in names

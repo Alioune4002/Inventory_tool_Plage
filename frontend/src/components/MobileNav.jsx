@@ -23,6 +23,7 @@ export default function MobileNav({ open, onClose, items }) {
               key={item.to}
               to={item.to}
               onClick={onClose}
+              data-tour={item.tour}
               className="rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface)]/70 transition"
             >
               {item.label}

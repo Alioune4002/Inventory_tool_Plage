@@ -1,6 +1,6 @@
 # Deployed backend: https://inventory-tool-plage.onrender.com
 from django.contrib.auth import get_user_model
-from rest_framework import serializers
+from rest_framework import serializers, exceptions
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import Tenant, UserProfile, Service, Membership
@@ -116,6 +116,17 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
             user_by_email = User.objects.filter(email__iexact=username).order_by("id").first()
             if user_by_email:
                 attrs[self.username_field] = user_by_email.username
+
+        candidate = None
+        if attrs.get(self.username_field):
+            candidate = User.objects.filter(username=attrs[self.username_field]).first()
+        if not candidate and username and "@" in username:
+            candidate = User.objects.filter(email__iexact=username).first()
+        if candidate and not candidate.is_active:
+            raise exceptions.AuthenticationFailed(
+                "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.",
+                code="email_not_verified",
+            )
 
         data = super().validate(attrs)
 

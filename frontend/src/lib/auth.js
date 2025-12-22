@@ -53,8 +53,7 @@ export async function apiRegister({ email, password, tenant_name, domain, servic
     extra_services: extra_services || [],
   };
   const res = await api.post("/api/auth/register/", payload);
-  const { access, user, tenant } = res.data;
-  return { access, user, tenant };
+  return res.data;
 }
 
 export async function apiServices() {

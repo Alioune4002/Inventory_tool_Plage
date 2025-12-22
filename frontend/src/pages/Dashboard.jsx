@@ -11,8 +11,6 @@ import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import AIAssistantPanel from "../components/AIAssistantPanel";
-import BillingBanners from "../components/BillingBanners";
-import useEntitlements from "../app/useEntitlements";
 import { getWording, getUxCopy } from "../lib/labels";
 
 const fmtCurrency = (n) =>
@@ -86,7 +84,6 @@ export default function Dashboard() {
     serviceProfile,
     serviceFeatures,
   } = useAuth();
-  const { data: entitlements } = useEntitlements();
   const pushToast = useToast();
 
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -350,7 +347,6 @@ export default function Dashboard() {
       </Helmet>
 
       <div className="grid gap-4">
-        <BillingBanners entitlements={entitlements} />
 
         {/* ✅ Admin principal: équipe + traçabilité */}
         {membersVisible ? (

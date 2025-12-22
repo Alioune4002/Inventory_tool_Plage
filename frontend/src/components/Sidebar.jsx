@@ -21,6 +21,7 @@ const tourTargets = {
   "/app/dashboard": "tour-dashboard",
   "/app/inventory": "tour-inventory",
   "/app/products": "tour-products",
+  "/app/losses": "tour-losses",
   "/app/exports": "tour-exports",
   "/app/settings": "tour-settings",
 };

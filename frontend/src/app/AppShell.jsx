@@ -21,13 +21,13 @@ export default function AppShell() {
 
   const navItems = useMemo(
     () => [
-      { to: "/app/dashboard", label: "Dashboard" },
-      { to: "/app/inventory", label: "Inventaire" },
-      { to: "/app/products", label: "Produits" },
+      { to: "/app/dashboard", label: "Dashboard", tour: "tour-dashboard" },
+      { to: "/app/inventory", label: "Inventaire", tour: "tour-inventory" },
+      { to: "/app/products", label: "Produits", tour: "tour-products" },
       { to: "/app/categories", label: "Catégories" },
-      { to: "/app/losses", label: "Pertes" },
-      { to: "/app/exports", label: "Exports" },
-      { to: "/app/settings", label: "Settings" },
+      { to: "/app/losses", label: "Pertes", tour: "tour-losses" },
+      { to: "/app/exports", label: "Exports", tour: "tour-exports" },
+      { to: "/app/settings", label: "Settings", tour: "tour-settings" },
       { to: "/app/support", label: "Support" },
     ],
     []
@@ -66,7 +66,7 @@ export default function AppShell() {
             </main>
           </div>
         </div>
-        <GuidedTour />
+        <GuidedTour onRequestMobileNav={setMobileNavOpen} />
         <Toast toast={toast} onClose={() => setToast(null)} />
         <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
       </div>

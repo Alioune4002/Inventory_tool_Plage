@@ -18,6 +18,7 @@ import {
   storeServiceId,
   storeToken,
 } from "../lib/auth";
+import { getTourKey, getTourPendingKey } from "../lib/tour";
 
 const AuthContext = createContext(null);
 
@@ -143,6 +144,12 @@ export function AuthProvider({ children }) {
         storeToken(data.access);
         setToken(data.access);
 
+        const userId = data?.user?.id || data?.user_id || data?.id;
+        if (userId) {
+          localStorage.removeItem(getTourKey(userId));
+          localStorage.setItem(getTourPendingKey(userId), "1");
+        }
+
         await refreshMe();
         await fetchServices();
 
@@ -155,6 +162,9 @@ export function AuthProvider({ children }) {
         }
         const detail =
           e.response?.data?.detail ||
+          (e.response?.data?.code === "email_not_verified"
+            ? "Email non vérifié. Vérifie ton email pour activer ton compte."
+            : null) ||
           e.response?.data?.non_field_errors?.[0] ||
           "Connexion impossible. Vérifiez vos identifiants.";
         throw new Error(detail);
@@ -195,6 +205,10 @@ export function AuthProvider({ children }) {
           business_type,
           extra_services,
         });
+
+        if (data?.requires_verification) {
+          return data;
+        }
 
         if (!data?.access) throw new Error("Token manquant dans la réponse register");
 

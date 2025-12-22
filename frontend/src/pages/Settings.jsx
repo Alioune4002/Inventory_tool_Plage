@@ -14,6 +14,7 @@ import useEntitlements from "../app/useEntitlements";
 import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
 import { formatPlanLabel } from "../lib/planLabels";
+import { getTourKey, getTourPendingKey } from "../lib/tour";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -38,6 +39,7 @@ export default function Settings() {
   const { me, tenant, services, refreshServices, logout, serviceId, selectService, isAllServices } = useAuth();
   const { data: entitlements, loading: entLoading, refetch: refetchEntitlements } = useEntitlements();
   const pushToast = useToast();
+  const userId = me?.id || me?.user?.id || me?.user_id || "";
 
   const [newService, setNewService] = useState("");
   const [toast, setToast] = useState("");
@@ -616,8 +618,14 @@ export default function Settings() {
             <Button
               variant="secondary"
               onClick={() => {
-                localStorage.removeItem("stockscan_tour_v1");
-                pushToast?.({ message: "Visite guidée réinitialisée. Retournez sur le dashboard pour la relancer.", type: "success" });
+                const tourKey = getTourKey(userId);
+                const pendingKey = getTourPendingKey(userId);
+                localStorage.removeItem(tourKey);
+                localStorage.setItem(pendingKey, "1");
+                pushToast?.({
+                  message: "Visite guidée prête. Retournez sur le dashboard pour la relancer.",
+                  type: "success",
+                });
               }}
             >
               Relancer la visite guidée

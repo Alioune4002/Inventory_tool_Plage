@@ -24,10 +24,11 @@ def test_register_creates_user_and_tenant():
     )
     assert res.status_code == 201
     user = User.objects.get(username="alice")
+    assert user.is_active is False
     profile = user.profile
     assert profile.tenant.name == "Alice Store"
-    assert res.data["tenant"]["id"] == profile.tenant.id
-    assert "access" in res.data and "refresh" in res.data
+    assert res.data["requires_verification"] is True
+    assert res.data["email"] == user.email
 
 
 @pytest.mark.django_db

@@ -237,3 +237,4 @@ STRIPE_PRICE_PRO_YEARLY = os.environ.get('STRIPE_PRICE_PRO_YEARLY')
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 SENDGRID_FROM_EMAIL = os.environ.get('SENDGRID_FROM_EMAIL', 'no-reply@stockscan.app')
 INVITATIONS_SEND_EMAILS = os.environ.get('INVITATIONS_SEND_EMAILS', 'true').lower() == 'true'
+EMAIL_VERIFICATION_REQUIRED = os.environ.get('EMAIL_VERIFICATION_REQUIRED', 'true').lower() == 'true'

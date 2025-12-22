@@ -8,6 +8,7 @@ from rest_framework.response import Response
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.chart import BarChart, Reference
+import numbers
 from datetime import datetime
 import logging
 import csv
@@ -23,6 +24,79 @@ from accounts.services.access import check_entitlement, check_limit, get_usage
 from utils.sendgrid_email import send_email_with_sendgrid
 
 logger = logging.getLogger(__name__)
+
+EXPORT_HEADER_FILL = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+EXPORT_STRIPE_FILL = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+EXPORT_BORDER = Border(
+    left=Side(style="thin"),
+    right=Side(style="thin"),
+    top=Side(style="thin"),
+    bottom=Side(style="thin"),
+)
+EXPORT_HEADER_FONT = Font(bold=True, color="FFFFFF")
+
+
+def _is_numeric(value):
+    return isinstance(value, numbers.Number) and not isinstance(value, bool)
+
+
+def _build_csv_bytes(headers, rows, delimiter=";"):
+    buffer = io.StringIO()
+    buffer.write("sep=;\n")
+    writer = csv.writer(buffer, delimiter=delimiter)
+    writer.writerow(headers)
+    for row in rows:
+        writer.writerow(["" if value is None else value for value in row])
+    content = buffer.getvalue()
+    return ("\ufeff" + content).encode("utf-8")
+
+
+def _apply_sheet_style(ws, headers):
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    ws.row_dimensions[1].height = 22
+
+    header_lookup = {index + 1: (header or "") for index, header in enumerate(headers)}
+
+    for col_idx, header in header_lookup.items():
+        cell = ws.cell(row=1, column=col_idx)
+        cell.value = header
+        cell.font = EXPORT_HEADER_FONT
+        cell.fill = EXPORT_HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = EXPORT_BORDER
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+        row_idx = row[0].row
+        if row_idx % 2 == 0:
+            for cell in row:
+                cell.fill = EXPORT_STRIPE_FILL
+        for cell in row:
+            cell.border = EXPORT_BORDER
+            header = header_lookup.get(cell.column, "")
+            if _is_numeric(cell.value):
+                header_lower = str(header).lower()
+                if any(term in header_lower for term in ("prix", "valeur", "sale", "purchase", "€")):
+                    cell.number_format = "#,##0.00"
+                elif any(term in header_lower for term in ("tva", "vat")):
+                    cell.number_format = "0.00"
+                else:
+                    cell.number_format = "#,##0.###"
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    for col_cells in ws.columns:
+        max_length = 0
+        column_letter = None
+        for cell in col_cells:
+            if not isinstance(cell, openpyxl.cell.cell.MergedCell):
+                column_letter = cell.column_letter
+                if cell.value is None:
+                    continue
+                max_length = max(max_length, len(str(cell.value)))
+        if column_letter:
+            ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
 
 
 def home(request):
@@ -342,12 +416,10 @@ def export_excel(request):
     check_entitlement(tenant, "exports_basic")
     products = Product.objects.filter(tenant=tenant, service=service, inventory_month=month)
 
-    # CSV lightweight export (content-type kept compatible with spreadsheet readers)
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(['Nom', 'Catégorie', 'Prix achat', 'Prix vente', 'TVA', 'DLC', 'Quantité'])
+    headers = ['Nom', 'Catégorie', 'Prix achat (€)', 'Prix vente (€)', 'TVA (%)', 'DLC', 'Quantité']
+    rows = []
     for p in products:
-        writer.writerow([
+        rows.append([
             p.name,
             p.category or "",
             float(p.purchase_price or 0),
@@ -357,9 +429,21 @@ def export_excel(request):
             float(p.quantity or 0),
         ])
 
-    content = buffer.getvalue()
-    response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = f'attachment; filename=\"inventaire_{month}.csv\"'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Inventaire {month}"
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    _apply_sheet_style(ws, headers)
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    response = HttpResponse(
+        bio.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename=\"inventaire_{month}.xlsx\"'
     return response
 
 
@@ -404,30 +488,35 @@ def export_generic(request):
     filename = "stockscan_export.xlsx" if export_format == "xlsx" else "stockscan_export.csv"
     mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if export_format == "xlsx" else "text/csv"
 
+    headers = ["Month", "Service", "Category", "ProductName", "ContainerStatus", "Qty", "UOM",
+               "RemainingFraction", "PackSize", "PackUOM", "PurchasePrice", "SalePrice"]
+    rows = []
+    for p in qs.select_related("service"):
+        rows.append([
+            p.inventory_month,
+            p.service.name if p.service else "",
+            p.category or "",
+            p.name,
+            p.container_status,
+            float(p.quantity or 0),
+            p.unit or "",
+            p.remaining_fraction or "",
+            p.pack_size or "",
+            p.pack_uom or "",
+            float(p.purchase_price or 0),
+            float(p.selling_price or 0),
+        ])
+
     if export_format == "csv":
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(["Month", "Service", "Category", "ProductName", "ContainerStatus", "Qty", "UOM",
-                         "RemainingFraction", "PackSize", "PackUOM", "PurchasePrice", "SalePrice"])
-        for p in qs.select_related("service"):
-            writer.writerow([
-                p.inventory_month, p.service.name if p.service else "", p.category or "", p.name,
-                p.container_status, p.quantity, p.unit, p.remaining_fraction or "",
-                p.pack_size or "", p.pack_uom or "", p.purchase_price or "", p.selling_price or ""
-            ])
-        attachment_bytes = buffer.getvalue().encode("utf-8")
+        attachment_bytes = _build_csv_bytes(headers, rows)
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Export"
-        ws.append(["Month", "Service", "Category", "ProductName", "ContainerStatus", "Qty", "UOM",
-                   "RemainingFraction", "PackSize", "PackUOM", "PurchasePrice", "SalePrice"])
-        for p in qs.select_related("service"):
-            ws.append([
-                p.inventory_month, p.service.name if p.service else "", p.category or "", p.name,
-                p.container_status, float(p.quantity), p.unit, p.remaining_fraction or "",
-                p.pack_size or "", p.pack_uom or "", p.purchase_price or "", p.selling_price or ""
-            ])
+        ws.append(headers)
+        for row in rows:
+            ws.append(row)
+        _apply_sheet_style(ws, headers)
         bio = io.BytesIO()
         wb.save(bio)
         attachment_bytes = bio.getvalue()
@@ -444,7 +533,7 @@ def export_generic(request):
             fallback_to_django=True,
         )
 
-    resp = HttpResponse(attachment_bytes, content_type=mimetype)
+    resp = HttpResponse(attachment_bytes, content_type=f"{mimetype}; charset=utf-8" if export_format == "csv" else mimetype)
     resp['Content-Disposition'] = f'attachment; filename="{filename}"'
     return resp
 
@@ -550,72 +639,41 @@ def export_advanced(request):
         headers.append('Mois')
         headers.append('Service')
 
+    def build_row(product):
+        if selected_fields:
+            return [field_map[field][1](product) for field in selected_fields]
+        row = [
+            product.name,
+            product.category,
+            float(product.purchase_price) if product.purchase_price else 0,
+            float(product.selling_price) if product.selling_price else 0,
+        ]
+        if include_tva:
+            row.append(float(product.tva) if product.tva else '')
+        if include_dlc:
+            row.append(product.dlc or '')
+        row.append(product.quantity or 0)
+        if include_sku:
+            row.append(product.internal_sku if product.no_barcode else product.barcode or '')
+        row.append(product.inventory_month)
+        row.append(product.service.name if product.service else '')
+        return row
+
+    rows = [build_row(p) for p in qs.select_related("service")]
+
     if export_format == 'csv':
-        buffer = io.StringIO()
-        writer = csv.writer(buffer)
-        writer.writerow(headers)
-        for p in qs.select_related("service"):
-            if selected_fields:
-                row = [field_map[field][1](p) for field in selected_fields]
-            else:
-                row = [
-                    p.name,
-                    p.category,
-                    float(p.purchase_price) if p.purchase_price else 0,
-                    float(p.selling_price) if p.selling_price else 0,
-                ]
-                if include_tva:
-                    row.append(float(p.tva) if p.tva else '')
-                if include_dlc:
-                    row.append(p.dlc or '')
-                row.append(p.quantity or 0)
-                if include_sku:
-                    row.append(p.internal_sku if p.no_barcode else p.barcode or '')
-                row.append(p.inventory_month)
-                row.append(p.service.name if p.service else '')
-            writer.writerow(row)
-        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        csv_bytes = _build_csv_bytes(headers, rows)
+        response = HttpResponse(csv_bytes, content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="export_avance.csv"'
         return response
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Export avancé"
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-
-    for col_num, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col_num)
-        cell.value = header
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.fill = PatternFill(start_color="6B7280", end_color="6B7280", fill_type="solid")
-        cell.border = thin_border
-
-    for row_num, p in enumerate(qs.select_related("service"), 2):
-        if selected_fields:
-            values = [field_map[field][1](p) for field in selected_fields]
-        else:
-            values = [
-                p.name,
-                p.category,
-                float(p.purchase_price) if p.purchase_price else 0,
-                float(p.selling_price) if p.selling_price else 0,
-            ]
-            if include_tva:
-                values.append(float(p.tva) if p.tva else '')
-            if include_dlc:
-                values.append(p.dlc or '')
-            values.append(p.quantity or 0)
-            if include_sku:
-                values.append(p.internal_sku if p.no_barcode else p.barcode or '')
-            values.append(p.inventory_month)
-            values.append(p.service.name if p.service else '')
-
-        for col_num, val in enumerate(values, 1):
-            cell = ws.cell(row=row_num, column=col_num)
-            cell.value = val
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.border = thin_border
+    ws.append(headers)
+    for row in rows:
+        ws.append(row)
+    _apply_sheet_style(ws, headers)
 
     if include_summary or include_charts:
         summary = wb.create_sheet("Synthèse")
@@ -662,7 +720,11 @@ def export_advanced(request):
         row_cursor += 1
         headers_summary = ["Catégorie", "Quantité", "Valeur achat (€)", "Valeur vente (€)"]
         for col_num, header in enumerate(headers_summary, 1):
-            summary.cell(row=row_cursor, column=col_num, value=header).font = Font(bold=True)
+            cell = summary.cell(row=row_cursor, column=col_num, value=header)
+            cell.font = EXPORT_HEADER_FONT
+            cell.fill = EXPORT_HEADER_FILL
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = EXPORT_BORDER
         row_cursor += 1
 
         category_totals = {}
@@ -682,6 +744,11 @@ def export_advanced(request):
             summary.cell(row=row_cursor, column=2, value=totals["qty"])
             summary.cell(row=row_cursor, column=3, value=totals["purchase"])
             summary.cell(row=row_cursor, column=4, value=totals["selling"])
+            if row_cursor % 2 == 0:
+                for col_idx in range(1, 5):
+                    summary.cell(row=row_cursor, column=col_idx).fill = EXPORT_STRIPE_FILL
+            for col_idx in range(1, 5):
+                summary.cell(row=row_cursor, column=col_idx).border = EXPORT_BORDER
             row_cursor += 1
 
         if include_charts and category_totals:
@@ -694,18 +761,18 @@ def export_advanced(request):
             chart.set_categories(categories_ref)
             summary.add_chart(chart, "F4")
 
-    for col in ws.columns:
-        max_length = 0
-        column = None
-        for cell in col:
-            if not isinstance(cell, openpyxl.cell.cell.MergedCell):
-                try:
+    for sheet in wb.worksheets:
+        for col_cells in sheet.columns:
+            max_length = 0
+            column_letter = None
+            for cell in col_cells:
+                if not isinstance(cell, openpyxl.cell.cell.MergedCell):
+                    column_letter = cell.column_letter
+                    if cell.value is None:
+                        continue
                     max_length = max(max_length, len(str(cell.value)))
-                    column = cell.column_letter
-                except Exception:
-                    pass
-        if column:
-            ws.column_dimensions[column].width = max_length + 2
+            if column_letter:
+                sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = 'attachment; filename="export_avance.xlsx"'

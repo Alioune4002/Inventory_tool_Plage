@@ -13,7 +13,7 @@ from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from accounts.models import Invitation, Membership, UserProfile
+from accounts.models import Invitation, Membership, UserProfile, Service
 from accounts.utils import get_tenant_for_request, get_user_role
 
 from utils.sendgrid_email import invitations_email_enabled, send_email_with_sendgrid
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
-BACKEND_URL = "https://inventory-tool-plage.onrender.com"
 FRONTEND_URL = getattr(settings, "FRONTEND_URL", "https://stockscan.app")
 
 
@@ -39,6 +38,7 @@ class InvitationCreateView(APIView):
 
         email = request.data.get("email")
         role = request.data.get("role", "operator")
+        service_id = request.data.get("service_id", None)
 
         if not email:
             return Response({"detail": "Email requis."}, status=400)
@@ -54,26 +54,39 @@ class InvitationCreateView(APIView):
         token = secrets.token_urlsafe(32)
         expires_at = timezone.now() + timedelta(days=7)
 
+        service_obj = None
+        if service_id:
+            service_obj = Service.objects.filter(id=service_id, tenant=tenant).first()
+            if not service_obj:
+                return Response({"detail": "Service invalide."}, status=400)
+
         invitation = Invitation.objects.create(
             tenant=tenant,
             email=email,
             role=role,
+            service=service_obj,
             token=token,
             expires_at=expires_at,
             status="SENT",
             created_by=request.user,
         )
 
-        accept_url = f"{BACKEND_URL}/api/auth/invitations/accept/?token={token}"
+        accept_url = f"{FRONTEND_URL}/invitation/accept?token={token}"
+        decline_url = f"{FRONTEND_URL}/invitation/decline?token={token}"
+        scope_label = service_obj.name if service_obj else "Tous les services"
 
         subject = f"Invitation à rejoindre {tenant.name} sur StockScan"
         text = f"""
 Bonjour,
 
 Vous avez été invité à rejoindre le commerce "{tenant.name}" sur StockScan.
+Accès : {role} · {scope_label}
 
 👉 Accepter l’invitation :
 {accept_url}
+
+👉 Refuser l’invitation :
+{decline_url}
 
 Ce lien expire dans 7 jours.
 
@@ -92,11 +105,20 @@ Ce lien expire dans 7 jours.
         Vous avez été invité à rejoindre le commerce
         <strong>{tenant.name}</strong> sur StockScan.
       </p>
+      <p style="margin:8px 0;font-size:14px;color:#4b5563">
+        Accès : <strong>{role}</strong> · {scope_label}
+      </p>
       <p style="margin:20px 0">
         <a href="{accept_url}"
            style="background:#2563eb;color:#fff;padding:12px 18px;
                   border-radius:10px;text-decoration:none;font-weight:700">
           Accepter l’invitation
+        </a>
+      </p>
+      <p style="margin:8px 0">
+        <a href="{decline_url}"
+           style="color:#64748b;text-decoration:none;font-size:13px">
+          Refuser l’invitation
         </a>
       </p>
       <p style="font-size:12px;color:#6b7280">
@@ -127,6 +149,7 @@ Ce lien expire dans 7 jours.
                 "id": invitation.id,
                 "email": email,
                 "role": role,
+                "service": {"id": service_obj.id, "name": service_obj.name} if service_obj else None,
                 "status": invitation.status,
                 "expires_at": expires_at,
             },
@@ -167,7 +190,7 @@ class InvitationAcceptView(APIView):
         Membership.objects.get_or_create(
             tenant=invitation.tenant,
             user=user,
-            defaults={"role": invitation.role},
+            defaults={"role": invitation.role, "service": invitation.service},
         )
 
         if not hasattr(user, "profile"):
@@ -188,3 +211,23 @@ class InvitationAcceptView(APIView):
                 "redirect": f"{FRONTEND_URL}/login",
             }
         )
+
+
+class InvitationDeclineView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        token = request.data.get("token") or request.query_params.get("token")
+        if not token:
+            return Response({"detail": "Token manquant."}, status=400)
+
+        invitation = Invitation.objects.filter(token=token).first()
+        if not invitation:
+            return Response({"detail": "Invitation invalide."}, status=400)
+
+        if invitation.status != "SENT":
+            return Response({"detail": "Invitation déjà traitée."}, status=400)
+
+        invitation.status = "CANCELED"
+        invitation.save(update_fields=["status"])
+        return Response({"detail": "Invitation refusée."})
