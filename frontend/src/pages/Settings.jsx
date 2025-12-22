@@ -13,6 +13,7 @@ import Divider from "../ui/Divider";
 import useEntitlements from "../app/useEntitlements";
 import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
+import { formatPlanLabel } from "../lib/planLabels";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -274,7 +275,7 @@ export default function Settings() {
     }
   };
 
-  const planLabel = entitlements?.plan_effective || "ESSENTIEL";
+  const planLabel = formatPlanLabel(entitlements?.plan_effective, "Solo");
   const subStatus = entitlements?.subscription_status || "NONE";
   const expiresAt = entitlements?.expires_at ? new Date(entitlements.expires_at).toLocaleDateString("fr-FR") : null;
 

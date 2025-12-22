@@ -121,7 +121,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
       }
       setAttempted(true);
       if (!canUseAI) {
-        showNotice("Je peux t’assister pleinement avec le plan Pro. Active-le pour débloquer mes conseils.");
+        showNotice("Je peux t’assister pleinement avec le plan Multi. Active-le pour débloquer mes conseils.");
         return;
       }
       setLoading(true);
@@ -185,7 +185,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
         </div>
         <div className="flex items-center gap-2">
           {!canUseAI && entLoaded && attempted && (
-            <Badge className="bg-amber-100 text-amber-700">Plan Pro</Badge>
+            <Badge className="bg-amber-100 text-amber-700">Plan Multi</Badge>
           )}
           <Button size="sm" onClick={handleAnalyze} loading={loading}>
             Analyser

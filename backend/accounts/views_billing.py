@@ -149,7 +149,7 @@ class StripeCheckoutSessionView(APIView):
         _init_stripe()
 
         tenant = get_tenant_for_request(request)
-        plan_code = (request.data.get("plan_code") or "").upper().strip()
+        plan_code = (request.data.get("plan_code") or request.data.get("plan") or "").upper().strip()
         cycle = (request.data.get("cycle") or "MONTHLY").upper().strip()
 
         if plan_code not in ("BOUTIQUE", "PRO"):

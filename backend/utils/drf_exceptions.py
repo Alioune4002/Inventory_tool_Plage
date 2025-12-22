@@ -17,6 +17,20 @@ def custom_exception_handler(exc, context):
     if response is not None:
         return response
 
+    try:
+        from accounts.services.access import LimitExceeded
+    except Exception:
+        LimitExceeded = None
+
+    if LimitExceeded is not None and isinstance(exc, LimitExceeded):
+        return Response(
+            {
+                "detail": exc.detail,
+                "code": exc.code,
+            },
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
     if isinstance(exc, (OperationalError, ProgrammingError)):
         request = context.get("request")
         if request is not None:
@@ -33,4 +47,3 @@ def custom_exception_handler(exc, context):
         )
 
     return None
-

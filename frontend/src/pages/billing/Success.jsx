@@ -11,15 +11,7 @@ import Badge from "../../ui/Badge";
 import { useToast } from "../../app/ToastContext";
 import { useAuth } from "../../app/AuthProvider";
 import useEntitlements from "../../app/useEntitlements";
-
-function prettyPlan(code) {
-  const c = String(code || "").toUpperCase();
-  if (c === "ESSENTIEL") return "Essentiel";
-  if (c === "BOUTIQUE") return "Boutique";
-  if (c === "PRO") return "Pro";
-  if (c === "ENTREPRISE") return "Entreprise";
-  return c || "—";
-}
+import { formatPlanLabel } from "../../lib/planLabels";
 
 function prettyStatus(status) {
   const s = String(status || "").toUpperCase();
@@ -48,7 +40,7 @@ export default function BillingSuccess() {
 
   const headline = useMemo(() => {
     if (!isAuthed) return "Paiement confirmé";
-    const plan = prettyPlan(entitlements?.plan_effective);
+    const plan = formatPlanLabel(entitlements?.plan_effective, "—");
     if (plan && plan !== "—") return `Plan ${plan} activé`;
     return "Plan activé";
   }, [entitlements, isAuthed]);
@@ -105,7 +97,7 @@ export default function BillingSuccess() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthed]);
 
-  const planEffective = prettyPlan(entitlements?.plan_effective);
+  const planEffective = formatPlanLabel(entitlements?.plan_effective, "—");
   const status = prettyStatus(entitlements?.subscription_status);
 
   useEffect(() => {
@@ -164,7 +156,7 @@ export default function BillingSuccess() {
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-3">
-            <Button onClick={() => navigate("/dashboard")}>Aller au Dashboard</Button>
+            <Button onClick={() => navigate("/app/dashboard")}>Aller au Dashboard</Button>
             <Button variant="secondary" onClick={() => navigate("/settings")}>
               Ouvrir les paramètres
             </Button>
@@ -201,7 +193,7 @@ export default function BillingSuccess() {
           <ul className="text-sm text-slate-600 space-y-1">
             <li>• Ajouter des services/utilisateurs selon votre plan</li>
             <li>• Déclarer les pertes (DLC, casse, vol) et suivre vos alertes</li>
-            <li>• Exporter vos inventaires (CSV / PDF selon plan)</li>
+            <li>• Exporter vos inventaires (CSV / XLSX selon plan)</li>
           </ul>
         </Card>
       </div>

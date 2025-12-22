@@ -38,7 +38,7 @@ export default function Tarifs() {
       setAuthToken(token);
 
       const res = await api.post("/api/auth/billing/checkout/", {
-        plan: planCode,
+        plan_code: planCode,
         cycle,
       });
 
@@ -62,7 +62,7 @@ export default function Tarifs() {
         <title>Tarifs | StockScan</title>
         <meta
           name="description"
-          content="Plans Essentiel, Boutique, Pro et Entreprise. Catalogue propre, inventaire métier, exports premium, IA coach."
+          content="Plans Solo, Duo, Multi et Entreprise. Catalogue propre, inventaire métier, exports premium, IA coach."
         />
       </Helmet>
 
@@ -71,8 +71,8 @@ export default function Tarifs() {
           <p className="text-sm font-semibold text-blue-300 uppercase tracking-wide">Tarifs</p>
           <h1 className="text-3xl md:text-4xl font-bold">Tarifs transparents, sans surprise</h1>
           <p className="text-lg text-slate-200">
-            Essentiel gratuit pour démarrer. Boutique et Pro pour les équipes multi-services. Entreprise pour les
-            contraintes réglementées ou multi-sites.
+            Solo gratuit pour démarrer. Duo pour séparer deux zones, Multi pour les équipes multi-services. Entreprise
+            pour les contraintes réglementées ou multi-sites.
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -150,19 +150,19 @@ export default function Tarifs() {
           <div className="grid md:grid-cols-2 gap-4 text-sm text-slate-100">
             <div>
               <p className="font-semibold">Puis-je tester avant de payer ?</p>
-              <p>Oui, l’essentiel est gratuit. Les plans payants sont activables à tout moment.</p>
+              <p>Oui, Solo est gratuit. Les plans payants sont activables à tout moment.</p>
             </div>
             <div>
               <p className="font-semibold">Comment sont gérés les multi-services ?</p>
-              <p>Boutique : 2 services. Pro : 5 services. Le regroupement est configurable dans les paramètres.</p>
+              <p>Duo : 2 services. Multi : 5 services. Le regroupement est configurable dans les paramètres.</p>
             </div>
             <div>
               <p className="font-semibold">L’assistant IA est-il inclus ?</p>
-              <p>Inclus en Pro (IA coach). Désactivable à tout moment. Non inclus en Essentiel/Boutique.</p>
+              <p>Inclus en Multi (IA coach). Désactivable à tout moment. Non inclus en Solo/Duo.</p>
             </div>
             <div>
               <p className="font-semibold">Exports et partage email ?</p>
-              <p>Essentiel : CSV limité. Boutique : CSV illimités. Pro : CSV + XLSX + partage email.</p>
+              <p>Solo : CSV limité. Duo : CSV illimités. Multi : CSV + XLSX + partage email.</p>
             </div>
             <div>
               <p className="font-semibold">Que se passe-t-il si je dépasse les limites ?</p>
@@ -170,7 +170,7 @@ export default function Tarifs() {
             </div>
             <div>
               <p className="font-semibold">Et en cas d’impayé ?</p>
-              <p>Grâce de quelques jours, puis retour Essentiel. Aucune donnée supprimée.</p>
+              <p>Grâce de quelques jours, puis retour Solo. Aucune donnée supprimée.</p>
             </div>
           </div>
         </section>
@@ -207,7 +207,7 @@ function buildPlans(cycle) {
 
   return [
     {
-      name: "Essentiel",
+      name: "Solo",
       planCode: "ESSENTIEL",
       subtitle: "Pour démarrer gratuitement",
       price: "0€",
@@ -223,9 +223,9 @@ function buildPlans(cycle) {
       note: "Downgrade sans perte de données.",
     },
     {
-      name: "Boutique",
+      name: "Duo",
       planCode: "BOUTIQUE",
-      subtitle: "Petites équipes & commerce de proximité",
+      subtitle: "Idéal pour séparer cuisine & bar, boutique & réserve",
       price: isYearly ? "90€" : "9€",
       cycleLabel: isYearly ? "/an" : "/mois",
       yearly: isYearly ? "Économie ≈ 2 mois" : "ou 90€ / an",
@@ -236,13 +236,13 @@ function buildPlans(cycle) {
         "Rôles par service",
         "Support prioritaire e-mail",
       ],
-      cta: "Passer au plan Boutique",
-      note: "Idéal pour retail, mode, bar mono-zone.",
+      cta: "Passer au plan Duo",
+      note: "Parfait pour deux zones distinctes ou deux équipes.",
     },
     {
-      name: "Pro",
+      name: "Multi",
       planCode: "PRO",
-      subtitle: "Multi-services & équipes",
+      subtitle: "Pour structures multi-services et équipes",
       price: isYearly ? "190€" : "19€",
       cycleLabel: isYearly ? "/an" : "/mois",
       yearly: isYearly ? "Économie ≈ 2 mois" : "ou 190€ / an",
@@ -254,7 +254,7 @@ function buildPlans(cycle) {
         "Assistant IA (coach) et analytics",
         "Automations & alertes avancées",
       ],
-      cta: "Choisir le plan Pro",
+      cta: "Choisir le plan Multi",
       note: "Pour structures multi-services exigeantes.",
     },
     {

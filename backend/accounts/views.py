@@ -40,6 +40,7 @@ from .serializers import (
     MembershipSerializer,
 )
 from .utils import get_tenant_for_request, get_user_role
+from .services.access import check_limit, get_usage
 
 LOGGER = logging.getLogger(__name__)
 User = get_user_model()
@@ -160,6 +161,8 @@ class ServiceViewSet(viewsets.ModelViewSet):
             raise exceptions.PermissionDenied("Rôle insuffisant pour créer un service.")
 
         tenant = get_tenant_for_request(self.request)
+        usage = get_usage(tenant)
+        check_limit(tenant, "max_services", usage["services_count"], requested_increment=1)
 
         name = serializer.validated_data.get("name")
         if Service.objects.filter(tenant=tenant, name=name).exists():
@@ -202,6 +205,19 @@ class MembershipViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant_for_request(self.request)
+        email = (serializer.validated_data.get("email") or "").strip()
+        username = (serializer.validated_data.get("username") or "").strip()
+        user_obj = None
+        if email:
+            user_obj = User.objects.filter(email=email).first()
+        if not user_obj and username:
+            user_obj = User.objects.filter(username=username).first()
+        is_existing_member = False
+        if user_obj:
+            is_existing_member = UserProfile.objects.filter(user=user_obj, tenant=tenant).exists()
+        if not is_existing_member:
+            usage = get_usage(tenant)
+            check_limit(tenant, "max_users", usage["users_count"], requested_increment=1)
         membership = serializer.save()
         _audit(
             tenant=tenant,
@@ -500,6 +516,16 @@ def _get_price_id(plan_code: str, billing_cycle: str) -> Optional[str]:
     return None
 
 
+def _normalize_checkout_plan(plan_code: str) -> str:
+    code = (plan_code or "").upper().strip()
+    aliases = {
+        "SOLO": "ESSENTIEL",
+        "DUO": "BOUTIQUE",
+        "MULTI": "PRO",
+    }
+    return aliases.get(code, code)
+
+
 def _reverse_price_id(price_id: str) -> Tuple[str, str]:
     """
     Retourne (plan_code, billing_cycle) depuis un Stripe Price ID.
@@ -586,7 +612,7 @@ def _set_tenant_plan_active(
 class CreateCheckoutSessionView(APIView):
     """
     POST /api/auth/billing/checkout/
-    Body: { "plan": "BOUTIQUE|PRO", "cycle": "MONTHLY|YEARLY" }
+    Body: { "plan": "BOUTIQUE|PRO|DUO|MULTI", "cycle": "MONTHLY|YEARLY" }
     Retour: { "url": "https://checkout.stripe.com/..." }
     """
     permission_classes = [permissions.IsAuthenticated]
@@ -596,7 +622,7 @@ class CreateCheckoutSessionView(APIView):
             return Response({"detail": "Stripe non configuré côté serveur."}, status=503)
 
         tenant = get_tenant_for_request(request)
-        plan_code = (request.data.get("plan") or "").upper().strip()
+        plan_code = _normalize_checkout_plan(request.data.get("plan"))
         cycle = (request.data.get("cycle") or "MONTHLY").upper().strip()
 
         if plan_code not in ["BOUTIQUE", "PRO"]:

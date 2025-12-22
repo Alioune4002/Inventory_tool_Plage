@@ -10,15 +10,7 @@ import Badge from "../../ui/Badge";
 
 import { useAuth } from "../../app/AuthProvider";
 import useEntitlements from "../../app/useEntitlements";
-
-function prettyPlan(code) {
-  const c = String(code || "").toUpperCase();
-  if (c === "ESSENTIEL") return "Essentiel";
-  if (c === "BOUTIQUE") return "Boutique";
-  if (c === "PRO") return "Pro";
-  if (c === "ENTREPRISE") return "Entreprise";
-  return c || "—";
-}
+import { formatPlanLabel } from "../../lib/planLabels";
 
 export default function BillingCancel() {
   const navigate = useNavigate();
@@ -28,7 +20,7 @@ export default function BillingCancel() {
   const { data: entitlements } = useEntitlements();
 
   const reason = params.get("reason"); // optionnel si tu veux l’ajouter côté backend
-  const lastPlan = prettyPlan(entitlements?.plan_effective);
+  const lastPlan = formatPlanLabel(entitlements?.plan_effective, "Solo");
 
   const headline = useMemo(() => {
     if (!isAuthed) return "Paiement annulé";
@@ -88,7 +80,7 @@ export default function BillingCancel() {
             <Button onClick={() => navigate("/tarifs")}>Revenir aux tarifs</Button>
             {isAuthed ? (
               <>
-                <Button variant="secondary" onClick={() => navigate("/dashboard")}>
+                <Button variant="secondary" onClick={() => navigate("/app/dashboard")}>
                   Retour au Dashboard
                 </Button>
                 <Button variant="secondary" onClick={() => navigate("/settings")}>
@@ -103,7 +95,7 @@ export default function BillingCancel() {
           </div>
 
           <div className="text-xs text-slate-500 pt-2">
-            Besoin d’aide ? En cas de blocage, on peut activer un essai Boutique/Pro sur demande.
+            Besoin d’aide ? En cas de blocage, on peut activer un essai Duo/Multi sur demande.
           </div>
         </Card>
 

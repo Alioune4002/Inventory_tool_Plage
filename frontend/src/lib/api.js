@@ -32,6 +32,11 @@ api.interceptors.response.use(
           error.response?.data?.detail ||
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";
         error.friendlyMessage = detail;
+      } else if (code === "FEATURE_NOT_INCLUDED") {
+        const detail =
+          error.response?.data?.detail ||
+          "Cette fonctionnalité nécessite un plan supérieur.";
+        error.friendlyMessage = detail;
       }
     }
 
@@ -65,7 +70,7 @@ export async function startCheckoutSession({ plan, cycle }) {
   if (!requireAuthOrRedirect("/tarifs")) return null;
 
   const payload = {
-    plan: String(plan || "").toUpperCase(),
+    plan_code: String(plan || "").toUpperCase(),
     cycle: String(cycle || "MONTHLY").toUpperCase(),
   };
 

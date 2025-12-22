@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { api } from "../lib/api";
+import { formatPlanLabel, formatUpgradeLabel } from "../lib/planLabels";
 
 const Banner = ({ title, subtitle, tone = "info", actions = [] }) => {
   const palette = {
@@ -78,7 +79,11 @@ export default function BillingBanners({ entitlements }) {
     usage,
     subscription_status,
     last_plan_was_trial,
+    plan_effective,
   } = entitlements;
+
+  const planLabel = formatPlanLabel(plan_effective, "Solo");
+  const upgradeLabel = formatUpgradeLabel(plan_effective);
 
   const banners = [];
   const dLeft = daysLeft(expires_at);
@@ -105,7 +110,7 @@ export default function BillingBanners({ entitlements }) {
         tone: "info",
         title: "Essai premium en cours",
         subtitle:
-          `Il vous reste ${dLeft} jour${dLeft > 1 ? "s" : ""} pour tester les fonctionnalités premium. À la fin, retour Essentiel automatiquement.`,
+          `Il vous reste ${dLeft} jour${dLeft > 1 ? "s" : ""} pour tester les fonctionnalités premium. À la fin, retour Solo automatiquement.`,
         actions: [
           { label: "Voir les plans", onClick: goTarifs, variant: "primary" },
         ],
@@ -119,7 +124,7 @@ export default function BillingBanners({ entitlements }) {
       tone: "neutral",
       title: "Fin de l’accès premium",
       subtitle:
-        "Votre essai est terminé. Vous êtes revenu sur Essentiel (gratuit). Vos données restent intactes, et l’export reste disponible.",
+        "Votre essai est terminé. Vous êtes revenu sur Solo (gratuit). Vos données restent intactes, et l’export reste disponible.",
       actions: [
         { label: "Comparer les plans", onClick: goTarifs, variant: "primary" },
       ],
@@ -149,7 +154,7 @@ export default function BillingBanners({ entitlements }) {
       tone: "danger",
       title: "Accès premium suspendu",
       subtitle:
-        "Faute de paiement, votre compte est repassé sur Essentiel. Vos données sont conservées, l’export reste disponible.",
+        "Faute de paiement, votre compte est repassé sur Solo. Vos données sont conservées, l’export reste disponible.",
       actions: [
         {
           label: "Réactiver via Stripe",
@@ -179,8 +184,14 @@ export default function BillingBanners({ entitlements }) {
       tone: "danger",
       title: "Limite de produits atteinte",
       subtitle:
-        `Votre plan limite le nombre de produits à ${limits?.max_products ?? "100"}. Vous en avez ${usage?.products_count ?? "plus que la limite"}. Lecture/export OK, ajout bloqué.`,
-      actions: [{ label: "Passer à un plan supérieur", onClick: goTarifs, variant: "danger" }],
+        `Plan ${planLabel} : limite à ${limits?.max_products ?? "100"} produits. Vous en avez ${usage?.products_count ?? "plus que la limite"}. Lecture/export OK, ajout bloqué.`,
+      actions: [
+        {
+          label: upgradeLabel ? `Passer à ${upgradeLabel}` : "Contacter l'équipe",
+          onClick: upgradeLabel ? goTarifs : () => (window.location.href = "/contact"),
+          variant: "danger",
+        },
+      ],
     });
   }
   if (overSrv) {
@@ -188,8 +199,14 @@ export default function BillingBanners({ entitlements }) {
       tone: "warning",
       title: "Limite de services atteinte",
       subtitle:
-        `Votre plan autorise ${limits?.max_services ?? "1"} service(s). Pour en ajouter un, choisissez un plan supérieur.`,
-      actions: [{ label: "Comparer les plans", onClick: goTarifs, variant: "primary" }],
+        `Plan ${planLabel} : ${limits?.max_services ?? "1"} service(s) autorisé(s). Pour en ajouter, passez au plan supérieur.`,
+      actions: [
+        {
+          label: upgradeLabel ? `Passer à ${upgradeLabel}` : "Comparer les plans",
+          onClick: goTarifs,
+          variant: "primary",
+        },
+      ],
     });
   }
   if (overUsers) {
@@ -197,8 +214,14 @@ export default function BillingBanners({ entitlements }) {
       tone: "warning",
       title: "Nombre maximal d’utilisateurs atteint",
       subtitle:
-        `Votre plan autorise ${limits?.max_users ?? "1"} utilisateur(s). Ajoutez-en davantage en changeant de plan.`,
-      actions: [{ label: "Augmenter mon plan", onClick: goTarifs, variant: "primary" }],
+        `Plan ${planLabel} : ${limits?.max_users ?? "1"} utilisateur(s). Ajoutez-en davantage en changeant de plan.`,
+      actions: [
+        {
+          label: upgradeLabel ? `Passer à ${upgradeLabel}` : "Comparer les plans",
+          onClick: goTarifs,
+          variant: "primary",
+        },
+      ],
     });
   }
 

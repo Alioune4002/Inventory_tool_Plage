@@ -10,6 +10,8 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework import status
 
 from .services.assistant import build_context, call_llm, validate_llm_json, SYSTEM_PROMPT
+from accounts.services.access import check_entitlement
+from accounts.utils import get_tenant_for_request
 
 
 class AiAssistantRateThrottle(SimpleRateThrottle):
@@ -34,6 +36,9 @@ class AiAssistantView(APIView):
         period_end = payload.get("period_end")
         filters = payload.get("filters") or {}
         question = payload.get("question") or payload.get("user_question")
+
+        tenant = get_tenant_for_request(request)
+        check_entitlement(tenant, "ai_assistant_basic")
 
         context = build_context(
             request.user,

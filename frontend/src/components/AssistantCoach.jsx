@@ -56,7 +56,7 @@ export default function AssistantCoach({ familyName, modules, identifierLabel = 
         <div>
           {proRequired ? (
             <div className="rounded-2xl bg-amber-500/10 border border-amber-400/40 px-3 py-2 text-xs text-amber-200">
-              L’assistant IA complet nécessite le plan Pro (module Pricing & TVA + Identifier activés). Active-les pour débloquer plus de réponses.
+              L’assistant IA complet nécessite le plan Multi (module Pricing & TVA + Identifier activés). Active-les pour débloquer plus de réponses.
             </div>
           ) : (
             <div className="rounded-2xl bg-emerald-500/10 border border-emerald-400/40 px-3 py-2 text-xs text-emerald-200">

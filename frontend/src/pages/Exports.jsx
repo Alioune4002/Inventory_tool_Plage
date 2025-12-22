@@ -309,7 +309,7 @@ export default function Exports() {
                   className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
                   onClick={() => setSelectedFields(essentialFields)}
                 >
-                  Essentiel
+                  Base
                 </button>
                 <button
                   type="button"

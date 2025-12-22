@@ -19,6 +19,7 @@ from django.conf import settings
 from accounts.mixins import TenantQuerySetMixin
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
 from accounts.permissions import ProductPermission, ManagerPermission
+from accounts.services.access import check_entitlement, check_limit, get_usage
 from utils.sendgrid_email import send_email_with_sendgrid
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class ProductViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
             raise exceptions.PermissionDenied("Rôle insuffisant pour créer un produit.")
         tenant = get_tenant_for_request(self.request)
         service = get_service_from_request(self.request)
+        usage = get_usage(tenant)
+        check_limit(tenant, "max_products", usage["products_count"], requested_increment=1)
         serializer.save(tenant=tenant, service=service)
 
     def perform_update(self, serializer):
@@ -179,6 +182,7 @@ class LossEventViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
             raise exceptions.PermissionDenied("Rôle insuffisant pour déclarer une perte.")
         tenant = get_tenant_for_request(self.request)
         service = get_service_from_request(self.request)
+        check_entitlement(tenant, "loss_management")
         serializer.save(
             tenant=tenant,
             service=service,
@@ -335,6 +339,7 @@ def export_excel(request):
 
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
+    check_entitlement(tenant, "exports_basic")
     products = Product.objects.filter(tenant=tenant, service=service, inventory_month=month)
 
     # CSV lightweight export (content-type kept compatible with spreadsheet readers)
@@ -376,6 +381,11 @@ def export_generic(request):
     to_month = request.query_params.get('to')
     email_to = request.query_params.get('email')
     email_message = request.query_params.get('message', '')
+    check_entitlement(tenant, "exports_basic")
+    if export_format == "xlsx":
+        check_entitlement(tenant, "exports_xlsx")
+    if email_to:
+        check_entitlement(tenant, "exports_email")
 
     qs = Product.objects.filter(tenant=tenant)
     if service_param and service_param != "all":
@@ -465,6 +475,12 @@ def export_advanced(request):
     fields = data.get('fields') or data.get('columns')
     if isinstance(fields, str):
         fields = [value.strip() for value in fields.split(',') if value.strip()]
+
+    check_entitlement(tenant, "exports_basic")
+    if export_format == "xlsx":
+        check_entitlement(tenant, "exports_xlsx")
+    if include_summary or include_charts:
+        check_entitlement(tenant, "reports_advanced")
 
     qs = Product.objects.filter(tenant=tenant)
 
