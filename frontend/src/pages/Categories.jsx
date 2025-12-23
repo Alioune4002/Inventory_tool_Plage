@@ -13,28 +13,32 @@ import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 export default function Categories() {
   const { serviceId, tenant, services } = useAuth();
   const pushToast = useToast();
+
   const [list, setList] = useState([]);
   const [page, setPage] = useState(1);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
+
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
   const serviceType = currentService?.service_type;
+
   const familyId = resolveFamilyId(serviceType, tenant?.domain);
   const familyMeta = FAMILLES.find((family) => family.id === familyId) ?? FAMILLES[0];
-  const categoryLabel = familyMeta.labels?.categoryLabel || "Categorie";
+
+  const categoryLabel = familyMeta.labels?.categoryLabel || "Catégorie";
   const categoryLabelLower = categoryLabel.toLowerCase();
   const defaultCategories = familyMeta.examples?.categories || [];
+
   const PAGE_SIZE = 12;
   const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+
   const paginated = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
     return list.slice(start, start + PAGE_SIZE);
   }, [list, page]);
 
   useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
+    if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   const load = async () => {
@@ -44,7 +48,10 @@ export default function Categories() {
       const res = await api.get(`/api/categories/?service=${serviceId}`);
       setList(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
-      pushToast?.({ message: "Impossible de charger les catégories (auth ou service).", type: "error" });
+      pushToast?.({
+        message: "Impossible de charger les catégories. Vérifie le service sélectionné et réessaie.",
+        type: "error",
+      });
       setList([]);
     } finally {
       setLoading(false);
@@ -61,12 +68,12 @@ export default function Categories() {
     setLoading(true);
     try {
       const res = await api.post("/api/categories/", { name: name.trim(), service: serviceId });
-      setList((prev) => [...prev, res.data]);
+      setList((prev) => [res.data, ...prev]); // plus agréable: on voit la nouvelle en haut
       setName("");
       setPage(1);
-      pushToast?.({ message: "Catégorie ajoutée.", type: "success" });
+      pushToast?.({ message: `${categoryLabel} ajoutée ✅`, type: "success" });
     } catch (e) {
-      const msg = e?.response?.data?.detail || "Ajout impossible (doublon ou droits).";
+      const msg = e?.response?.data?.detail || "Ajout impossible. (Doublon ou droits insuffisants.)";
       pushToast?.({ message: msg, type: "error" });
     } finally {
       setLoading(false);
@@ -80,9 +87,9 @@ export default function Categories() {
       await api.delete(`/api/categories/${cat.id}/?service=${serviceId}`);
       setList((prev) => prev.filter((c) => c.id !== cat.id));
       setPage(1);
-      pushToast?.({ message: "Catégorie supprimée.", type: "success" });
+      pushToast?.({ message: `${categoryLabel} supprimée.`, type: "success" });
     } catch (e) {
-      pushToast?.({ message: "Suppression impossible.", type: "error" });
+      pushToast?.({ message: "Suppression impossible pour le moment.", type: "error" });
     } finally {
       setLoading(false);
     }
@@ -90,15 +97,23 @@ export default function Categories() {
 
   const prefill = async () => {
     if (!serviceId || defaultCategories.length === 0) return;
-    for (const d of defaultCategories) {
-      try {
-        await api.post("/api/categories/", { name: d, service: serviceId });
-      } catch (_) {
-        /* ignore duplicates */
+    setLoading(true);
+    try {
+      for (const d of defaultCategories) {
+        try {
+          await api.post("/api/categories/", { name: d, service: serviceId });
+        } catch (_) {
+          /* ignore duplicates */
+        }
       }
+      await load();
+      pushToast?.({ message: "Pré-remplissage terminé ✨", type: "success" });
+      setPage(1);
+    } finally {
+      setLoading(false);
     }
-    load();
   };
+
   const showSkeleton = loading && list.length === 0;
 
   return (
@@ -110,11 +125,22 @@ export default function Categories() {
 
       <div className="space-y-4">
         <Card className="p-6 space-y-2">
-          <div className="text-sm text-slate-500">Catégories</div>
-          <h1 className="text-2xl font-black">Organisez vos {categoryLabelLower}</h1>
-          <p className="text-slate-600 text-sm">
-            Ajoutez, renommez ou supprimez vos {categoryLabelLower}.
-          </p>
+          <div className="flex items-start gap-3">
+            <img
+              src="/icon.svg"
+              alt="StockScan"
+              className="h-10 w-10 rounded-2xl border border-slate-200 bg-white p-2"
+              loading="lazy"
+            />
+            <div>
+              <div className="text-sm text-slate-500">Catégories</div>
+              <h1 className="text-2xl font-black">Organisez vos {categoryLabelLower}</h1>
+              <p className="text-slate-600 text-sm">
+                Créez une structure claire : une bonne liste de {categoryLabelLower} rend vos inventaires plus rapides,
+                vos exports plus propres, et vos stats plus fiables.
+              </p>
+            </div>
+          </div>
         </Card>
 
         <Card className="p-6 space-y-4">
@@ -124,12 +150,25 @@ export default function Categories() {
               placeholder={familyMeta.placeholders?.category || `Ex. ${categoryLabel}`}
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") add();
+              }}
             />
-            <div className="md:col-span-2 flex gap-3">
-              <Button onClick={add} loading={loading} className="shrink-0">Ajouter</Button>
-              <Button variant="secondary" onClick={() => setName("")} className="shrink-0">Réinitialiser</Button>
+
+            <div className="md:col-span-2 flex gap-3 flex-wrap">
+              <Button onClick={add} loading={loading} className="shrink-0">
+                Ajouter
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setName("")}
+                className="shrink-0"
+                disabled={loading}
+              >
+                Réinitialiser
+              </Button>
               {defaultCategories.length > 0 && (
-                <Button variant="ghost" onClick={prefill} className="shrink-0">
+                <Button variant="ghost" onClick={prefill} className="shrink-0" disabled={loading}>
                   Pré-remplir (recommandé)
                 </Button>
               )}
@@ -140,16 +179,21 @@ export default function Categories() {
             {showSkeleton
               ? Array.from({ length: 6 }).map((_, idx) => <Skeleton key={idx} className="h-12 w-full" />)
               : paginated.map((cat) => (
-                  <Card key={cat.id || cat.name} className="p-4 flex items-center justify-between" hover>
-                    <div className="font-semibold text-slate-900">{cat.name || cat}</div>
-                    <Button variant="ghost" size="sm" onClick={() => remove(cat)}>
+                  <Card
+                    key={cat.id || cat.name}
+                    className="p-4 flex items-center justify-between gap-3"
+                    hover
+                  >
+                    <div className="font-semibold text-slate-900 truncate">{cat.name || cat}</div>
+                    <Button variant="ghost" size="sm" onClick={() => remove(cat)} disabled={loading}>
                       Supprimer
                     </Button>
                   </Card>
                 ))}
             {!showSkeleton && !paginated.length && (
               <Card className="p-4 text-slate-500 text-sm">
-                Aucune {categoryLabelLower} pour ce service. Ajoutez-en ou pré-remplissez.
+                Aucune {categoryLabelLower} pour ce service.
+                {defaultCategories.length ? " Tu peux pré-remplir en 1 clic." : " Ajoute-en une première pour démarrer."}
               </Card>
             )}
           </div>
@@ -163,7 +207,7 @@ export default function Categories() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={page === 1}
+                disabled={page === 1 || loading}
               >
                 Précédent
               </Button>
@@ -171,11 +215,15 @@ export default function Categories() {
                 variant="ghost"
                 size="sm"
                 onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={page === totalPages}
+                disabled={page === totalPages || loading}
               >
                 Suivant
               </Button>
             </div>
+          </div>
+
+          <div className="text-xs text-slate-500">
+            Pro tip : garde 8–25 {categoryLabelLower} max. Trop de catégories = inventaire plus lent (et stats moins claires).
           </div>
         </Card>
       </div>

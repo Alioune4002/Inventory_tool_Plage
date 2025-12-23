@@ -1,4 +1,3 @@
-
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 
@@ -16,6 +15,7 @@ import PourBoutique from "../pages/public/PourBoutique.jsx";
 import Fonctionnalites from "../pages/public/Fonctionnalites.jsx";
 import Tarifs from "../pages/public/Tarifs.jsx";
 import PublicSupport from "../pages/public/PublicSupport.jsx";
+
 import Dashboard from "../pages/Dashboard.jsx";
 import Inventory from "../pages/Inventory.jsx";
 import Products from "../pages/Products.jsx";
@@ -24,10 +24,13 @@ import Exports from "../pages/Exports.jsx";
 import Losses from "../pages/Losses.jsx";
 import Settings from "../pages/Settings.jsx";
 import Support from "../pages/Support.jsx";
+
 import Terms from "../pages/Terms.jsx";
 import Privacy from "../pages/Privacy.jsx";
+import Legal from "../pages/Legal.jsx";
 import NotFound from "../pages/NotFound.jsx";
 
+import InvitationAccept from "../pages/InvitationAccept.jsx";
 import RequireAuth from "./RequireAuth.jsx";
 
 export default function AppRoutes() {
@@ -37,6 +40,9 @@ export default function AppRoutes() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+
+      <Route path="/invitation/accept" element={<InvitationAccept />} />
+
       <Route path="/comment-ca-marche" element={<CommentCaMarche />} />
       <Route path="/metiers" element={<Metiers />} />
       <Route path="/pour-restaurant-cuisine" element={<PourRestaurantCuisine />} />
@@ -48,10 +54,15 @@ export default function AppRoutes() {
       <Route path="/fonctionnalites" element={<Fonctionnalites />} />
       <Route path="/tarifs" element={<Tarifs />} />
       <Route path="/support" element={<PublicSupport />} />
+
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
       <Route path="/cgu" element={<Terms />} />
       <Route path="/confidentialite" element={<Privacy />} />
+
+      {/* Mentions légales */}
+      <Route path="/legal" element={<Legal />} />
+      <Route path="/mentions-legales" element={<Legal />} />
 
       {/* App (protected) */}
       <Route

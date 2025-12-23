@@ -31,20 +31,25 @@ export default function AIAssistantPanel({ month, serviceId }) {
   const pushToast = useToast();
   const { data: entitlements } = useEntitlements();
   const { serviceProfile, services, tenant } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState("");
   const [attempted, setAttempted] = useState(false);
+
   const [data, setData] = useState({
     message: "Posez une question ou lancez une analyse pour obtenir des conseils.",
     insights: [],
     suggested_actions: [],
     question: null,
   });
+
   const timerRef = useRef(null);
 
   const entLoaded = entitlements !== null;
   const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
+
+  // UX soft : autorisé tant que les entitlements ne sont pas chargés (évite un flash paywall)
   const canUseAI = !entLoaded || aiAllowed;
 
   const currentService = useMemo(() => {
@@ -56,9 +61,16 @@ export default function AIAssistantPanel({ month, serviceId }) {
   const serviceType = serviceProfile?.service_type || currentService?.service_type || "other";
   const tenantDomain = tenant?.domain || "food";
   const serviceDomain = serviceType === "retail_general" ? "general" : tenantDomain;
+
   const familyId = resolveFamilyId(serviceType, serviceDomain);
   const familyMeta = FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0];
-  const moduleMap = useMemo(() => MODULES.reduce((acc, mod) => ({ ...acc, [mod.id]: mod }), {}), []);
+
+  const moduleMap = useMemo(() => {
+    const acc = {};
+    for (const mod of MODULES) acc[mod.id] = mod;
+    return acc;
+  }, []);
+
   const serviceFeatures = serviceProfile?.features || currentService?.features || {};
 
   const isModuleActive = useCallback(
@@ -95,12 +107,8 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
   const showNotice = useCallback((message) => {
     setNotice(message);
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-    }
-    timerRef.current = window.setTimeout(() => {
-      setNotice("");
-    }, 10000);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setNotice(""), 9000);
   }, []);
 
   const basePayload = useMemo(
@@ -116,25 +124,30 @@ export default function AIAssistantPanel({ month, serviceId }) {
   const runAssistant = useCallback(
     async (userQuestion) => {
       if (!serviceId) {
-        showNotice("Sélectionnez un service avant d’interroger l’assistant.");
+        showNotice("Sélectionnez un service avant d’utiliser l’assistant.");
         return;
       }
+
       setAttempted(true);
+
       if (!canUseAI) {
-        showNotice("Je peux t’assister pleinement avec le plan Multi. Active-le pour débloquer mes conseils.");
+        showNotice("Cette fonctionnalité est disponible avec le plan Multi.");
         return;
       }
+
       setLoading(true);
       setNotice("");
+
       try {
         const resp = await api.post("/api/ai/assistant/", {
           ...basePayload,
           question: userQuestion || undefined,
         });
-        setData(resp.data || {});
+
+        setData(resp?.data || {});
         if (userQuestion) setQuestion("");
       } catch (e) {
-        showNotice("Votre assistant IA est en pause clope. Réessayez dans quelques secondes.");
+        showNotice("L’assistant n’est pas disponible pour le moment. Réessayez dans quelques secondes.");
         pushToast?.({ message: "Assistant IA indisponible.", type: "error" });
       } finally {
         setLoading(false);
@@ -149,17 +162,13 @@ export default function AIAssistantPanel({ month, serviceId }) {
       showNotice("Écrivez une question pour démarrer.");
       return;
     }
-    setAttempted(true);
     runAssistant(trimmed);
   };
 
-  const handleAnalyze = () => {
-    setAttempted(true);
-    runAssistant("");
-  };
+  const handleAnalyze = () => runAssistant("");
 
   const handleAction = async (action) => {
-    if (action.requires_confirmation) {
+    if (action?.requires_confirmation) {
       const ok = window.confirm(action.label || "Confirmer l'action ?");
       if (!ok) return;
     }
@@ -176,18 +185,23 @@ export default function AIAssistantPanel({ month, serviceId }) {
     }
   };
 
+  const disabledBecauseNoService = !serviceId;
+  const disabledBecausePaywall = entLoaded && !aiAllowed;
+
   return (
     <Card className="p-5 space-y-4" data-tour="tour-ai">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-500">Assistant IA</div>
           <div className="text-lg font-bold">Coach d’usage</div>
+          <div className="text-xs text-slate-500">
+            Conseils basés sur vos données (mois/service sélectionné).
+          </div>
         </div>
+
         <div className="flex items-center gap-2">
-          {!canUseAI && entLoaded && attempted && (
-            <Badge className="bg-amber-100 text-amber-700">Plan Multi</Badge>
-          )}
-          <Button size="sm" onClick={handleAnalyze} loading={loading}>
+          {disabledBecausePaywall && attempted && <Badge className="bg-amber-100 text-amber-700">Plan Multi</Badge>}
+          <Button size="sm" onClick={handleAnalyze} loading={loading} disabled={loading || disabledBecauseNoService || disabledBecausePaywall}>
             Analyser
           </Button>
         </div>
@@ -197,14 +211,15 @@ export default function AIAssistantPanel({ month, serviceId }) {
         <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-100">{data?.message}</div>
       </div>
 
-      {data?.question && (
+      {data?.question ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/30 dark:text-amber-100">
           Question : {data.question}
         </div>
-      )}
+      ) : null}
 
       <div className="space-y-2">
         <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">Questions rapides</div>
+
         <div className="flex flex-wrap gap-2">
           {SUGGESTIONS.map((prompt) => (
             <Button
@@ -215,52 +230,57 @@ export default function AIAssistantPanel({ month, serviceId }) {
                 setQuestion(prompt);
                 runAssistant(prompt);
               }}
-              disabled={loading}
+              disabled={loading || disabledBecauseNoService || disabledBecausePaywall}
             >
               {prompt}
             </Button>
           ))}
         </div>
+
         <div className="rounded-2xl border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/50">
           <textarea
             rows={2}
             className="w-full resize-none bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
-            placeholder="Posez une question précise (ex: quels produits sont à risque ?)"
+            placeholder="Posez une question précise (ex : quels produits sont à risque ?)"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
+            disabled={loading || disabledBecausePaywall}
           />
           <div className="flex items-center justify-between pt-2 text-xs text-slate-500">
-            <span>Réponses basées sur vos données.</span>
-            <Button size="sm" onClick={handleAsk} loading={loading}>
+            <span>{disabledBecausePaywall ? "Disponible avec le plan Multi." : "Réponses basées sur vos données."}</span>
+            <Button size="sm" onClick={handleAsk} loading={loading} disabled={loading || disabledBecauseNoService || disabledBecausePaywall}>
               Envoyer
             </Button>
           </div>
         </div>
-        {notice && (
+
+        {notice ? (
           <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800/60 dark:bg-blue-900/30 dark:text-blue-100">
             {notice}
           </div>
-        )}
+        ) : null}
 
-        {!!recommendedModules.length && (
+        {!!recommendedModules.length ? (
           <div className="rounded-2xl border border-slate-200/70 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900/50 space-y-2">
             <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">
               Modules conseillés pour {familyMeta?.name || "votre métier"}
             </div>
+
             <div className="flex flex-wrap gap-2">
               {recommendedModules.map((modId) => (
                 <Badge
                   key={modId}
-                  className={`${
+                  className={
                     inactiveRecommended.includes(modId)
                       ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100"
                       : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-100"
-                  }`}
+                  }
                 >
                   {moduleMap[modId]?.name || modId}
                 </Badge>
               ))}
             </div>
+
             {inactiveRecommended.length ? (
               <div className="text-xs text-slate-500">
                 Active les modules en attente pour débloquer tous les champs utiles.
@@ -268,11 +288,12 @@ export default function AIAssistantPanel({ month, serviceId }) {
             ) : (
               <div className="text-xs text-slate-500">Tous les modules recommandés sont actifs ✅</div>
             )}
+
             <Button as={Link} to="/app/settings" size="sm" variant="secondary">
               Ouvrir Paramètres → Modules
             </Button>
           </div>
-        )}
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -297,7 +318,12 @@ export default function AIAssistantPanel({ month, serviceId }) {
         {data?.suggested_actions?.length ? (
           <div className="flex flex-wrap gap-2">
             {data.suggested_actions.map((act, idx) => (
-              <Button key={idx} variant={act.requires_confirmation ? "secondary" : "primary"} onClick={() => handleAction(act)}>
+              <Button
+                key={idx}
+                variant={act.requires_confirmation ? "secondary" : "primary"}
+                onClick={() => handleAction(act)}
+                disabled={loading}
+              >
                 {act.label || "Action"}
               </Button>
             ))}

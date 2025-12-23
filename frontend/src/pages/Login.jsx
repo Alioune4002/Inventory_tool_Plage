@@ -11,8 +11,13 @@ export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
+  const invited = loc.state?.invited;
+ const invitedEmail = loc.state?.email;
 
   const [form, setForm] = useState({ username: "", password: "" });
+  useEffect(() => {
+    if (invitedEmail) setForm((p) => ({ ...p, username: invitedEmail }));
+ }, [invitedEmail]);
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
@@ -56,7 +61,11 @@ export default function Login() {
             <h1 className="text-3xl font-black leading-tight">Connexion</h1>
             <p className="text-white/70 mt-1">Accède à ton espace StockScan.</p>
           </div>
-
+                {invited ? (
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+          Invitation acceptée ✅ {invitedEmail ? `Connecte-toi avec ${invitedEmail}.` : "Tu peux te connecter."}
+        </div>
+      ) : null}
           {err && (
             <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
               {err}

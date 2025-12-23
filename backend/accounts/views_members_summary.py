@@ -82,7 +82,7 @@ class MembersSummaryView(APIView):
                 },
                 "object_type": r.object_type,
                 "object_id": r.object_id,
-                "metadata": r.metadata,
+                "metadata": r.meta,
             }
             for r in recent
         ]

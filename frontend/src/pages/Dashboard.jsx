@@ -110,14 +110,9 @@ export default function Dashboard() {
   const tenantDomain = tenant?.domain || "food";
   const serviceType = serviceProfile?.service_type || currentService?.service_type || "other";
   const serviceDomain = serviceType === "retail_general" ? "general" : tenantDomain;
-  const wording = useMemo(
-    () => getWording(serviceType, serviceDomain),
-    [serviceType, serviceDomain]
-  );
-  const ux = useMemo(
-    () => getUxCopy(serviceType, serviceDomain),
-    [serviceType, serviceDomain]
-  );
+
+  const wording = useMemo(() => getWording(serviceType, serviceDomain), [serviceType, serviceDomain]);
+  const ux = useMemo(() => getUxCopy(serviceType, serviceDomain), [serviceType, serviceDomain]);
 
   const priceCfg = serviceFeatures?.prices || {};
   const sellingEnabled = priceCfg.selling_enabled !== false;
@@ -140,7 +135,7 @@ export default function Dashboard() {
 
     try {
       if (isAllServices) {
-        const calls = services.map((s) =>
+        const calls = (services || []).map((s) =>
           Promise.all([
             api.get(`/api/inventory-stats/?month=${month}&service=${s.id}`),
             api.get(`/api/products/?month=${month}&service=${s.id}`),
@@ -179,7 +174,9 @@ export default function Dashboard() {
               }
             });
 
-            acc.by_product.push(...safeArray(r.stats.by_product).map((p) => ({ ...p, __service_name: r.service?.name })));
+            acc.by_product.push(
+              ...safeArray(r.stats.by_product).map((p) => ({ ...p, __service_name: r.service?.name }))
+            );
 
             safeArray(r.stats.losses_by_reason).forEach((lr) => {
               const existing = acc.losses_by_reason.find((x) => x.reason === lr.reason);
@@ -239,7 +236,10 @@ export default function Dashboard() {
         setProductsCount(list.length);
       }
     } catch (e) {
-      pushToast?.({ message: "Impossible de charger les données (auth/service ?)", type: "error" });
+      pushToast?.({
+        message: "Oups… impossible de charger le dashboard. Vérifie le service sélectionné et reconnecte-toi si besoin.",
+        type: "error",
+      });
       setStats({
         total_value: 0,
         total_selling_value: 0,
@@ -275,7 +275,11 @@ export default function Dashboard() {
         setMembersSummary({ members: [], recent_activity: [] });
       } else {
         setMembersVisible(false);
-        pushToast?.({ message: "Impossible de charger les membres (réessaie).", type: "error" });
+        // message plus doux
+        pushToast?.({
+          message: "Impossible de charger la section équipe pour l’instant. Réessaie dans quelques secondes.",
+          type: "error",
+        });
       }
     } finally {
       setMembersLoading(false);
@@ -285,7 +289,7 @@ export default function Dashboard() {
   useEffect(() => {
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceId, month]);
+  }, [serviceId, month, isAllServices]);
 
   // ✅ On tente une fois au chargement : si owner => panel s’affiche
   useEffect(() => {
@@ -310,15 +314,15 @@ export default function Dashboard() {
       label: copy.sellingLabel,
       value: sellingEnabled ? fmtCurrency(sellingValue) : "—",
       helper: itemTypeEnabled
-        ? "Exclut les matières premières si le type est renseigné."
-        : "Projection prix de vente (si renseigné).",
+        ? "Peut exclure les matières premières si le type d’article est activé."
+        : "Projection basée sur vos prix de vente (si renseignés).",
     },
     {
       label: "Marge potentielle",
       value: sellingEnabled ? fmtCurrency(marginValue) : "—",
       helper: sellingEnabled
         ? copy.marginHelper
-        : "Activez Prix de vente dans Settings → Modules pour estimer la marge.",
+        : "Astuce : activez “Prix de vente” dans Settings → Modules pour estimer la marge.",
     },
     {
       label: copy.inventoryCountLabel,
@@ -339,6 +343,20 @@ export default function Dashboard() {
   const members = safeArray(membersSummary.members);
   const recentActivity = safeArray(membersSummary.recent_activity);
 
+  const maxCategoryPurchase = useMemo(() => {
+    const vals = categories.map((x) => x.total_purchase_value || 0);
+    const max = Math.max(...vals, 1);
+    return max || 1;
+  }, [categories]);
+
+  const maxLossCost = useMemo(() => {
+    const vals = lossesByReason.map((x) => x.total_cost || 0);
+    const max = Math.max(...vals, 1);
+    return max || 1;
+  }, [lossesByReason]);
+
+  const showServiceSelect = (services || []).length > 0;
+
   return (
     <PageTransition>
       <Helmet>
@@ -347,21 +365,28 @@ export default function Dashboard() {
       </Helmet>
 
       <div className="grid gap-4">
-
         {/* ✅ Admin principal: équipe + traçabilité */}
         {membersVisible ? (
           <Card className="p-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <div className="text-sm text-slate-500">Admin</div>
-                <div className="text-2xl font-black tracking-tight">Équipe & traçabilité</div>
-                <div className="text-sm text-slate-600">
-                  Membres, rôles, scope par service (Salle / Cuisine…) et activité récente.
+              <div className="flex items-start gap-3">
+                <img
+                  src="/icon.svg"
+                  alt="StockScan"
+                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-white p-2"
+                  loading="lazy"
+                />
+                <div>
+                  <div className="text-sm text-slate-500">Espace admin</div>
+                  <div className="text-2xl font-black tracking-tight">Équipe & activité</div>
+                  <div className="text-sm text-slate-600">
+                    Visualisez les accès par service et gardez un œil sur ce qui bouge.
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex gap-2 flex-wrap items-center">
                 <Button variant="secondary" onClick={loadMembersSummary} loading={membersLoading}>
-                  Rafraîchir (membres)
+                  Rafraîchir
                 </Button>
                 <Badge variant="neutral">{membersLoading ? "Chargement…" : `${members.length} membre(s)`}</Badge>
               </div>
@@ -371,7 +396,7 @@ export default function Dashboard() {
               <Card className="p-4 space-y-3" hover>
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-semibold text-slate-800">Membres & rôles</div>
-                  <Badge variant="info">Owner only</Badge>
+                  <Badge variant="info">Admin</Badge>
                 </div>
 
                 {membersLoading ? (
@@ -383,8 +408,10 @@ export default function Dashboard() {
                 ) : members.length ? (
                   <div className="space-y-2">
                     {members.map((m) => {
-                      const scope = m?.service_scope?.name ? `Service: ${m.service_scope.name}` : "Accès multi-services";
-                      const last = m?.last_action?.action ? `${m.last_action.action} · ${fmtDateTime(m.last_action.at)}` : "—";
+                      const scope = m?.service_scope?.name ? `Service : ${m.service_scope.name}` : "Accès : multi-services";
+                      const last = m?.last_action?.action
+                        ? `${m.last_action.action} · ${fmtDateTime(m.last_action.at)}`
+                        : "—";
                       const role = (m?.role || "operator").toUpperCase();
                       const user = m?.user || {};
                       return (
@@ -397,19 +424,17 @@ export default function Dashboard() {
                                 <span className="text-slate-600 font-semibold">{user.email || "—"}</span>
                               </div>
                               <div className="text-xs text-slate-500 mt-1">
-                                {scope} · Dernière action : {last}
+                                {scope} · Dernière activité : {last}
                               </div>
                             </div>
-                            <Badge variant={role === "OWNER" ? "info" : role === "MANAGER" ? "neutral" : "neutral"}>
-                              {role}
-                            </Badge>
+                            <Badge variant={role === "OWNER" ? "info" : "neutral"}>{role}</Badge>
                           </div>
                         </Card>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">Aucun membre trouvé.</div>
+                  <div className="text-sm text-slate-500">Aucun membre à afficher pour l’instant.</div>
                 )}
               </Card>
 
@@ -431,7 +456,9 @@ export default function Dashboard() {
                       const who = a?.user?.username || "system";
                       const action = a?.action || "—";
                       const when = fmtDateTime(a?.at);
-                      const obj = a?.object_type ? `${a.object_type}${a.object_id ? `#${a.object_id}` : ""}` : "";
+                      const obj = a?.object_type
+                        ? `${a.object_type}${a.object_id ? `#${a.object_id}` : ""}`
+                        : "";
                       return (
                         <div key={`${action}-${idx}`} className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
@@ -449,14 +476,14 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div className="text-sm text-slate-500">
-                    Aucune activité enregistrée (ou AuditLog pas encore alimenté).
+                    Rien à afficher ici pour le moment — dès qu’un membre agit, l’activité apparaîtra.
                   </div>
                 )}
               </Card>
             </div>
 
             <div className="text-xs text-slate-500">
-              Prochaine étape (Settings) : modifier le scope service + rôle d’un membre, retirer un accès, renvoyer une invitation.
+              Astuce : gérez les rôles et le scope service depuis <span className="font-semibold">Settings → Équipe</span>.
             </div>
           </Card>
         ) : null}
@@ -464,9 +491,17 @@ export default function Dashboard() {
         {/* Dashboard header */}
         <Card className="p-6 space-y-3">
           <div className="flex flex-wrap gap-3 items-center justify-between">
-            <div>
-              <div className="text-sm text-slate-500">{copy.subtitle}</div>
-              <div className="text-2xl font-black tracking-tight">{copy.title}</div>
+            <div className="flex items-start gap-3">
+              <img
+                src="/logo_dark.svg"
+                alt="StockScan"
+                className="h-10 hidden sm:block"
+                loading="lazy"
+              />
+              <div>
+                <div className="text-sm text-slate-500">{copy.subtitle}</div>
+                <div className="text-2xl font-black tracking-tight">{copy.title}</div>
+              </div>
             </div>
             <Badge variant="info">{badgeText}</Badge>
           </div>
@@ -474,16 +509,17 @@ export default function Dashboard() {
           <div className="grid sm:grid-cols-3 gap-3 items-end">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
-            {services?.length > 0 && (
+            {showServiceSelect && (
               <label className="space-y-1.5">
                 <span className="text-sm font-medium text-slate-700">Service</span>
                 <select
                   className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-                  value={serviceId || ""}
+                  value={isAllServices ? "all" : serviceId || ""}
                   onChange={(e) => selectService(e.target.value)}
+                  aria-label="Sélection du service"
                 >
-                  {services.length > 1 && <option value="all">Tous les services</option>}
-                  {services.map((s) => (
+                  {(services || []).length > 1 && <option value="all">Tous les services</option>}
+                  {(services || []).map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
                     </option>
@@ -497,6 +533,10 @@ export default function Dashboard() {
                 Rafraîchir
               </Button>
             </div>
+          </div>
+
+          <div className="text-xs text-slate-500">
+            Conseil : démarrez avec un comptage simple (10–20 lignes). Le dashboard devient très parlant dès les premiers cycles.
           </div>
         </Card>
 
@@ -527,8 +567,7 @@ export default function Dashboard() {
           ) : categories.length ? (
             <div className="grid sm:grid-cols-2 gap-3">
               {categories.map((c) => {
-                const maxPurchase = Math.max(...categories.map((x) => x.total_purchase_value || 0), 1) || 1;
-                const width = Math.max(((c.total_purchase_value || 0) / maxPurchase) * 100, 6);
+                const width = Math.max(((c.total_purchase_value || 0) / maxCategoryPurchase) * 100, 6);
 
                 return (
                   <Card key={c.category || "aucune"} className="p-4 space-y-2" hover>
@@ -555,7 +594,7 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="text-sm text-slate-500">
-              Aucune donnée pour ce mois. Lancez un comptage (ou changez de mois/service).
+              Pas encore de données sur cette période. Lancez un comptage, ou changez de mois/service ✨
             </div>
           )}
         </Card>
@@ -576,8 +615,7 @@ export default function Dashboard() {
           ) : lossesByReason.length ? (
             <div className="space-y-2">
               {lossesByReason.map((l) => {
-                const maxCost = Math.max(...lossesByReason.map((x) => x.total_cost || 0), 1);
-                const width = Math.max(((l.total_cost || 0) / maxCost) * 100, 8);
+                const width = Math.max(((l.total_cost || 0) / maxLossCost) * 100, 8);
                 return (
                   <div key={l.reason} className="space-y-1">
                     <div className="flex justify-between text-xs font-semibold text-slate-600">
@@ -597,7 +635,7 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">Aucune perte déclarée sur cette période.</div>
+            <div className="text-sm text-slate-500">Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)</div>
           )}
         </Card>
 
@@ -638,19 +676,21 @@ export default function Dashboard() {
                   {p.notes?.length ? (
                     <div className="text-xs text-amber-700">{p.notes.join(" ")}</div>
                   ) : (
-                    <div className="text-xs text-slate-500">Astuce : renseignez prix d’achat/vente pour des stats plus précises.</div>
+                    <div className="text-xs text-slate-500">
+                      Astuce : ajoutez vos prix d’achat/vente pour des stats ultra précises.
+                    </div>
                   )}
                 </Card>
               ))}
             </div>
           ) : (
             <div className="text-sm text-slate-500">
-              Ajoutez des comptages pour voir les valeurs et pertes. Le dashboard devient utile dès 10–20 lignes.
+              Ajoutez des comptages pour voir les valeurs et pertes. Le dashboard devient vraiment parlant dès 10–20 lignes.
             </div>
           )}
         </Card>
 
-        <AIAssistantPanel month={month} serviceId={serviceId} />
+        <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
       </div>
     </PageTransition>
   );

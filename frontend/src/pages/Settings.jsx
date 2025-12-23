@@ -19,21 +19,24 @@ import { getTourKey, getTourPendingKey } from "../lib/tour";
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
 const FeatureToggle = ({ label, description, helper, checked, onChange, disabled }) => (
-  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3">
-    <input
-      type="checkbox"
-      className="mt-1 accent-blue-600"
-      checked={checked}
-      onChange={onChange}
-      disabled={disabled}
-    />
+  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-900/50">
+    <input type="checkbox" className="mt-1 accent-blue-600" checked={checked} onChange={onChange} disabled={disabled} />
     <div className="space-y-1">
-      <div className="text-sm font-semibold text-slate-900">{label}</div>
-      {description ? <div className="text-xs text-slate-500">{description}</div> : null}
-      {helper ? <div className="text-xs text-slate-400">{helper}</div> : null}
+      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</div>
+      {description ? <div className="text-xs text-slate-600 dark:text-slate-300">{description}</div> : null}
+      {helper ? <div className="text-xs text-slate-500 dark:text-slate-400">{helper}</div> : null}
     </div>
   </label>
 );
+
+const copyToClipboard = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export default function Settings() {
   const { me, tenant, services, refreshServices, logout, serviceId, selectService, isAllServices } = useAuth();
@@ -69,13 +72,17 @@ export default function Settings() {
     service_id: "", // "" => all services
   });
 
+  const [lastInviteLink, setLastInviteLink] = useState("");
+
   const serviceOptions = useMemo(() => safeArray(services), [services]);
   const hasMultiServices = serviceOptions.length > 1;
+
   const defaultServiceId = useMemo(() => {
     if (serviceId && serviceId !== "all") return String(serviceId);
     if (serviceOptions[0]) return String(serviceOptions[0].id);
     return "";
   }, [serviceId, serviceOptions]);
+
   const moduleLookup = useMemo(
     () =>
       MODULES.reduce((acc, mod) => {
@@ -112,34 +119,40 @@ export default function Settings() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const addMember = async () => {
+  // ✅ Invite: guest creates password
+  const inviteMember = async () => {
     if (!inviteForm.email.trim()) {
       pushToast?.({ message: "Email requis.", type: "error" });
       return;
     }
     setMembersLoading(true);
+    setLastInviteLink("");
     try {
       const payload = {
         email: inviteForm.email.trim(),
         role: inviteForm.role,
         service_id: inviteForm.service_id ? Number(inviteForm.service_id) : null,
       };
-      const res = await api.post("/api/auth/memberships/", payload);
-      const temp = res?.data?.temp_password;
-      if (temp) {
-        pushToast?.({
-          message: `Membre créé. Mot de passe temporaire: ${temp}`,
-          type: "warn",
-        });
-      } else {
-        pushToast?.({ message: "Membre ajouté / mis à jour.", type: "success" });
-      }
+
+      const res = await api.post("/api/auth/invitations/", payload);
+      const link = res?.data?.invite_link || "";
+
       setInviteForm({ email: "", role: "operator", service_id: "" });
+      if (link) setLastInviteLink(link);
+
+      pushToast?.({
+        message: "Invitation envoyée. L’invité va créer son mot de passe via le lien.",
+        type: "success",
+      });
+
       await loadMembers();
       refetchEntitlements?.();
     } catch (e) {
-      const msg = e?.response?.data?.detail || "Impossible d’ajouter ce membre.";
-      pushToast?.({ message: msg, type: "error" });
+      const msg =
+        e?.response?.data?.detail ||
+        e?.response?.data?.email ||
+        "Impossible d’envoyer l’invitation.";
+      pushToast?.({ message: typeof msg === "string" ? msg : "Invitation impossible.", type: "error" });
     } finally {
       setMembersLoading(false);
     }
@@ -290,9 +303,9 @@ export default function Settings() {
 
       <div className="space-y-4">
         <Card className="p-6 space-y-2">
-          <div className="text-sm text-slate-500">Paramètres</div>
-          <h1 className="text-2xl font-black">Compte & Services</h1>
-          <p className="text-slate-600 text-sm">Gérez votre compte, vos services, votre équipe et votre abonnement.</p>
+          <div className="text-sm text-slate-600 dark:text-slate-400">Paramètres</div>
+          <h1 className="text-2xl font-black text-slate-900 dark:text-white">Compte & Services</h1>
+          <p className="text-slate-700 dark:text-slate-300 text-sm">Gérez votre compte, vos services, votre équipe et votre abonnement.</p>
         </Card>
 
         {/* ✅ Owner: Team & access */}
@@ -300,9 +313,9 @@ export default function Settings() {
           <Card className="p-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <div className="text-sm font-semibold text-slate-700">Équipe & Accès</div>
-                <div className="text-sm text-slate-500">
-                  Donnez accès à un service précis (ex: Salle uniquement) + modifiez les rôles.
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Équipe & Accès</div>
+                <div className="text-sm text-slate-600 dark:text-slate-300">
+                  Invitez un membre : il reçoit un lien et crée lui-même son mot de passe.
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
@@ -314,16 +327,18 @@ export default function Settings() {
 
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <Input
-                label="Inviter / ajouter (email)"
+                label="Inviter (email)"
                 type="email"
                 placeholder="responsable@societe.com"
                 value={inviteForm.email}
                 onChange={(e) => setInviteForm((p) => ({ ...p, email: e.target.value }))}
               />
+
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Rôle</span>
+                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Rôle</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   value={inviteForm.role}
                   onChange={(e) => setInviteForm((p) => ({ ...p, role: e.target.value }))}
                 >
@@ -333,9 +348,10 @@ export default function Settings() {
               </label>
 
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Scope service</span>
+                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Scope service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   value={inviteForm.service_id}
                   onChange={(e) => setInviteForm((p) => ({ ...p, service_id: e.target.value }))}
                 >
@@ -348,16 +364,35 @@ export default function Settings() {
                 </select>
               </label>
 
-              <Button onClick={addMember} loading={membersLoading}>
-                Ajouter
+              <Button onClick={inviteMember} loading={membersLoading}>
+                Envoyer l’invitation
               </Button>
             </div>
+
+            {lastInviteLink ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+                <div className="font-semibold">Lien d’invitation (debug)</div>
+                <div className="break-all opacity-90">{lastInviteLink}</div>
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      const ok = await copyToClipboard(lastInviteLink);
+                      pushToast?.({ message: ok ? "Lien copié." : "Copie impossible.", type: ok ? "success" : "error" });
+                    }}
+                  >
+                    Copier
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <Divider />
 
             <div className="grid lg:grid-cols-2 gap-4">
               <Card className="p-4 space-y-3" hover>
-                <div className="text-sm font-semibold text-slate-800">Membres</div>
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Membres</div>
 
                 {membersLoading ? (
                   <div className="grid gap-2">
@@ -372,15 +407,17 @@ export default function Settings() {
                       const scope = m?.service_scope?.id ? String(m.service_scope.id) : "";
                       return (
                         <Card key={m.id} className="p-4 space-y-3" hover>
-                          <div className="text-sm font-semibold text-slate-900">
-                            {user.username || "Utilisateur"} · <span className="text-slate-600">{user.email || "—"}</span>
+                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            {user.username || "Utilisateur"} ·{" "}
+                            <span className="text-slate-600 dark:text-slate-300">{user.email || "—"}</span>
                           </div>
 
                           <div className="grid sm:grid-cols-3 gap-2 items-end">
                             <label className="space-y-1.5">
-                              <span className="text-xs font-semibold text-slate-600">Rôle</span>
+                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Rôle</span>
                               <select
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
+                                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                                 value={m.role || "operator"}
                                 onChange={(e) => updateMember(m.id, { role: e.target.value })}
                                 disabled={membersLoading}
@@ -392,13 +429,12 @@ export default function Settings() {
                             </label>
 
                             <label className="space-y-1.5">
-                              <span className="text-xs font-semibold text-slate-600">Service</span>
+                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Service</span>
                               <select
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
+                                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                                 value={scope}
-                                onChange={(e) =>
-                                  updateMember(m.id, { service_id: e.target.value ? Number(e.target.value) : null })
-                                }
+                                onChange={(e) => updateMember(m.id, { service_id: e.target.value ? Number(e.target.value) : null })}
                                 disabled={membersLoading}
                               >
                                 <option value="">Tous les services</option>
@@ -410,31 +446,32 @@ export default function Settings() {
                               </select>
                             </label>
 
-                            <Button
-                              variant="danger"
-                              onClick={() => removeMember(m.id)}
-                              loading={membersLoading}
-                              disabled={membersLoading}
-                            >
+                            <Button variant="danger" onClick={() => removeMember(m.id)} loading={membersLoading} disabled={membersLoading}>
                               Retirer
                             </Button>
                           </div>
 
-                          <div className="text-xs text-slate-500">
-                            Scope actuel :{" "}
-                            {m?.service_scope?.name ? <span className="font-semibold">{m.service_scope.name}</span> : "multi-services"}
+                          <div className="text-xs text-slate-600 dark:text-slate-400">
+                            Scope actuel : {m?.service_scope?.name ? <span className="font-semibold">{m.service_scope.name}</span> : "multi-services"}
                           </div>
+
+                          {m?.last_action?.action ? (
+                            <div className="text-xs text-slate-600 dark:text-slate-400">
+                              Dernière action : <span className="font-semibold">{m.last_action.action}</span>
+                              {m.last_action.at ? <span className="opacity-80"> · {new Date(m.last_action.at).toLocaleString("fr-FR")}</span> : null}
+                            </div>
+                          ) : null}
                         </Card>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">Aucun membre.</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Aucun membre.</div>
                 )}
               </Card>
 
               <Card className="p-4 space-y-3" hover>
-                <div className="text-sm font-semibold text-slate-800">Traçabilité (récent)</div>
+                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Traçabilité (récent)</div>
 
                 {membersLoading ? (
                   <div className="grid gap-2">
@@ -445,28 +482,26 @@ export default function Settings() {
                 ) : recentActivity.length ? (
                   <div className="space-y-2">
                     {recentActivity.slice(0, 12).map((a, idx) => (
-                      <div key={idx} className="text-sm text-slate-700">
+                      <div key={idx} className="text-sm text-slate-800 dark:text-slate-200">
                         <span className="font-semibold">{a.action}</span>{" "}
-                        <span className="text-slate-500">
+                        <span className="text-slate-600 dark:text-slate-400">
                           · {a.user?.username || "system"} · {new Date(a.at).toLocaleString("fr-FR")}
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">Aucune activité (audit pas encore alimenté).</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">Aucune activité (audit pas encore alimenté).</div>
                 )}
               </Card>
             </div>
 
-            <div className="text-xs text-slate-500">
-              Next V2: invitations par email + acceptation via lien (au lieu de “création directe”).
-            </div>
+            <div className="text-xs text-slate-600 dark:text-slate-400">Next V2: afficher aussi les invitations en attente + relance.</div>
           </Card>
         ) : null}
 
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Compte</div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Compte</div>
           <div className="grid sm:grid-cols-2 gap-3">
             <Input label="Utilisateur" value={me?.username || ""} readOnly />
             <Input label="Commerce" value={tenant?.name || ""} readOnly />
@@ -482,9 +517,9 @@ export default function Settings() {
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="text-sm font-semibold text-slate-700">Abonnement & facturation</div>
-              <div className="text-sm text-slate-500">
-                Plan actuel : <span className="font-semibold text-slate-800">{planLabel}</span>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Abonnement & facturation</div>
+              <div className="text-sm text-slate-700 dark:text-slate-300">
+                Plan actuel : <span className="font-semibold">{planLabel}</span>
                 {expiresAt ? (
                   <span className="ml-2">
                     · Fin de période : <span className="font-semibold">{expiresAt}</span>
@@ -506,15 +541,15 @@ export default function Settings() {
             </div>
           </div>
 
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-600 dark:text-slate-400">
             En cas d’impayé, vous pouvez mettre à jour votre carte depuis Stripe. Aucun effacement de données : lecture et export restent possibles.
           </div>
 
-          {entLoading ? <div className="text-sm text-slate-500">Chargement des informations d’abonnement…</div> : null}
+          {entLoading ? <div className="text-sm text-slate-600 dark:text-slate-400">Chargement…</div> : null}
         </Card>
 
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Sécurité / Identifiants</div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Sécurité / Identifiants</div>
           <div className="grid sm:grid-cols-2 gap-3">
             <Input
               label="Changer d’email"
@@ -524,13 +559,11 @@ export default function Settings() {
               helper="Front uniquement pour l’instant"
             />
             <div className="flex items-end">
-              <Button
-                variant="secondary"
-                onClick={() => pushToast?.({ message: "Changement d’email côté backend à implémenter.", type: "info" })}
-              >
+              <Button variant="secondary" onClick={() => pushToast?.({ message: "Changement d’email côté backend à implémenter.", type: "info" })}>
                 Mettre à jour
               </Button>
             </div>
+
             <Input
               label="Nouveau mot de passe"
               type="password"
@@ -538,12 +571,8 @@ export default function Settings() {
               onChange={(e) => setPwdForm((p) => ({ ...p, pwd: e.target.value }))}
               helper="Front uniquement pour l’instant"
             />
-            <Input
-              label="Confirmer mot de passe"
-              type="password"
-              value={pwdForm.confirm}
-              onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))}
-            />
+            <Input label="Confirmer mot de passe" type="password" value={pwdForm.confirm} onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))} />
+
             <div className="sm:col-span-2 flex gap-2">
               <Button
                 onClick={() => {
@@ -561,12 +590,12 @@ export default function Settings() {
         </Card>
 
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Préférences UI</div>
+          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Préférences UI</div>
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Mode de saisie</span>
+              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Mode de saisie</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 value={scanMode}
                 onChange={(e) => {
                   setScanMode(e.target.value);
@@ -576,13 +605,13 @@ export default function Settings() {
                 <option value="scan">Scan prioritaire</option>
                 <option value="manual">Saisie manuelle</option>
               </select>
-              <span className="text-xs text-slate-500">Ajuste l’accent sur les flux scan/sans-code-barres.</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Ajuste l’accent sur les flux scan/sans-code-barres.</span>
             </label>
 
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Coach onboarding</span>
+              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Coach onboarding</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 value={coachEnabled ? "on" : "off"}
                 onChange={(e) => {
                   const on = e.target.value === "on";
@@ -593,13 +622,13 @@ export default function Settings() {
                 <option value="on">Activé</option>
                 <option value="off">Désactivé</option>
               </select>
-              <span className="text-xs text-slate-500">Affiche/masque les aides rapides.</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Affiche/masque les aides rapides.</span>
             </label>
 
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Thème</span>
+              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Thème</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                 value={theme}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -611,9 +640,10 @@ export default function Settings() {
                 <option value="light">Clair</option>
                 <option value="dark">Sombre</option>
               </select>
-              <span className="text-xs text-slate-500">Persiste sur cet appareil.</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Persiste sur cet appareil.</span>
             </label>
           </div>
+
           <div className="flex flex-wrap gap-2">
             <Button
               variant="secondary"
@@ -622,10 +652,7 @@ export default function Settings() {
                 const pendingKey = getTourPendingKey(userId);
                 localStorage.removeItem(tourKey);
                 localStorage.setItem(pendingKey, "1");
-                pushToast?.({
-                  message: "Visite guidée prête. Retournez sur le dashboard pour la relancer.",
-                  type: "success",
-                });
+                pushToast?.({ message: "Visite guidée prête. Retournez sur le dashboard pour la relancer.", type: "success" });
               }}
             >
               Relancer la visite guidée
@@ -636,26 +663,19 @@ export default function Settings() {
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <div className="text-sm font-semibold text-slate-700">Services & modules</div>
-              <div className="text-sm text-slate-500">
-                Activez les modules métier : ils pilotent les champs visibles dans Produits, Inventaire et Exports.
-              </div>
+              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Services & modules</div>
+              <div className="text-sm text-slate-700 dark:text-slate-300">Activez les modules métier : ils pilotent les champs visibles dans Produits, Inventaire et Exports.</div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
-            <div className="text-sm font-semibold text-slate-800">Regrouper ou séparer vos services</div>
-            <div className="text-xs text-slate-500">
-              Ce choix organise la navigation et les tableaux de bord (vue globale ou vue par service).
-            </div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-900/40">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Regrouper ou séparer vos services</div>
+            <div className="text-xs text-slate-700 dark:text-slate-300">Ce choix organise la navigation et les tableaux de bord (vue globale ou vue par service).</div>
+
             {hasMultiServices ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant={isAllServices ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => selectService("all")}
-                  >
+                  <Button variant={isAllServices ? "primary" : "secondary"} size="sm" onClick={() => selectService("all")}>
                     Regrouper (vue globale)
                   </Button>
                   <Button
@@ -668,11 +688,12 @@ export default function Settings() {
                     Séparer (par service)
                   </Button>
                 </div>
+
                 {!isAllServices && defaultServiceId ? (
                   <label className="space-y-1.5">
-                    <span className="text-xs font-semibold text-slate-600">Service par défaut</span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Service par défaut</span>
                     <select
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       value={defaultServiceId}
                       onChange={(e) => selectService(e.target.value)}
                     >
@@ -684,14 +705,11 @@ export default function Settings() {
                     </select>
                   </label>
                 ) : null}
-                <div className="text-xs text-slate-500">
-                  Vous pourrez toujours basculer depuis la barre supérieure.
-                </div>
+
+                <div className="text-xs text-slate-700 dark:text-slate-300">Vous pourrez toujours basculer depuis la barre supérieure.</div>
               </div>
             ) : (
-              <div className="text-xs text-slate-500">
-                Ajoutez un 2e service pour activer le regroupement multi-services.
-              </div>
+              <div className="text-xs text-slate-700 dark:text-slate-300">Ajoutez un 2e service pour activer le regroupement multi-services.</div>
             )}
           </div>
 
@@ -700,7 +718,7 @@ export default function Settings() {
             <Button onClick={addService} loading={loading}>
               Ajouter
             </Button>
-            {toast && <div className="text-sm text-slate-500">{toast}</div>}
+            {toast && <div className="text-sm text-slate-700 dark:text-slate-300">{toast}</div>}
           </div>
 
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -726,23 +744,24 @@ export default function Settings() {
               const multiUnitEnabled = features.multi_unit?.enabled === true;
               const variantsEnabled = features.variants?.enabled === true;
               const itemTypeEnabled = features.item_type?.enabled === true;
+
               const hasModule = (id) => modules.includes(id);
 
               return (
                 <Card key={s.id} className="p-4 space-y-3" hover>
                   <div className="space-y-1">
-                    <div className="font-semibold text-slate-900">{s.name}</div>
-                    <div className="text-xs text-slate-500">Métier : {familyMeta?.name || "—"}</div>
-                    <div className="text-xs text-slate-400">
-                      Modules recommandés : {moduleNames.length ? moduleNames.join(", ") : "Base"}
-                    </div>
+                    <div className="font-semibold text-slate-900 dark:text-slate-100">{s.name}</div>
+                    <div className="text-xs text-slate-700 dark:text-slate-300">Métier : {familyMeta?.name || "—"}</div>
+                    <div className="text-xs text-slate-600 dark:text-slate-400">Modules recommandés : {moduleNames.length ? moduleNames.join(", ") : "Base"}</div>
                   </div>
+
                   <Divider />
 
                   <div className="space-y-3 text-sm">
                     {hasModule("identifier") && (
                       <div className="space-y-2">
-                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Identifiants</div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-700 dark:text-slate-400">Identifiants</div>
+
                         <FeatureToggle
                           label={wording?.barcodeLabel || "Code-barres"}
                           description="Scan rapide pour retrouver un article et éviter les doublons."
@@ -751,6 +770,7 @@ export default function Settings() {
                           onChange={(e) => toggleFeature(s, "barcode", e.target.checked)}
                           disabled={loading}
                         />
+
                         <FeatureToggle
                           label={wording?.skuLabel || "SKU interne"}
                           description="Référence interne stable pour garder un catalogue propre."
@@ -759,12 +779,8 @@ export default function Settings() {
                           onChange={(e) => toggleFeature(s, "sku", e.target.checked)}
                           disabled={loading}
                         />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => applyIdentifierDefaults(s, identifiers)}
-                          disabled={loading}
-                        >
+
+                        <Button variant="ghost" size="sm" onClick={() => applyIdentifierDefaults(s, identifiers)} disabled={loading}>
                           Appliquer la recommandation métier
                         </Button>
                       </div>
@@ -772,7 +788,8 @@ export default function Settings() {
 
                     {hasModule("pricing") && (
                       <div className="space-y-2">
-                        <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Pricing & TVA</div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-slate-700 dark:text-slate-400">Pricing & TVA</div>
+
                         <FeatureToggle
                           label="Prix d’achat (HT)"
                           description="Base de valeur de stock et coût des pertes."
@@ -780,6 +797,7 @@ export default function Settings() {
                           onChange={(e) => toggleFeature(s, "prices_purchase", e.target.checked)}
                           disabled={loading}
                         />
+
                         <FeatureToggle
                           label="Prix de vente (TTC par défaut)"
                           description="Active les marges théoriques et le CA potentiel."
@@ -787,6 +805,7 @@ export default function Settings() {
                           onChange={(e) => toggleFeature(s, "prices_selling", e.target.checked)}
                           disabled={loading}
                         />
+
                         <FeatureToggle
                           label="TVA"
                           description="Taux exportables (0%, 5.5%, 10%, 20%)."
@@ -794,9 +813,8 @@ export default function Settings() {
                           onChange={(e) => toggleFeature(s, "tva", e.target.checked)}
                           disabled={loading}
                         />
-                        <div className="text-xs text-slate-500">
-                          Sans prix de vente, la marge estimée reste indicative.
-                        </div>
+
+                        <div className="text-xs text-slate-700 dark:text-slate-300">Sans prix de vente, la marge estimée reste indicative.</div>
                       </div>
                     )}
 
@@ -867,38 +885,23 @@ export default function Settings() {
           </div>
         </Card>
 
-        <Card className="p-6 space-y-3 border-red-200/70 bg-red-50/70">
-          <div className="text-sm font-semibold text-red-700">Suppression du compte</div>
-          <div className="text-sm text-red-700">
+        <Card className="p-6 space-y-3 border-red-200/70 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10">
+          <div className="text-sm font-semibold text-red-800 dark:text-red-200">Suppression du compte</div>
+          <div className="text-sm text-red-800 dark:text-red-200">
             Cette action est définitive. Si vous êtes le seul membre du commerce, le tenant et ses données seront supprimés.
           </div>
           <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm text-red-800">
-              <input
-                type="checkbox"
-                className="mt-1 accent-red-600"
-                checked={confirmA}
-                onChange={(e) => setConfirmA(e.target.checked)}
-              />
-              <span>Je comprends que mes données et services associés peuvent être supprimés.</span>
+            <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
+              <input type="checkbox" className="mt-1 accent-red-600" checked={confirmA} onChange={(e) => setConfirmA(e.target.checked)} />
+              <span>Je comprends que mes données, services et abonnements associés peuvent être supprimés.</span>
             </label>
-            <label className="flex items-start gap-2 text-sm text-red-800">
-              <input
-                type="checkbox"
-                className="mt-1 accent-red-600"
-                checked={confirmB}
-                onChange={(e) => setConfirmB(e.target.checked)}
-              />
-              <span>Action irréversible : je devrai recréer un compte pour utiliser StockScan.</span>
+            <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
+              <input type="checkbox" className="mt-1 accent-red-600" checked={confirmB} onChange={(e) => setConfirmB(e.target.checked)} />
+              <span>Action irréversible : je devrai recréer un compte et me réabonner pour utiliser StockScan.</span>
             </label>
           </div>
           <div className="flex gap-3">
-            <Button
-              variant="danger"
-              disabled={!confirmA || !confirmB || deleting}
-              loading={deleting}
-              onClick={deleteAccount}
-            >
+            <Button variant="danger" disabled={!confirmA || !confirmB || deleting} loading={deleting} onClick={deleteAccount}>
               Supprimer mon compte
             </Button>
           </div>

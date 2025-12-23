@@ -20,10 +20,17 @@ export default function PublicShell({ children }) {
       <div className="pointer-events-none absolute -top-20 -left-24 h-72 w-72 rounded-full bg-blue-600 blur-[140px] opacity-30" />
       <div className="pointer-events-none absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-cyan-400 blur-[160px] opacity-20" />
 
-      <header className="relative z-10 mx-auto max-w-6xl px-4 py-6 flex items-center justify-between">
-        <Link to="/" className="text-xl font-black tracking-tight text-white">
-          StockScan
+      {/* ✅ HEADER: mobile clean */}
+      <header className="relative z-10 mx-auto max-w-6xl px-4 py-5 flex items-center justify-between gap-3">
+        <Link to="/" className="flex items-center gap-2 min-w-0">
+          {/* ✅ Tu peux activer ton logo plus tard :
+          <img src="/logo_dark.svg" alt="StockScan" className="h-8 w-auto" />
+          */}
+          <span className="text-xl font-black tracking-tight text-white truncate">
+            StockScan
+          </span>
         </Link>
+
         <nav className="hidden md:flex items-center gap-4 text-sm font-semibold">
           <Link to="/metiers" className="text-white/80 hover:text-white">
             Métiers
@@ -38,16 +45,26 @@ export default function PublicShell({ children }) {
             Support
           </Link>
         </nav>
-        <div className="flex items-center gap-2">
+
+        {/* ✅ 1 seul bouton sur mobile (évite l’encombrement) */}
+        <div className="flex items-center gap-2 shrink-0">
           <Link
-            className="rounded-full px-4 py-2 text-sm font-semibold border border-white/15 bg-white/5 text-white hover:bg-white/10 transition"
+            className="rounded-full px-3 py-2 text-sm font-semibold border border-white/15 bg-white/5 text-white hover:bg-white/10 transition whitespace-nowrap"
             to="/login"
           >
             Se connecter
           </Link>
-          <Button as={Link} to="/register" className="rounded-full px-4 py-2 text-sm font-semibold">
-            Créer un compte
-          </Button>
+
+          {/* Optionnel (desktop seulement) : */}
+          <div className="hidden md:block">
+            <Button
+              as={Link}
+              to="/register"
+              className="rounded-full px-4 py-2 text-sm font-semibold"
+            >
+              Créer un compte
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -71,6 +88,9 @@ export default function PublicShell({ children }) {
             </Link>
             <Link to="/privacy" className="hover:text-white">
               Confidentialité
+            </Link>
+            <Link to="/legal" className="hover:text-white">
+              Mentions légales
             </Link>
             <Link to="/support" className="hover:text-white">
               Support
