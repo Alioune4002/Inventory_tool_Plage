@@ -107,7 +107,7 @@ export default function Landing() {
               </div>
 
               <h1 className="text-4xl md:text-5xl font-black leading-[1.05] text-white">
-                L’inventaire qui donne (vraiment) envie de le faire
+                L’app qui donne (vraiment) envie de faire son inventaire
               </h1>
 
               <p className="text-lg text-slate-200">

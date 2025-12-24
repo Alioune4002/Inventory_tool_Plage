@@ -48,7 +48,7 @@ export default function AppShell() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
-  // ✅ Evite le "silence" en cas de promesse rejetée non catchée
+
   useEffect(() => {
     const onUnhandled = (event) => {
       try {
