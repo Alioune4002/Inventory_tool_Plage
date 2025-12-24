@@ -204,25 +204,59 @@ def get_default_service(tenant: Tenant):
     return service
 
 
+def _membership_has_status_field() -> bool:
+    # ✅ compat: certains environnements/tests n'ont pas encore le champ status
+    try:
+        return any(f.name == "status" for f in Membership._meta.fields)
+    except Exception:
+        return False
+
+
 def _get_membership_for_tenant(user, tenant: Tenant):
     """
-    ✅ On ne considère que les memberships ACTIVE pour les droits/scopes.
+    ✅ Compat:
+    - si Membership.status existe -> on ne prend que ACTIVE
+    - sinon -> on prend la membership (legacy)
     """
     if not user or not getattr(user, "is_authenticated", False):
         return None
-    return (
-        Membership.objects.filter(user=user, tenant=tenant, status="ACTIVE")
-        .select_related("service")
-        .first()
-    )
+
+    qs = Membership.objects.filter(user=user, tenant=tenant).select_related("service")
+    if _membership_has_status_field():
+        qs = qs.filter(status="ACTIVE")
+    return qs.first()
+
+
+def get_user_role(request):
+    """
+    ✅ Fix:
+    - Priorité au UserProfile (owner/manager/etc.) si présent pour ce tenant
+    - Ensuite Membership (ACTIVE si champ status existe)
+    - Sinon operator
+    """
+    user = getattr(request, "user", None)
+    tenant = get_tenant_for_request(request)
+
+    if not user or not user.is_authenticated:
+        return "operator"
+
+    profile = getattr(user, "profile", None)
+    if profile and profile.tenant_id == tenant.id:
+        return profile.role or "owner"
+
+    m = _get_membership_for_tenant(user, tenant)
+    if m:
+        return m.role
+
+    return "operator"
 
 
 def get_service_from_request(request):
     """
     ✅ IMPORTANT (scope service):
-    - owner => libre de choisir n'importe quel service du tenant via ?service=
-    - non-owner avec membership ACTIVE + membership.service défini => service forcé
-    - non-owner sans scope => comportement historique (param ?service= sinon Principal)
+    - owner => libre via ?service=
+    - non-owner + membership ACTIVE + membership.service défini => service forcé
+    - sinon => ?service= ou Principal
     """
     tenant = get_tenant_for_request(request)
     user = getattr(request, "user", None)
@@ -230,7 +264,7 @@ def get_service_from_request(request):
     role = get_user_role(request)
     membership = _get_membership_for_tenant(user, tenant)
 
-    # 🔒 Si scope fixé et non owner => on force le service
+    # 🔒 scope forcé si membership scoped + pas owner
     if role != "owner" and membership and membership.service_id:
         forced = membership.service
         requested_service_id = request.query_params.get("service") or (
@@ -240,7 +274,6 @@ def get_service_from_request(request):
             raise exceptions.PermissionDenied("Accès limité : vous n'avez pas accès à ce service.")
         return forced
 
-    # sinon comportement normal
     service_id = request.query_params.get("service") or (
         request.data.get("service") if hasattr(request, "data") else None
     )
@@ -252,33 +285,3 @@ def get_service_from_request(request):
             pass
 
     return get_default_service(tenant)
-
-
-def get_user_role(request):
-    """
-    ✅ Fix critique:
-    - On privilégie le rôle du UserProfile (owner par défaut) quand il existe.
-    - Ensuite seulement, on regarde Membership ACTIVE.
-    - Les INVITED ne doivent ni donner des droits, ni écraser le rôle owner.
-    """
-    user = getattr(request, "user", None)
-    tenant = get_tenant_for_request(request)
-
-    if not user or not user.is_authenticated:
-        return "operator"
-
-    # ✅ 1) Profile d'abord (source principale pour le "propriétaire" du tenant)
-    profile = getattr(user, "profile", None)
-    if profile and profile.tenant_id == tenant.id:
-        return profile.role or "owner"
-
-    # ✅ 2) Puis membership ACTIVE
-    m = (
-        Membership.objects.filter(user=user, tenant=tenant, status="ACTIVE")
-        .only("role")
-        .first()
-    )
-    if m:
-        return m.role
-
-    return "operator"
