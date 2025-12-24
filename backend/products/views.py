@@ -113,7 +113,7 @@ class ProductViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         service = get_service_from_request(self.request)
         qs = qs.filter(service=service)
 
-        # ✅ FIX: filtrage par mois si fourni (ton frontend en dépend)
+        # ✅ filtrage par mois si fourni (ton frontend en dépend)
         month = self.request.query_params.get("month")
         if month:
             qs = qs.filter(inventory_month=month)
@@ -156,7 +156,6 @@ def lookup_product(request):
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
 
-    # ✅ FIX: prendre le produit le plus récent (au lieu d'un get() qui casse si plusieurs mois)
     product = (
         Product.objects
         .filter(tenant=tenant, service=service, barcode=barcode)
@@ -283,7 +282,6 @@ def inventory_stats(request):
     if month:
         products = products.filter(inventory_month=month)
 
-    # Map des pertes par produit
     losses_qs = LossEvent.objects.filter(tenant=tenant, service=service)
     if month:
         losses_qs = losses_qs.filter(inventory_month=month)
@@ -292,7 +290,6 @@ def inventory_stats(request):
         if l.product_id:
             loss_by_product[l.product_id] = loss_by_product.get(l.product_id, 0) + float(l.quantity or 0)
 
-    # Pertes agrégées
     losses_total_qty = sum(float(l.quantity or 0) for l in losses_qs)
     losses_total_cost = 0
     losses_by_reason = []
@@ -307,7 +304,6 @@ def inventory_stats(request):
         losses_by_reason.append({"reason": r, "total_qty": qty, "total_cost": cost})
         losses_total_cost += cost
 
-    # Calculs par produit (avec limites réalistes : pas de stock initial/entrées dispos)
     by_product = []
     for p in products:
         stock_final = float(p.quantity or 0)
@@ -347,7 +343,6 @@ def inventory_stats(request):
             "notes": notes,
         })
 
-    # Par catégorie
     categories = products.values_list("category", flat=True).distinct()
     by_category = []
     for cat in categories:
@@ -368,7 +363,6 @@ def inventory_stats(request):
             "losses_qty": cat_losses,
         })
 
-    # Totaux service
     total_purchase_value = sum((float(p.purchase_price or 0) * float(p.quantity or 0)) for p in products)
     total_selling_value = 0
     for p in products:
@@ -542,35 +536,57 @@ def export_generic(request):
 @permission_classes([permissions.IsAuthenticated, ManagerPermission])
 def export_advanced(request):
     """
-    Export avancé (CSV ou XLSX) avec filtres combinés.
+    Export avancé (CSV ou XLSX) avec filtres combinés + (optionnel) envoi email.
     """
     tenant = get_tenant_for_request(request)
     service_from_request = get_service_from_request(request)
     data = request.data or {}
 
+    # ---- filtres & options (compat front) ----
     from_month = data.get('from_month') or data.get('fromMonth')
     to_month = data.get('to_month') or data.get('toMonth')
-    services = data.get('services') or [service_from_request.id]
+
+    # ✅ compat: ton front envoie "service", pas "services"
+    service_single = data.get("service")
+    services = data.get('services')
+    if not services:
+        if service_single:
+            services = [service_single]
+        else:
+            services = [service_from_request.id]
+
     categories = data.get('categories') or []
+    mode = (data.get("mode") or "all").upper()
+
     price_min = data.get('price_min', data.get('priceMin'))
     price_max = data.get('price_max', data.get('priceMax'))
     stock_min = data.get('stock_min', data.get('stockMin'))
+
     include_tva = data.get('include_tva', data.get('includeTVA', True))
     include_dlc = data.get('include_dlc', data.get('includeDLC', True))
     include_sku = data.get('include_sku', data.get('includeSKU', True))
     include_summary = data.get('include_summary', data.get('includeSummary', True))
     include_charts = data.get('include_charts', data.get('includeCharts', False))
     export_format = data.get('format', data.get('exportFormat', 'xlsx'))
+
+    # ✅ email (ton front l’envoie déjà)
+    email_to = (data.get("email") or "").strip()
+    email_message = (data.get("message") or "").strip()
+
     fields = data.get('fields') or data.get('columns')
     if isinstance(fields, str):
         fields = [value.strip() for value in fields.split(',') if value.strip()]
 
+    # ---- droits ----
     check_entitlement(tenant, "exports_basic")
     if export_format == "xlsx":
         check_entitlement(tenant, "exports_xlsx")
     if include_summary or include_charts:
         check_entitlement(tenant, "reports_advanced")
+    if email_to:
+        check_entitlement(tenant, "exports_email")
 
+    # ---- queryset ----
     qs = Product.objects.filter(tenant=tenant)
 
     if price_min == "" or price_min is None:
@@ -595,6 +611,10 @@ def export_advanced(request):
     if categories:
         qs = qs.filter(category__in=categories)
 
+    # ✅ appliquer le filtre entamé/non entamé
+    if mode in ("SEALED", "OPENED"):
+        qs = qs.filter(container_status=mode)
+
     if price_min is not None:
         qs = qs.filter(selling_price__gte=price_min)
     if price_max is not None:
@@ -611,7 +631,8 @@ def export_advanced(request):
         "tva": ("TVA (%)", lambda p: float(p.tva) if p.tva else ""),
         "dlc": ("DLC", lambda p: p.dlc or ""),
         "quantity": ("Quantité", lambda p: p.quantity or 0),
-        "identifier": ("Code-barres / SKU", lambda p: p.internal_sku if p.no_barcode else (p.barcode or "")),
+        # NOTE: on garde ta logique existante (no_barcode) pour éviter régression
+        "identifier": ("Code-barres / SKU", lambda p: p.internal_sku if getattr(p, "no_barcode", False) else (p.barcode or "")),
         "inventory_month": ("Mois", lambda p: p.inventory_month or ""),
         "service": ("Service", lambda p: p.service.name if p.service else ""),
         "unit": ("Unité", lambda p: p.unit or ""),
@@ -654,130 +675,163 @@ def export_advanced(request):
             row.append(product.dlc or '')
         row.append(product.quantity or 0)
         if include_sku:
-            row.append(product.internal_sku if product.no_barcode else product.barcode or '')
+            row.append(product.internal_sku if getattr(product, "no_barcode", False) else product.barcode or '')
         row.append(product.inventory_month)
         row.append(product.service.name if product.service else '')
         return row
 
-    rows = [build_row(p) for p in qs.select_related("service")]
+    products_qs = qs.select_related("service")
+    rows = [build_row(p) for p in products_qs]
+
+    # ---- build bytes + response ----
+    filename = "export_avance.xlsx" if export_format != "csv" else "export_avance.csv"
+    mimetype = (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if export_format != "csv"
+        else "text/csv"
+    )
+
+    attachment_bytes = b""
 
     if export_format == 'csv':
-        csv_bytes = _build_csv_bytes(headers, rows)
-        response = HttpResponse(csv_bytes, content_type='text/csv; charset=utf-8')
-        response['Content-Disposition'] = 'attachment; filename="export_avance.csv"'
-        return response
+        attachment_bytes = _build_csv_bytes(headers, rows)
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Export avancé"
+        ws.append(headers)
+        for row in rows:
+            ws.append(row)
+        _apply_sheet_style(ws, headers)
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Export avancé"
-    ws.append(headers)
-    for row in rows:
-        ws.append(row)
-    _apply_sheet_style(ws, headers)
+        if include_summary or include_charts:
+            summary = wb.create_sheet("Synthèse")
+            summary["A1"] = "Synthèse export"
+            summary["A1"].font = Font(bold=True, size=14)
 
-    if include_summary or include_charts:
-        summary = wb.create_sheet("Synthèse")
-        summary["A1"] = "Synthèse export"
-        summary["A1"].font = Font(bold=True, size=14)
+            products_list = list(products_qs)
+            total_products = len(products_list)
+            total_qty = sum(float(p.quantity or 0) for p in products_list)
+            total_purchase = sum(float(p.purchase_price or 0) * float(p.quantity or 0) for p in products_list)
+            total_selling = 0
+            for p in products_list:
+                features = getattr(p.service, "features", {}) or {}
+                item_cfg = features.get("item_type", {}) or {}
+                if item_cfg.get("enabled") and p.product_role == "raw_material":
+                    continue
+                total_selling += float(p.selling_price or 0) * float(p.quantity or 0)
+            dlc_count = sum(1 for p in products_list if p.dlc)
 
-        products_list = list(qs.select_related("service"))
-        total_products = len(products_list)
-        total_qty = sum(float(p.quantity or 0) for p in products_list)
-        total_purchase = sum(float(p.purchase_price or 0) * float(p.quantity or 0) for p in products_list)
-        total_selling = 0
-        for p in products_list:
-            features = getattr(p.service, "features", {}) or {}
-            item_cfg = features.get("item_type", {}) or {}
-            if item_cfg.get("enabled") and p.product_role == "raw_material":
-                continue
-            total_selling += float(p.selling_price or 0) * float(p.quantity or 0)
-        dlc_count = sum(1 for p in products_list if p.dlc)
+            has_item_type_enabled = any(
+                (getattr(p.service, "features", {}) or {}).get("item_type", {}).get("enabled")
+                for p in products_list
+            )
 
-        has_item_type_enabled = any(
-            (getattr(p.service, "features", {}) or {}).get("item_type", {}).get("enabled")
-            for p in products_list
-        )
+            info_rows = [
+                ("Produits", total_products),
+                ("Quantité totale", total_qty),
+                ("Valeur stock achat (€)", total_purchase),
+                ("Valeur stock vente (€)", total_selling),
+            ]
+            if include_dlc and (not selected_fields or "dlc" in selected_fields):
+                info_rows.append(("Produits avec DLC/DDM", dlc_count))
+            if has_item_type_enabled:
+                info_rows.append(("Note", "Valeur de vente exclut les matières premières."))
 
-        info_rows = [
-            ("Produits", total_products),
-            ("Quantité totale", total_qty),
-            ("Valeur stock achat (€)", total_purchase),
-            ("Valeur stock vente (€)", total_selling),
-        ]
-        if include_dlc and (not selected_fields or "dlc" in selected_fields):
-            info_rows.append(("Produits avec DLC/DDM", dlc_count))
-        if has_item_type_enabled:
-            info_rows.append(("Note", "Valeur de vente exclut les matières premières."))
+            row_cursor = 3
+            for label, value in info_rows:
+                summary.cell(row=row_cursor, column=1, value=label).font = Font(bold=True)
+                summary.cell(row=row_cursor, column=2, value=value)
+                row_cursor += 1
 
-        row_cursor = 3
-        for label, value in info_rows:
-            summary.cell(row=row_cursor, column=1, value=label).font = Font(bold=True)
-            summary.cell(row=row_cursor, column=2, value=value)
+            row_cursor += 1
+            summary.cell(row=row_cursor, column=1, value="Par catégorie").font = Font(bold=True)
+            row_cursor += 1
+            headers_summary = ["Catégorie", "Quantité", "Valeur achat (€)", "Valeur vente (€)"]
+            for col_num, header in enumerate(headers_summary, 1):
+                cell = summary.cell(row=row_cursor, column=col_num, value=header)
+                cell.font = EXPORT_HEADER_FONT
+                cell.fill = EXPORT_HEADER_FILL
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = EXPORT_BORDER
             row_cursor += 1
 
-        row_cursor += 1
-        summary.cell(row=row_cursor, column=1, value="Par catégorie").font = Font(bold=True)
-        row_cursor += 1
-        headers_summary = ["Catégorie", "Quantité", "Valeur achat (€)", "Valeur vente (€)"]
-        for col_num, header in enumerate(headers_summary, 1):
-            cell = summary.cell(row=row_cursor, column=col_num, value=header)
-            cell.font = EXPORT_HEADER_FONT
-            cell.fill = EXPORT_HEADER_FILL
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = EXPORT_BORDER
-        row_cursor += 1
+            category_totals = {}
+            for p in products_list:
+                cat = p.category or "Sans catégorie"
+                category_totals.setdefault(cat, {"qty": 0, "purchase": 0, "selling": 0})
+                category_totals[cat]["qty"] += float(p.quantity or 0)
+                category_totals[cat]["purchase"] += float(p.purchase_price or 0) * float(p.quantity or 0)
+                features = getattr(p.service, "features", {}) or {}
+                item_cfg = features.get("item_type", {}) or {}
+                if not (item_cfg.get("enabled") and p.product_role == "raw_material"):
+                    category_totals[cat]["selling"] += float(p.selling_price or 0) * float(p.quantity or 0)
 
-        category_totals = {}
-        for p in products_list:
-            cat = p.category or "Sans catégorie"
-            category_totals.setdefault(cat, {"qty": 0, "purchase": 0, "selling": 0})
-            category_totals[cat]["qty"] += float(p.quantity or 0)
-            category_totals[cat]["purchase"] += float(p.purchase_price or 0) * float(p.quantity or 0)
-            features = getattr(p.service, "features", {}) or {}
-            item_cfg = features.get("item_type", {}) or {}
-            if not (item_cfg.get("enabled") and p.product_role == "raw_material"):
-                category_totals[cat]["selling"] += float(p.selling_price or 0) * float(p.quantity or 0)
-
-        start_category_row = row_cursor
-        for cat, totals in sorted(category_totals.items()):
-            summary.cell(row=row_cursor, column=1, value=cat)
-            summary.cell(row=row_cursor, column=2, value=totals["qty"])
-            summary.cell(row=row_cursor, column=3, value=totals["purchase"])
-            summary.cell(row=row_cursor, column=4, value=totals["selling"])
-            if row_cursor % 2 == 0:
+            start_category_row = row_cursor
+            for cat, totals in sorted(category_totals.items()):
+                summary.cell(row=row_cursor, column=1, value=cat)
+                summary.cell(row=row_cursor, column=2, value=totals["qty"])
+                summary.cell(row=row_cursor, column=3, value=totals["purchase"])
+                summary.cell(row=row_cursor, column=4, value=totals["selling"])
+                if row_cursor % 2 == 0:
+                    for col_idx in range(1, 5):
+                        summary.cell(row=row_cursor, column=col_idx).fill = EXPORT_STRIPE_FILL
                 for col_idx in range(1, 5):
-                    summary.cell(row=row_cursor, column=col_idx).fill = EXPORT_STRIPE_FILL
-            for col_idx in range(1, 5):
-                summary.cell(row=row_cursor, column=col_idx).border = EXPORT_BORDER
-            row_cursor += 1
+                    summary.cell(row=row_cursor, column=col_idx).border = EXPORT_BORDER
+                row_cursor += 1
 
-        if include_charts and category_totals:
-            chart = BarChart()
-            chart.title = "Valeur stock achat par catégorie"
-            chart.y_axis.title = "€"
-            data = Reference(summary, min_col=3, min_row=start_category_row - 1, max_row=row_cursor - 1)
-            categories_ref = Reference(summary, min_col=1, min_row=start_category_row, max_row=row_cursor - 1)
-            chart.add_data(data, titles_from_data=True)
-            chart.set_categories(categories_ref)
-            summary.add_chart(chart, "F4")
+            if include_charts and category_totals:
+                chart = BarChart()
+                chart.title = "Valeur stock achat par catégorie"
+                chart.y_axis.title = "€"
+                data_ref = Reference(summary, min_col=3, min_row=start_category_row - 1, max_row=row_cursor - 1)
+                categories_ref = Reference(summary, min_col=1, min_row=start_category_row, max_row=row_cursor - 1)
+                chart.add_data(data_ref, titles_from_data=True)
+                chart.set_categories(categories_ref)
+                summary.add_chart(chart, "F4")
 
-    for sheet in wb.worksheets:
-        for col_cells in sheet.columns:
-            max_length = 0
-            column_letter = None
-            for cell in col_cells:
-                if not isinstance(cell, openpyxl.cell.cell.MergedCell):
-                    column_letter = cell.column_letter
-                    if cell.value is None:
-                        continue
-                    max_length = max(max_length, len(str(cell.value)))
-            if column_letter:
-                sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
+        # Ajuste colonnes sur toutes les feuilles
+        for sheet in wb.worksheets:
+            for col_cells in sheet.columns:
+                max_length = 0
+                column_letter = None
+                for cell in col_cells:
+                    if not isinstance(cell, openpyxl.cell.cell.MergedCell):
+                        column_letter = cell.column_letter
+                        if cell.value is None:
+                            continue
+                        max_length = max(max_length, len(str(cell.value)))
+                if column_letter:
+                    sheet.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
 
-    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    response['Content-Disposition'] = 'attachment; filename="export_avance.xlsx"'
-    wb.save(response)
-    return response
+        bio = io.BytesIO()
+        wb.save(bio)
+        attachment_bytes = bio.getvalue()
+
+    # ✅ ENVOI EMAIL (si demandé)
+    if email_to:
+        try:
+            send_email_with_sendgrid(
+                to_email=email_to,
+                subject="Export StockScan",
+                text_body=email_message or "Ci-joint votre export.",
+                html_body=email_message or None,
+                filename=filename,
+                file_bytes=attachment_bytes or b"",
+                mimetype=mimetype,
+                fallback_to_django=True,
+            )
+        except Exception as mail_err:
+            logger.exception("Erreur envoi email export_advanced")
+            # On ne bloque pas le téléchargement si l’envoi mail échoue.
+
+    # Response téléchargement (comme avant, mais depuis bytes)
+    resp = HttpResponse(
+        attachment_bytes,
+        content_type=f"{mimetype}; charset=utf-8" if export_format == "csv" else mimetype
+    )
+    resp['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
 
 
 @api_view(['GET'])

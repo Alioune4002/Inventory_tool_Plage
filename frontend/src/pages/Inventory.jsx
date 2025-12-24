@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
@@ -9,6 +9,7 @@ import Card from "../ui/Card";
 import Skeleton from "../ui/Skeleton";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
+import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 
@@ -34,6 +35,18 @@ export default function Inventory() {
   const [lastFound, setLastFound] = useState(null);
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
+
+  // ✅ scanner modal
+  const [scannerOpen, setScannerOpen] = useState(false);
+
+  // ✅ highlight + scroll
+  const [highlightCode, setHighlightCode] = useState("");
+  const highlightTimeoutRef = useRef(null);
+  const rowRefs = useRef(new Map());
+  const tableWrapRef = useRef(null);
+
+  // ✅ focus "Nom" after scan if not found
+  const nameInputRef = useRef(null);
 
   const [quick, setQuick] = useState({
     name: "",
@@ -66,9 +79,7 @@ export default function Inventory() {
 
   const getFeatureFlag = (key, fallback = false) => {
     const cfg = serviceFeatures?.[key];
-    if (cfg && typeof cfg.enabled === "boolean") {
-      return cfg.enabled;
-    }
+    if (cfg && typeof cfg.enabled === "boolean") return cfg.enabled;
     return fallback;
   };
 
@@ -88,7 +99,6 @@ export default function Inventory() {
 
   const isAllServices = services.length > 1 && String(serviceId) === "all";
 
-  // features dérivées
   const dlcCfg = serviceFeatures?.dlc || {};
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
@@ -115,7 +125,6 @@ export default function Inventory() {
     return ["pcs"];
   }, [countingMode]);
 
-  // adapter l'unité par défaut selon countingMode
   useEffect(() => {
     setQuick((prev) => {
       const next = { ...prev };
@@ -134,7 +143,6 @@ export default function Inventory() {
     });
   }, [lossReasons]);
 
-  // charger catégories du service sélectionné
   useEffect(() => {
     const loadCategories = async () => {
       if (!serviceId || isAllServices) {
@@ -204,9 +212,7 @@ export default function Inventory() {
   const PAGE_SIZE = 12;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
+    if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   useEffect(() => {
@@ -214,9 +220,11 @@ export default function Inventory() {
     const timer = window.setTimeout(() => setErr(""), 7000);
     return () => window.clearTimeout(timer);
   }, [err]);
+
   useEffect(() => {
     setPage(1);
   }, [search, totalPages]);
+
   const paginatedInventory = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
     return filtered.slice(start, start + PAGE_SIZE);
@@ -283,6 +291,7 @@ export default function Inventory() {
 
     if (skuEnabled) payload.internal_sku = cleanedSku || "";
     else payload.internal_sku = "";
+
     if (dlcEnabled) payload.dlc = quick.dlc || null;
     if (lotEnabled) payload.lot_number = quick.lotNumber || null;
     if (itemTypeEnabled) payload.product_role = quick.product_role || null;
@@ -326,10 +335,7 @@ export default function Inventory() {
           });
           pushToast?.({ message: "Perte enregistrée.", type: "info" });
         } catch (lossErr) {
-          pushToast?.({
-            message: "Comptage OK, mais la perte n’a pas pu être enregistrée.",
-            type: "warn",
-          });
+          pushToast?.({ message: "Comptage OK, mais la perte n’a pas pu être enregistrée.", type: "warn" });
         }
       }
 
@@ -347,25 +353,30 @@ export default function Inventory() {
     }
   };
 
-  const lookupBarcode = async () => {
-    if (!quick.barcode) {
+  // ✅ returns { kind: "local"|"external"|"none", data }
+  const lookupBarcode = async (overrideBarcode) => {
+    const code = String(overrideBarcode ?? quick.barcode ?? "").trim();
+
+    if (!code) {
       pushToast?.({ message: `Scannez ou saisissez un ${wording.barcodeLabel || "code-barres"} d’abord.`, type: "warn" });
-      return;
+      return { kind: "none" };
     }
+
     try {
-      const res = await api.get(`/api/products/lookup/?barcode=${encodeURIComponent(quick.barcode)}`);
+      const res = await api.get(`/api/products/lookup/?barcode=${encodeURIComponent(code)}`);
       if (res?.data?.found && res.data.product) {
         const p = res.data.product;
-          setQuick((prev) => ({
-            ...prev,
-            name: p.name || prev.name,
-            category: p.category || prev.category,
-            internal_sku: p.internal_sku || prev.internal_sku,
-            product_role: p.product_role || prev.product_role,
-            dlc: p.dlc || prev.dlc,
-            unit: p.unit || prev.unit,
-            lotNumber: p.lot_number || prev.lotNumber,
-          }));
+        setQuick((prev) => ({
+          ...prev,
+          barcode: code,
+          name: p.name || prev.name,
+          category: p.category || prev.category,
+          internal_sku: p.internal_sku || prev.internal_sku,
+          product_role: p.product_role || prev.product_role,
+          dlc: p.dlc || prev.dlc,
+          unit: p.unit || prev.unit,
+          lotNumber: p.lot_number || prev.lotNumber,
+        }));
         setLastFound({
           type: "local",
           product: res.data.product,
@@ -373,17 +384,130 @@ export default function Inventory() {
           history: res.data.history || [],
         });
         pushToast?.({ message: `Fiche ${itemLabelLower} pré-remplie.`, type: "success" });
-      } else if (res?.data?.suggestion) {
+        return { kind: "local", data: res.data.product };
+      }
+
+      if (res?.data?.suggestion) {
         setLastFound({ type: "external", suggestion: res.data.suggestion });
         pushToast?.({ message: "Suggestion trouvée : vérifiez puis complétez.", type: "info" });
-      } else {
-        setLastFound(null);
-        pushToast?.({ message: "Aucune correspondance trouvée.", type: "info" });
+        return { kind: "external", data: res.data.suggestion };
       }
+
+      setLastFound(null);
+      pushToast?.({ message: "Aucune correspondance trouvée.", type: "info" });
+      return { kind: "none" };
     } catch (e) {
       setLastFound(null);
       pushToast?.({ message: `Aucun ${itemLabelLower} trouvé pour ce ${barcodeLabel}.`, type: "info" });
+      return { kind: "none" };
     }
+  };
+
+  const armHighlightClear = () => {
+    if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = window.setTimeout(() => setHighlightCode(""), 3000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) window.clearTimeout(highlightTimeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!highlightCode) return;
+
+    const code = highlightCode.toLowerCase();
+
+    const indexInFiltered = filtered.findIndex(
+      (p) =>
+        String(p.barcode || "").toLowerCase() === code ||
+        String(p.internal_sku || "").toLowerCase() === code
+    );
+    if (indexInFiltered >= 0) {
+      const targetPage = Math.floor(indexInFiltered / PAGE_SIZE) + 1;
+      if (targetPage !== page) {
+        setPage(targetPage);
+        return;
+      }
+    }
+
+    const exact = paginatedInventory.find(
+      (p) =>
+        String(p.barcode || "").toLowerCase() === code ||
+        String(p.internal_sku || "").toLowerCase() === code
+    );
+    if (!exact) return;
+
+    const rowKey =
+      (exact.barcode && String(exact.barcode).toLowerCase()) ||
+      (exact.internal_sku && String(exact.internal_sku).toLowerCase()) ||
+      String(exact.id);
+
+    window.requestAnimationFrame(() => {
+      const el = rowRefs.current.get(rowKey);
+      if (el?.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      else tableWrapRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+  }, [highlightCode, filtered, paginatedInventory, page]);
+
+  // ✅ ultra flow: if none found => keep barcode + focus Name
+  const onScannerDetected = async (code) => {
+    const cleaned = String(code || "").trim();
+    if (!cleaned) return;
+
+    setScannerOpen(false);
+
+    // 1) always set barcode
+    setQuick((p) => ({ ...p, barcode: cleaned }));
+
+    // 2) search table + highlight
+    setSearch(cleaned);
+    setHighlightCode(cleaned);
+    armHighlightClear();
+
+    // 3) lookup
+    const result = await lookupBarcode(cleaned);
+
+    // 4) if not found locally, force focus on name and encourage filling
+    if (result.kind === "none") {
+      setQuick((prev) => ({
+        ...prev,
+        barcode: cleaned,
+        // keep existing category if user had one, but clear name to force intent
+        name: "",
+      }));
+
+      pushToast?.({
+        message: "Produit non trouvé. Code-barres renseigné : complète le nom puis ajoute.",
+        type: "info",
+      });
+
+      window.setTimeout(() => {
+        // try focus inside Input (depends on your Input implementation)
+        const el = nameInputRef.current;
+        if (el?.focus) el.focus();
+        // fallback: query by input[name] if needed
+        else {
+          const input = document.querySelector('input[autocomplete="off"][placeholder]') || document.querySelector("input");
+          input?.focus?.();
+        }
+      }, 150);
+    }
+  };
+
+  const getRowKey = (p) =>
+    (p.barcode && String(p.barcode).toLowerCase()) ||
+    (p.internal_sku && String(p.internal_sku).toLowerCase()) ||
+    String(p.id);
+
+  const isRowHighlighted = (p) => {
+    if (!highlightCode) return false;
+    const code = highlightCode.toLowerCase();
+    return (
+      String(p.barcode || "").toLowerCase() === code ||
+      String(p.internal_sku || "").toLowerCase() === code
+    );
   };
 
   return (
@@ -392,6 +516,12 @@ export default function Inventory() {
         <title>{ux.inventoryTitle} | StockScan</title>
         <meta name="description" content={ux.inventoryIntro} />
       </Helmet>
+
+      <BarcodeScannerModal
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onDetected={onScannerDetected}
+      />
 
       <div className="grid gap-4">
         <Card className="p-6 space-y-4">
@@ -444,12 +574,14 @@ export default function Inventory() {
             ) : (
               <form className="grid md:grid-cols-3 gap-3 items-end" onSubmit={addQuick}>
                 <fieldset disabled={loading || authLoading} className="contents">
+                  {/* ✅ ref for focus after scan */}
                   <Input
                     label={wording.itemLabel}
                     placeholder={placeholders.name}
                     value={quick.name}
                     onChange={(e) => setQuick((p) => ({ ...p, name: e.target.value }))}
                     required
+                    inputRef={nameInputRef}
                   />
 
                   {categories.length > 0 ? (
@@ -520,15 +652,24 @@ export default function Inventory() {
                   )}
 
                   {barcodeEnabled && (
-                    <div className="flex items-end">
+                    <div className="flex items-end gap-2">
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={lookupBarcode}
+                        onClick={() => setScannerOpen(true)}
                         className="w-full flex gap-2 justify-center"
                       >
                         <ScanLine className="w-4 h-4" />
-                        {ux.scanButton}
+                        Scanner caméra
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => lookupBarcode()}
+                        className="w-full justify-center"
+                        disabled={!String(quick.barcode || "").trim()}
+                      >
+                        Chercher
                       </Button>
                     </div>
                   )}
@@ -571,14 +712,6 @@ export default function Inventory() {
                           </option>
                         ))}
                       </select>
-                      <p className="text-xs text-[var(--muted)]">
-                        Unités adaptées :{" "}
-                        {countingMode === "weight"
-                          ? "kg / g"
-                          : countingMode === "volume"
-                          ? "l / ml"
-                          : "pcs / kg / g / l / ml"}
-                      </p>
                     </label>
                   )}
 
@@ -731,28 +864,6 @@ export default function Inventory() {
                   {lastFound.product?.inventory_month || "—"})
                   <span className="text-xs text-slate-500"> · info non reprise automatiquement</span>
                 </div>
-
-                {lastFound.recent?.length ? (
-                  <div className="mt-2 text-xs text-slate-600 space-y-1">
-                    <div className="font-semibold">Dernières fiches {itemLabelLower} saisies :</div>
-                    {lastFound.recent.map((r) => (
-                      <div key={r.id}>
-                        • {r.name} ({r.inventory_month})
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                {lastFound.history?.length ? (
-                  <div className="mt-2 text-xs text-slate-600 space-y-1">
-                    <div className="font-semibold">Historique (quantites non reprises) :</div>
-                    {lastFound.history.slice(0, 5).map((h) => (
-                      <div key={h.id}>
-                        • {h.inventory_month} — {h.quantity} {h.unit || "pcs"}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             ) : (
               <div className="text-sm text-slate-700">
@@ -788,7 +899,7 @@ export default function Inventory() {
           ) : err ? (
             <div className="p-6 rounded-xl bg-red-50 text-red-700">{err}</div>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" ref={tableWrapRef}>
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr className="text-slate-600">
@@ -811,18 +922,7 @@ export default function Inventory() {
                           <div className="text-lg font-semibold text-slate-800">{ux.emptyInventoryTitle}</div>
                           <div className="text-sm text-slate-600">{ux.emptyInventoryText}</div>
                           <div className="flex justify-center gap-2">
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                setQuick((p) => ({
-                                  ...p,
-                                  name: placeholders.name,
-                                }))
-                              }
-                            >
-                              Pré-remplir
-                            </Button>
-                            <Button variant="secondary" size="sm" onClick={() => setSearch("")}>
+                            <Button size="sm" onClick={() => setSearch("")}>
                               Reset recherche
                             </Button>
                           </div>
@@ -830,20 +930,35 @@ export default function Inventory() {
                       </td>
                     </tr>
                   ) : (
-                    paginatedInventory.map((p, idx) => (
-                      <tr key={p.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
-                        {isAllServices && (
-                          <td className="px-4 py-3 text-slate-700">{p.__service_name || p.service_name || "—"}</td>
-                        )}
-                        <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
-                        <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
-                        <td className="px-4 py-3 text-slate-700">{p.inventory_month}</td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {p.quantity} {p.unit || "pcs"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700">{p.barcode || p.internal_sku || "—"}</td>
-                      </tr>
-                    ))
+                    paginatedInventory.map((p, idx) => {
+                      const highlighted = isRowHighlighted(p);
+                      const rowKey = getRowKey(p);
+
+                      return (
+                        <tr
+                          key={p.id}
+                          ref={(el) => {
+                            if (!el) return;
+                            rowRefs.current.set(rowKey, el);
+                          }}
+                          className={[
+                            idx % 2 === 0 ? "bg-white" : "bg-slate-50/60",
+                            highlighted ? "ring-2 ring-blue-500 bg-blue-50" : "",
+                          ].join(" ")}
+                        >
+                          {isAllServices && (
+                            <td className="px-4 py-3 text-slate-700">{p.__service_name || p.service_name || "—"}</td>
+                          )}
+                          <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
+                          <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
+                          <td className="px-4 py-3 text-slate-700">{p.inventory_month}</td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {p.quantity} {p.unit || "pcs"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">{p.barcode || p.internal_sku || "—"}</td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>

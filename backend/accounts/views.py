@@ -29,7 +29,7 @@ from .models import (
     Plan,
     Subscription,
     UserProfile,
-    AuditLog,  # ✅ NEW: traçabilité
+    AuditLog,
 )
 from .serializers import (
     RegisterSerializer,
@@ -281,7 +281,6 @@ class MeView(APIView):
         tenant = get_tenant_for_request(request)
         serializer = MeSerializer(request.user, context={"request": request})
         data = serializer.data
-        # forcer la clé "tenant" (le front s'appuie dessus)
         data["tenant"] = {
             "id": tenant.id,
             "name": tenant.name,
@@ -322,7 +321,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
         if role not in ["owner", "manager"]:
             raise exceptions.PermissionDenied("Rôle insuffisant pour supprimer un service.")
 
-        # garde-fou: pas de suppression si des produits existent
         if hasattr(instance, "products") and instance.products.exists():
             raise exceptions.ValidationError("Impossible de supprimer : produits associés.")
         return super().perform_destroy(instance)
@@ -342,7 +340,6 @@ class MembershipViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         tenant = get_tenant_for_request(self.request)
-        # ✅ include service pour afficher scope
         return Membership.objects.filter(tenant=tenant).select_related("user", "service")
 
     def get_serializer_context(self):
@@ -352,20 +349,39 @@ class MembershipViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant_for_request(self.request)
+
+        # ✅ on bloque si la personne est déjà INVITED (flow invitations)
         email = (serializer.validated_data.get("email") or "").strip()
         username = (serializer.validated_data.get("username") or "").strip()
+
         user_obj = None
         if email:
-            user_obj = User.objects.filter(email=email).first()
+            user_obj = User.objects.filter(email__iexact=email).first()
         if not user_obj and username:
             user_obj = User.objects.filter(username=username).first()
-        is_existing_member = False
+
         if user_obj:
-            is_existing_member = UserProfile.objects.filter(user=user_obj, tenant=tenant).exists()
-        if not is_existing_member:
+            existing = Membership.objects.filter(user=user_obj, tenant=tenant).first()
+            if existing and existing.status == "INVITED":
+                raise exceptions.ValidationError(
+                    "Ce membre est déjà invité (en attente d’acceptation). "
+                    "Annule l’invitation ou attends qu’il accepte."
+                )
+
+        # ✅ limites: on compte uniquement les membres ACTIVE
+        # (les INVITED ne doivent pas consommer un slot)
+        is_existing_active_member = False
+        if user_obj:
+            is_existing_active_member = Membership.objects.filter(
+                user=user_obj, tenant=tenant, status="ACTIVE"
+            ).exists()
+
+        if not is_existing_active_member:
             usage = get_usage(tenant)
             check_limit(tenant, "max_users", usage["users_count"], requested_increment=1)
+
         membership = serializer.save()
+
         _audit(
             tenant=tenant,
             user=self.request.user,
@@ -375,6 +391,7 @@ class MembershipViewSet(viewsets.ModelViewSet):
             service=membership.service,
             meta={
                 "role": membership.role,
+                "status": membership.status,
                 "service_id": membership.service_id,
                 "email": membership.user.email,
                 "username": membership.user.username,
@@ -393,6 +410,7 @@ class MembershipViewSet(viewsets.ModelViewSet):
             service=membership.service,
             meta={
                 "role": membership.role,
+                "status": membership.status,
                 "service_id": membership.service_id,
                 "email": membership.user.email,
                 "username": membership.user.username,
@@ -410,6 +428,7 @@ class MembershipViewSet(viewsets.ModelViewSet):
             service=instance.service,
             meta={
                 "role": instance.role,
+                "status": instance.status,
                 "service_id": instance.service_id,
                 "email": instance.user.email,
                 "username": instance.user.username,
@@ -422,22 +441,6 @@ class MembersSummaryView(APIView):
     """
     GET /api/auth/members/summary/
     Owner only.
-
-    Retour:
-      {
-        "members": [
-          {
-            "id": membership_id,
-            "role": "operator|manager|owner",
-            "service_scope": {"id": 1, "name": "Salle"} | null,
-            "user": {"id": 2, "username": "...", "email": "..."},
-            "last_action": {"action": "...", "at": "..."} | null
-          }
-        ],
-        "recent_activity": [
-          {"action": "...", "at": "...", "user": {...}|null, "object_type": "...", "object_id": "..."}
-        ]
-      }
     """
     permission_classes = [permissions.IsAuthenticated, MembershipPermission]
 
@@ -450,7 +453,6 @@ class MembersSummaryView(APIView):
             .order_by("created_at")
         )
 
-        # Dernière action par user
         last_by_user = {}
         logs = AuditLog.objects.filter(tenant=tenant).select_related("user").order_by("-created_at")[:200]
         for l in logs:
@@ -465,6 +467,7 @@ class MembersSummaryView(APIView):
                 {
                     "id": m.id,
                     "role": m.role,
+                    "status": m.status,  # ✅ NEW
                     "service_scope": {"id": m.service.id, "name": m.service.name} if m.service_id else None,
                     "user": {"id": m.user.id, "username": m.user.username, "email": m.user.email},
                     "last_action": (
@@ -510,7 +513,6 @@ class PasswordResetRequestView(APIView):
             user = User.objects.filter(email=data["email"]).first()
 
         if not user:
-            # réponse générique (anti-énumération)
             return Response({"detail": "Si le compte existe, un jeton a été généré."})
 
         uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -638,7 +640,6 @@ class EmailChangeConfirmView(APIView):
 # --------------------------------
 
 def _tenant_plan_code(tenant: Tenant) -> str:
-    # tenant.plan est un FK vers Plan
     if tenant.plan_id and getattr(tenant.plan, "code", None):
         return str(tenant.plan.code).upper()
     return "ESSENTIEL"
@@ -646,16 +647,15 @@ def _tenant_plan_code(tenant: Tenant) -> str:
 
 class EntitlementsView(APIView):
     """
-    Endpoint pour fournir plan/entitlements/limits/usage.
-    Compatible avec le hook frontend useEntitlements:
-      GET /api/auth/me/org/entitlements
+    GET /api/auth/me/org/entitlements
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def get_usage(self, tenant: Tenant):
         products_count = Product.objects.filter(tenant=tenant).count()
         services_count = tenant.services.count()
-        users_count = UserProfile.objects.filter(tenant=tenant).count()
+        # ✅ IMPORTANT: on compte les membres actifs uniquement
+        users_count = Membership.objects.filter(tenant=tenant, status="ACTIVE").count()
         return {
             "products_count": products_count,
             "services_count": services_count,
@@ -663,9 +663,8 @@ class EntitlementsView(APIView):
         }
 
     def _resolve_plan_cfg(self, plan_code: str):
-        # On s'appuie sur accounts/services/access.py si disponible
         try:
-            from accounts.services.access import PLAN_REGISTRY  # import local
+            from accounts.services.access import PLAN_REGISTRY
             return PLAN_REGISTRY.get(plan_code, PLAN_REGISTRY.get("ESSENTIEL", {}))
         except Exception:
             return {}
@@ -693,7 +692,6 @@ class EntitlementsView(APIView):
             "exports_basic",
         ]
 
-        # ton frontend attend un dict { key: true }
         entitlements = {k: True for k in ent_list}
 
         plan_source = tenant.plan_source or "FREE"
@@ -716,7 +714,7 @@ class EntitlementsView(APIView):
                 "limits": limits,
                 "usage": usage,
                 "over_limit": over_limit,
-                "last_plan_was_trial": False,  # tu brancheras promo/trial après
+                "last_plan_was_trial": False,
             }
         )
 
@@ -765,9 +763,6 @@ def _normalize_checkout_plan(plan_code: str) -> str:
 
 
 def _reverse_price_id(price_id: str) -> Tuple[str, str]:
-    """
-    Retourne (plan_code, billing_cycle) depuis un Stripe Price ID.
-    """
     mapping = {
         getattr(settings, "STRIPE_PRICE_BOUTIQUE_MONTHLY", None): ("BOUTIQUE", "MONTHLY"),
         getattr(settings, "STRIPE_PRICE_BOUTIQUE_YEARLY", None): ("BOUTIQUE", "YEARLY"),
@@ -779,9 +774,6 @@ def _reverse_price_id(price_id: str) -> Tuple[str, str]:
 
 
 def _ensure_plan_row(plan_code: str) -> Plan:
-    """
-    Sécurise la DB : crée Plan si non seedé.
-    """
     plan_code = (plan_code or "ESSENTIEL").upper()
     defaults = {
         "name": plan_code.title(),
@@ -848,11 +840,6 @@ def _set_tenant_plan_active(
 # --------------------------------
 
 class CreateCheckoutSessionView(APIView):
-    """
-    POST /api/auth/billing/checkout/
-    Body: { "plan_code"|"plan": "BOUTIQUE|PRO|DUO|MULTI", "cycle": "MONTHLY|YEARLY" }
-    Retour: { "url": "https://checkout.stripe.com/..." }
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -896,10 +883,6 @@ class CreateCheckoutSessionView(APIView):
 
 
 class CreateBillingPortalView(APIView):
-    """
-    POST /api/auth/billing/portal/
-    Retour: { "url": "https://billing.stripe.com/..." }
-    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -920,11 +903,6 @@ class CreateBillingPortalView(APIView):
 
 
 class StripeWebhookView(APIView):
-    """
-    POST /api/auth/billing/webhook/
-    - pas d'auth
-    - vérif signature obligatoire (STRIPE_WEBHOOK_SECRET)
-    """
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
 
@@ -957,17 +935,12 @@ class StripeWebhookView(APIView):
             self._handle_event(event_type, data_obj)
         except Exception as e:
             LOGGER.exception("Stripe webhook handling error: %s", e)
-            # Stripe retente => 500 seulement si erreur serveur
             return Response({"detail": "Erreur serveur lors du traitement webhook."}, status=500)
 
         return Response({"received": True}, status=200)
 
     @transaction.atomic
     def _handle_event(self, event_type: str, obj: dict):
-        """
-        Synchronise Stripe -> (Tenant + Subscription).
-        """
-        # 1) Checkout terminé (création subscription)
         if event_type == "checkout.session.completed":
             tenant_id = (obj.get("metadata") or {}).get("tenant_id") or obj.get("client_reference_id")
             if not tenant_id:
@@ -1001,7 +974,6 @@ class StripeWebhookView(APIView):
             )
             return
 
-        # 2) Subscription create/update
         if event_type in ("customer.subscription.created", "customer.subscription.updated"):
             sub_id = obj.get("id") or ""
             customer_id = obj.get("customer") or ""
@@ -1063,7 +1035,6 @@ class StripeWebhookView(APIView):
             )
             return
 
-        # 3) Subscription supprimée
         if event_type == "customer.subscription.deleted":
             customer_id = obj.get("customer") or ""
             tenant = Tenant.objects.filter(stripe_customer_id=customer_id).first()
@@ -1082,7 +1053,6 @@ class StripeWebhookView(APIView):
                 sub.save(update_fields=["status", "canceled_at"])
             return
 
-        # 4) Paiement échoué / payé
         if event_type == "invoice.payment_failed":
             customer_id = obj.get("customer") or ""
             tenant = Tenant.objects.filter(stripe_customer_id=customer_id).first()
@@ -1116,5 +1086,4 @@ class StripeWebhookView(APIView):
                 sub.save(update_fields=["status", "grace_started_at"])
             return
 
-        # event ignoré
         return

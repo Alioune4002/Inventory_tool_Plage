@@ -1,4 +1,4 @@
-# Deployed backend: https://inventory-tool-plage.onrender.com
+# backend/accounts/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
@@ -17,14 +17,15 @@ from .views import (
     MembershipViewSet,
     EntitlementsView,
 
-    # Billing / Stripe
+    # Billing / Stripe (NOMS OK)
     CreateCheckoutSessionView,
     CreateBillingPortalView,
     StripeWebhookView,
 
-    # ✅ NEW
+    # Members summary
     MembersSummaryView,
 )
+
 from .views_delete import DeleteAccountView
 from .views_invitations import InvitationCreateView, InvitationAcceptView, InvitationDeclineView
 
@@ -38,7 +39,6 @@ urlpatterns = [
     path("refresh/", RefreshView.as_view(), name="auth-refresh"),
     path("me/", MeView.as_view(), name="auth-me"),
 
-    # Entitlements
     path("me/org/entitlements", EntitlementsView.as_view(), name="auth-entitlements"),
 
     path("password-reset/", PasswordResetRequestView.as_view(), name="auth-password-reset"),
@@ -54,10 +54,10 @@ urlpatterns = [
     path("billing/portal/", CreateBillingPortalView.as_view(), name="billing-portal"),
     path("billing/webhook/", StripeWebhookView.as_view(), name="billing-webhook"),
 
-    # ✅ Members summary (owner)
+    # Members summary (owner)
     path("members/summary/", MembersSummaryView.as_view(), name="members-summary"),
 
-    # Invitations email (owner)
+    # Invitations
     path("invitations/", InvitationCreateView.as_view(), name="invite-create"),
     path("invitations/accept/", InvitationAcceptView.as_view(), name="invite-accept"),
     path("invitations/decline/", InvitationDeclineView.as_view(), name="invite-decline"),

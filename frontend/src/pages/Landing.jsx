@@ -30,28 +30,71 @@ const ROUTES = {
 const steps = [
   {
     title: "1) Choisissez votre métier",
-    desc: "StockScan s’adapte à votre activité : vous voyez uniquement ce qui est utile.",
+    desc: "StockScan adapte l’interface : vous ne voyez que l’essentiel, sans surcharge.",
   },
   {
     title: "2) Organisez vos services",
-    desc: "Un seul service ou plusieurs (ex : bar / cuisine) selon votre organisation.",
+    desc: "Un service ou plusieurs (ex. bar / cuisine) selon votre façon de travailler.",
   },
   {
-    title: "3) Faites l’inventaire",
-    desc: "Vous comptez les quantités. StockScan structure, calcule et exporte proprement.",
+    title: "3) Faites votre inventaire",
+    desc: "Vous comptez, StockScan met en forme, calcule et exporte proprement.",
   },
 ];
 
 export default function Landing() {
+  const siteUrl = "https://stockscan.app";
+  const canonicalUrl = `${siteUrl}/`;
+  const ogImage = `${siteUrl}/og-image.png`;
+
+  const seoTitle =
+    "StockScan — Inventaire simple et rapide pour restaurant, bar, boulangerie, épicerie, boutique et pharmacie";
+  const seoDescription =
+    "StockScan vous aide à gérer votre base produits et à réaliser vos inventaires mensuels en quelques minutes. Exports CSV/Excel, options (prix, TVA, DLC, lots, produits entamés) et interface adaptée à votre métier.";
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "StockScan",
+    applicationCategory: "BusinessApplication",
+    operatingSystem: "Web",
+    url: canonicalUrl,
+    description: seoDescription,
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "EUR",
+      category: "Free",
+    },
+  };
+
   return (
     <PublicShell>
       <PageTransition>
         <Helmet>
-          <title>Inventaire simple et rapide pour votre commerce | StockScan</title>
-          <meta
-            name="description"
-            content="StockScan : un outil clair pour gérer vos produits et vos inventaires mensuels. Adapté aux restaurants, bars, boulangeries, épiceries, boutiques et pharmacies."
-          />
+          <title>{seoTitle}</title>
+          <meta name="description" content={seoDescription} />
+
+          <link rel="canonical" href={canonicalUrl} />
+
+          {/* Open Graph */}
+          <meta property="og:site_name" content="StockScan" />
+          <meta property="og:type" content="website" />
+          <meta property="og:url" content={canonicalUrl} />
+          <meta property="og:title" content={seoTitle} />
+          <meta property="og:description" content={seoDescription} />
+          <meta property="og:image" content={ogImage} />
+          <meta property="og:image:width" content="1200" />
+          <meta property="og:image:height" content="630" />
+
+          {/* Twitter */}
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={seoTitle} />
+          <meta name="twitter:description" content={seoDescription} />
+          <meta name="twitter:image" content={ogImage} />
+
+          {/* JSON-LD */}
+          <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
         </Helmet>
 
         <main className="mx-auto w-full max-w-6xl px-4 pb-16 space-y-14">
@@ -64,38 +107,38 @@ export default function Landing() {
               </div>
 
               <h1 className="text-4xl md:text-5xl font-black leading-[1.05] text-white">
-                L’inventaire qui donne envie de le faire
+                L’inventaire qui donne (vraiment) envie de le faire
               </h1>
 
               <p className="text-lg text-slate-200">
-                StockScan vous aide à <span className="font-semibold text-white">garder une base produits propre</span> et à{" "}
-                <span className="font-semibold text-white">faire vos inventaires mensuels</span> rapidement.
-                Simple, lisible, et pensé pour votre activité.
+                StockScan vous aide à{" "}
+                <span className="font-semibold text-white">garder une base produits propre</span> et à{" "}
+                <span className="font-semibold text-white">réaliser vos inventaires mensuels</span> rapidement.
+                Simple, lisible, pensé pour le terrain.
               </p>
 
-              {/* CTA (en Link => fiable) */}
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
                   to="/register"
                   className="w-full sm:w-auto inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold bg-white text-slate-900 hover:bg-slate-100 transition"
                 >
-                  Commencer gratuitement
+                  Essayer gratuitement
                 </Link>
 
                 <Link
-                  to="/tarifs"
+                  to="/comment-ca-marche"
                   className="w-full sm:w-auto inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold border border-white/20 bg-white/5 text-white hover:bg-white/10 transition"
                 >
-                  Voir les offres
+                  Voir comment ça marche
                 </Link>
               </div>
 
-              {/* Proof points */}
+              {/* Points de confiance */}
               <div className="grid sm:grid-cols-3 gap-3 text-sm">
                 {[
-                  { title: "Produits bien rangés", desc: "catégories, code-barres, référence interne" },
-                  { title: "Inventaire rapide", desc: "comptage du mois, clair et structuré" },
-                  { title: "Exports prêts", desc: "CSV / Excel faciles à envoyer" },
+                  { title: "Catalogue propre", desc: "catégories, code-barres ou référence interne" },
+                  { title: "Inventaire rapide", desc: "comptage du mois, simple et structuré" },
+                  { title: "Exports prêts", desc: "CSV / Excel faciles à partager" },
                 ].map((item) => (
                   <Card key={item.title} className="p-3 border-white/10 bg-white/5" hover>
                     <div className="font-semibold text-white">{item.title}</div>
@@ -117,14 +160,14 @@ export default function Landing() {
 
               <div className="mt-4 space-y-3">
                 <Card className="p-4 border-white/10 bg-white/5">
-                  <div className="text-xs text-white/60">Valeur de stock (HT)</div>
+                  <div className="text-xs text-white/60">Valeur du stock (HT)</div>
                   <div className="text-2xl font-black text-white">12 480 €</div>
                 </Card>
 
                 <Card className="p-4 border-white/10 bg-white/5">
                   <div className="text-xs text-white/60">Pertes déclarées</div>
                   <div className="text-xl font-semibold text-white">- 380 €</div>
-                  <div className="text-xs text-white/60">casse, DLC, erreurs</div>
+                  <div className="text-xs text-white/60">casse, DLC, erreurs…</div>
                 </Card>
 
                 <Card className="p-4 border-white/10 bg-white/5">
@@ -151,14 +194,14 @@ export default function Landing() {
               <div className="flex items-center gap-2 text-sm text-blue-200">
                 <ClipboardList className="h-4 w-4" /> Inventaires
               </div>
-              <h2 className="text-xl font-semibold text-white">Votre inventaire mensuel</h2>
+              <h2 className="text-xl font-semibold text-white">Vos inventaires mensuels</h2>
               <p className="text-sm text-slate-200">
-                Le comptage à date : quantités + (si vous voulez) pertes, lots, DLC… vous choisissez.
+                Vous comptez les quantités. Si vous le souhaitez : pertes, lots, DLC/DDM… vous choisissez.
               </p>
             </Card>
           </section>
 
-          {/* METIERS (comme Metiers.jsx => Link) */}
+          {/* METIERS */}
           <section className="space-y-6" id="metiers">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
@@ -208,13 +251,13 @@ export default function Landing() {
             </div>
           </section>
 
-          {/* OPTIONS (au lieu de “modules”) */}
+          {/* OPTIONS */}
           <section className="space-y-6">
             <div>
               <div className="text-sm text-white/60">Options</div>
-              <h2 className="text-3xl font-black text-white">Vous restez en mode simple</h2>
+              <h2 className="text-3xl font-black text-white">Simple par défaut, complet si besoin</h2>
               <p className="text-sm text-slate-300 mt-2">
-                Vous pouvez activer des options quand vous en avez besoin : prix & TVA, DLC/DDM, lots, produits entamés…
+                Activez uniquement ce qui vous sert : prix & TVA, DLC/DDM, lots, produits entamés…
                 Sinon, StockScan reste minimal et clair.
               </p>
             </div>
@@ -229,7 +272,7 @@ export default function Landing() {
             </div>
           </section>
 
-          {/* STEPS */}
+          {/* ÉTAPES */}
           <section className="grid md:grid-cols-3 gap-4">
             {steps.map((step) => (
               <Card key={step.title} className="p-5 border-white/10 bg-white/5 space-y-2" hover>
@@ -240,10 +283,10 @@ export default function Landing() {
             ))}
           </section>
 
-          {/* DEMO */}
+          {/* DÉMO */}
           <section className="space-y-4">
             <div className="text-sm text-slate-400">Démo</div>
-            <h2 className="text-3xl font-black text-white">Voyez StockScan en action</h2>
+            <h2 className="text-3xl font-black text-white">Voir StockScan en action</h2>
             <p className="text-sm text-slate-300">
               Une démonstration guidée : inventaire, pertes, exports, tableau de bord — sans créer de compte.
             </p>
@@ -261,7 +304,7 @@ export default function Landing() {
                 to="/register"
                 className="inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold bg-white text-slate-900 hover:bg-slate-100 transition"
               >
-                Commencer maintenant
+                Essayer maintenant
               </Link>
               <Link
                 to="/tarifs"

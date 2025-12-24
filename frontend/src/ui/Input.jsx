@@ -7,6 +7,7 @@ export default function Input({
   error,
   rightSlot,
   className = "",
+  inputRef, // ✅ NEW: permet de focus depuis les pages (scanner, etc.)
   ...props
 }) {
   return (
@@ -21,6 +22,7 @@ export default function Input({
         )}
       >
         <input
+          ref={inputRef || undefined}
           {...props}
           className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
         />

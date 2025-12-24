@@ -1,7 +1,8 @@
 # Deployed backend: https://inventory-tool-plage.onrender.com
 from django.contrib.auth import get_user_model
-from rest_framework import serializers, exceptions
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.utils import timezone
+from rest_framework import serializers, exceptions  # type: ignore
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer  # pyright: ignore[reportMissingImports]
 
 from .models import Tenant, UserProfile, Service, Membership
 from .utils import get_default_service
@@ -27,7 +28,6 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
-        # Accepte l'absence explicite de password_confirm en utilisant le mot de passe fourni
         if not attrs.get("password_confirm"):
             attrs["password_confirm"] = attrs.get("password")
 
@@ -112,7 +112,6 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         username = attrs.get(self.username_field)
         if username and "@" in username:
-            # Tolère les doublons d'email (email non unique) sans 500.
             user_by_email = User.objects.filter(email__iexact=username).order_by("id").first()
             if user_by_email:
                 attrs[self.username_field] = user_by_email.username
@@ -204,6 +203,7 @@ class MembershipSerializer(serializers.ModelSerializer):
             "user",
             "tenant",
             "role",
+            "status",          # ✅ NEW
             "service",
             "created_at",
             "email",
@@ -213,11 +213,20 @@ class MembershipSerializer(serializers.ModelSerializer):
             "user_display",
             "temp_password",
         ]
-        read_only_fields = ["id", "tenant", "created_at", "user", "service", "service_scope", "user_display", "temp_password"]
+        read_only_fields = [
+            "id",
+            "tenant",
+            "created_at",
+            "user",
+            "service",
+            "service_scope",
+            "user_display",
+            "temp_password",
+            "status",          # ✅ statut géré par API invite/accept
+        ]
 
     def validate(self, attrs):
         if self.instance:
-            # PATCH: role/service_id autorisés
             return attrs
 
         if not attrs.get("email") and not attrs.get("username"):
@@ -225,7 +234,6 @@ class MembershipSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        request = self.context["request"]
         tenant = self.context["tenant"]
 
         email = (validated_data.pop("email", "") or "").strip()
@@ -255,19 +263,23 @@ class MembershipSerializer(serializers.ModelSerializer):
         from django.db import IntegrityError
 
         try:
+            # ✅ Ajout manuel par owner => ACTIVE par défaut
             membership, _ = Membership.objects.update_or_create(
                 user=user_obj,
                 tenant=tenant,
-                defaults={"role": role, "service": service_obj},
+                defaults={
+                    "role": role,
+                    "service": service_obj,
+                    "status": "ACTIVE",
+                    "activated_at": timezone.now(),
+                },
             )
         except IntegrityError:
             raise serializers.ValidationError("Ce membre existe déjà pour ce commerce.")
 
-        # ensure profile exists
         if not hasattr(user_obj, "profile"):
             UserProfile.objects.create(user=user_obj, tenant=tenant, role=role)
 
-        # si user existait déjà, on ne renvoie pas de mdp
         if not created_new:
             self._temp_password = None
 

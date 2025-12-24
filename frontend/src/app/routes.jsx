@@ -1,5 +1,5 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 
 import Landing from "../pages/Landing.jsx";
 import Login from "../pages/Login.jsx";
@@ -33,6 +33,8 @@ import NotFound from "../pages/NotFound.jsx";
 import InvitationAccept from "../pages/InvitationAccept.jsx";
 import RequireAuth from "./RequireAuth.jsx";
 
+const Protected = ({ children }) => <RequireAuth>{children}</RequireAuth>;
+
 export default function AppRoutes() {
   return (
     <Routes>
@@ -55,81 +57,28 @@ export default function AppRoutes() {
       <Route path="/tarifs" element={<Tarifs />} />
       <Route path="/support" element={<PublicSupport />} />
 
+      {/* SEO: aliases -> canonical routes */}
+      <Route path="/cgu" element={<Navigate to="/terms" replace />} />
+      <Route path="/confidentialite" element={<Navigate to="/privacy" replace />} />
+      <Route path="/mentions-legales" element={<Navigate to="/legal" replace />} />
+
       <Route path="/terms" element={<Terms />} />
       <Route path="/privacy" element={<Privacy />} />
-      <Route path="/cgu" element={<Terms />} />
-      <Route path="/confidentialite" element={<Privacy />} />
-
-      {/* Mentions légales */}
       <Route path="/legal" element={<Legal />} />
-      <Route path="/mentions-legales" element={<Legal />} />
 
       {/* App (protected) */}
-      <Route
-        path="/app/dashboard"
-        element={
-          <RequireAuth>
-            <Dashboard />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/inventory"
-        element={
-          <RequireAuth>
-            <Inventory />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/products"
-        element={
-          <RequireAuth>
-            <Products />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/categories"
-        element={
-          <RequireAuth>
-            <Categories />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/exports"
-        element={
-          <RequireAuth>
-            <Exports />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/losses"
-        element={
-          <RequireAuth>
-            <Losses />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/settings"
-        element={
-          <RequireAuth>
-            <Settings />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/app/support"
-        element={
-          <RequireAuth>
-            <Support />
-          </RequireAuth>
-        }
-      />
+      <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
 
+      <Route path="/app/dashboard" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/app/inventory" element={<Protected><Inventory /></Protected>} />
+      <Route path="/app/products" element={<Protected><Products /></Protected>} />
+      <Route path="/app/categories" element={<Protected><Categories /></Protected>} />
+      <Route path="/app/exports" element={<Protected><Exports /></Protected>} />
+      <Route path="/app/losses" element={<Protected><Losses /></Protected>} />
+      <Route path="/app/settings" element={<Protected><Settings /></Protected>} />
+      <Route path="/app/support" element={<Protected><Support /></Protected>} />
+
+      {/* 404 */}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

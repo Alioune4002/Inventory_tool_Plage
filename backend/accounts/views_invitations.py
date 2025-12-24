@@ -1,14 +1,14 @@
-# accounts/views_invitations.py
 from datetime import timedelta
 import secrets
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import permissions, status
+from rest_framework import permissions
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound
 
 from .models import Invitation, Membership, UserProfile, Service, AuditLog
@@ -17,21 +17,34 @@ from .utils import get_tenant_for_request, get_user_role
 User = get_user_model()
 
 
-def _frontend_base():
-    # Tu peux définir FRONTEND_URL dans env (ex: https://stockscan.app)
+def _frontend_base() -> str:
     return getattr(settings, "FRONTEND_URL", "").rstrip("/") or "http://localhost:5173"
 
 
-def _invite_link(token: str):
+def _invite_link(token: str) -> str:
     return f"{_frontend_base()}/invitation/accept?token={token}"
 
 
-def _gen_token():
-    # ~43 chars, on peut le laisser tel quel. Ton model token max_length=64.
+def _gen_token() -> str:
     return secrets.token_urlsafe(32)[:64]
 
 
+def _safe_get_profile(user):
+    try:
+        return user.profile
+    except Exception:
+        return None
+
+
 class InvitationCreateView(APIView):
+    """
+    POST /api/auth/invitations/
+    Body: { email, role?, service_id? }
+
+    ✅ Anti-réinvitation:
+      - si une invitation active existe déjà (SENT/PENDING non expirée) => 409 (on ne recrée pas)
+      - si membership existe déjà (INVITED ou ACTIVE) => 409
+    """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -58,24 +71,55 @@ class InvitationCreateView(APIView):
             if not service_obj:
                 raise ValidationError({"service_id": "Service invalide pour ce tenant."})
 
-        # Si déjà membre, on peut juste update le scope/role via memberships
-        existing_user = User.objects.filter(email__iexact=email).first()
-        if existing_user and Membership.objects.filter(user=existing_user, tenant=tenant).exists():
+        now = timezone.now()
+
+        # 1) Anti-réinvitation: invitation déjà active
+        existing_active_inv = (
+            Invitation.objects.filter(
+                tenant=tenant,
+                email=email,
+                status__in=["PENDING", "SENT"],
+                expires_at__gt=now,
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        if existing_active_inv:
             return Response(
-                {"detail": "Cet email est déjà membre de ce commerce. Modifie ses accès via la liste des membres."},
+                {
+                    "detail": "Une invitation est déjà en cours pour cet email.",
+                    "code": "INVITE_ALREADY_SENT",
+                    "email": email,
+                    "expires_at": existing_active_inv.expires_at.isoformat(),
+                    "invite_link": _invite_link(existing_active_inv.token),
+                },
                 status=409,
             )
 
-        # Invalide les anciennes invitations actives (optionnel mais propre)
+        # 2) Si user existe et membership existe déjà (INVITED ou ACTIVE): stop
+        existing_user = User.objects.filter(email__iexact=email).first()
+        if existing_user:
+            existing_mem = Membership.objects.filter(user=existing_user, tenant=tenant).first()
+            if existing_mem:
+                return Response(
+                    {
+                        "detail": "Cet email est déjà lié à ce commerce (invité ou actif).",
+                        "code": "ALREADY_MEMBER_OR_INVITED",
+                        "status": existing_mem.status,
+                    },
+                    status=409,
+                )
+
+        # 3) Nettoyage soft: marque les invitations expirées restantes
         Invitation.objects.filter(
             tenant=tenant,
             email=email,
             status__in=["PENDING", "SENT"],
-            expires_at__gt=timezone.now(),
-        ).update(status="CANCELED")
+            expires_at__lte=now,
+        ).update(status="EXPIRED")
 
         token = _gen_token()
-        expires_at = timezone.now() + timedelta(days=7)
+        expires_at = now + timedelta(days=7)
 
         inv = Invitation.objects.create(
             tenant=tenant,
@@ -87,6 +131,20 @@ class InvitationCreateView(APIView):
             status="SENT",
             created_by=request.user,
         )
+
+        # ✅ Si user existe, on matérialise le membership INVITED (statut côté membership)
+        if existing_user:
+            mem, created = Membership.objects.update_or_create(
+                user=existing_user,
+                tenant=tenant,
+                defaults={
+                    "role": inv_role,
+                    "service": service_obj,
+                    "status": "INVITED",
+                    "invited_at": now,
+                    "activated_at": None,
+                },
+            )
 
         AuditLog.objects.create(
             tenant=tenant,
@@ -107,8 +165,6 @@ class InvitationCreateView(APIView):
             f"Ce lien expire le {expires_at.strftime('%d/%m/%Y %H:%M')}."
         )
 
-        # Ton helper existe déjà côté products; ici on suppose un helper similaire.
-        # Si tu utilises le même: from utils.sendgrid_email import send_email_with_sendgrid
         from utils.sendgrid_email import send_email_with_sendgrid
 
         send_email_with_sendgrid(
@@ -116,27 +172,27 @@ class InvitationCreateView(APIView):
             subject=subject,
             text_body=text_body,
             html_body=None,
-            filename=None,
+            filename="",
             file_bytes=None,
-            mimetype=None,
+            mimetype="text/plain",
             fallback_to_django=True,
         )
 
         return Response(
-            {
-                "ok": True,
-                "email": email,
-                "expires_at": expires_at.isoformat(),
-                "invite_link": link,  # utile pour debug
-            },
+            {"ok": True, "email": email, "expires_at": expires_at.isoformat(), "invite_link": link},
             status=201,
         )
 
 
 class InvitationAcceptView(APIView):
+    """
+    GET  /api/auth/invitations/accept/?token=...   => preview
+    POST /api/auth/invitations/accept/            => finalize (token + password)
+
+    ✅ Accept => Membership.status = ACTIVE
+    """
     permission_classes = [permissions.AllowAny]
 
-    # ✅ Preview (page publique) : GET /api/auth/invitations/accept/?token=...
     def get(self, request):
         token = (request.query_params.get("token") or "").strip()
         if not token:
@@ -145,6 +201,7 @@ class InvitationAcceptView(APIView):
         inv = Invitation.objects.filter(token=token).select_related("tenant", "service").first()
         if not inv:
             raise NotFound("Invitation introuvable.")
+
         if inv.status in ("CANCELED", "EXPIRED"):
             return Response({"status": inv.status}, status=410)
         if inv.accepted_at or inv.status == "ACCEPTED":
@@ -165,7 +222,7 @@ class InvitationAcceptView(APIView):
             }
         )
 
-    # ✅ Finalize : POST /api/auth/invitations/accept/ {token, password, password_confirm, username?}
+    @transaction.atomic
     def post(self, request):
         token = (request.data.get("token") or "").strip()
         password = request.data.get("password") or ""
@@ -179,21 +236,24 @@ class InvitationAcceptView(APIView):
         if password != password_confirm:
             raise ValidationError({"password_confirm": "Les mots de passe ne correspondent pas."})
 
-        inv = Invitation.objects.filter(token=token).select_related("tenant", "service").first()
+        inv = Invitation.objects.select_for_update().filter(token=token).select_related("tenant", "service").first()
         if not inv:
             raise NotFound("Invitation introuvable.")
+
+        now = timezone.now()
 
         if inv.status in ("CANCELED", "EXPIRED"):
             return Response({"detail": "Invitation invalide."}, status=410)
         if inv.accepted_at or inv.status == "ACCEPTED":
             return Response({"detail": "Invitation déjà acceptée."}, status=409)
-        if inv.expires_at <= timezone.now():
+        if inv.expires_at <= now:
             inv.status = "EXPIRED"
             inv.save(update_fields=["status"])
             return Response({"detail": "Invitation expirée."}, status=410)
 
         tenant = inv.tenant
         email = inv.email.lower()
+        service_obj = inv.service if inv.service_id else None
 
         user = User.objects.filter(email__iexact=email).first()
         created = False
@@ -209,40 +269,60 @@ class InvitationAcceptView(APIView):
                 if i > 50:
                     final = f"{base}{secrets.randbelow(9999)}"
                     break
-
             user = User.objects.create_user(username=final, email=email, password=password)
             created = True
         else:
+            # Comportement voulu: l’invité définit/écrase son mot de passe
             user.set_password(password)
             user.save(update_fields=["password"])
 
-        # IMPORTANT: chez toi, login bloque si user.is_active == False (“email non vérifié”)
+        # Login bloque si is_active=False => on active
         if not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
 
-        service_obj = inv.service if inv.service_id else None
+        # ✅ Membership: INVITED -> ACTIVE (ou création directe ACTIVE)
+        existing_mem = Membership.objects.filter(user=user, tenant=tenant).first()
+        if existing_mem and existing_mem.status == "ACTIVE":
+            return Response({"detail": "Vous êtes déjà membre de ce commerce."}, status=409)
 
         membership, _ = Membership.objects.update_or_create(
             user=user,
             tenant=tenant,
-            defaults={"role": inv.role, "service": service_obj},
+            defaults={
+                "role": inv.role,
+                "service": service_obj,
+                "status": "ACTIVE",
+                "activated_at": now,
+                # si le membership existait déjà en INVITED, on conserve invited_at
+                "invited_at": existing_mem.invited_at if existing_mem else now,
+            },
         )
 
-        # Profile (compat)
-        if not hasattr(user, "profile"):
+        prof = _safe_get_profile(user)
+        if not prof:
             UserProfile.objects.create(user=user, tenant=tenant, role=inv.role)
         else:
-            # s'assure tenant/role correct si besoin
-            prof = user.profile
+            changed = False
             if prof.tenant_id != tenant.id:
                 prof.tenant = tenant
-            prof.role = inv.role
-            prof.save(update_fields=["tenant", "role"])
+                changed = True
+            if prof.role != inv.role:
+                prof.role = inv.role
+                changed = True
+            if changed:
+                prof.save(update_fields=["tenant", "role"])
 
         inv.status = "ACCEPTED"
-        inv.accepted_at = timezone.now()
+        inv.accepted_at = now
         inv.save(update_fields=["status", "accepted_at"])
+
+        # ✅ optionnel mais propre: annule toute autre invitation active pour le même email/tenant
+        Invitation.objects.filter(
+            tenant=tenant,
+            email=email,
+            status__in=["PENDING", "SENT"],
+        ).exclude(id=inv.id).update(status="CANCELED")
 
         AuditLog.objects.create(
             tenant=tenant,
@@ -251,20 +331,19 @@ class InvitationAcceptView(APIView):
             object_type="Invitation",
             object_id=str(inv.id),
             service=service_obj,
-            meta={"email": email, "created_user": created},
+            meta={"email": email, "created_user": created, "membership_status": "ACTIVE"},
         )
 
         return Response(
-            {
-                "ok": True,
-                "detail": "Invitation acceptée. Vous pouvez vous connecter.",
-                "email": email,
-            },
+            {"ok": True, "detail": "Invitation acceptée. Vous pouvez vous connecter.", "email": email},
             status=200,
         )
 
 
 class InvitationDeclineView(APIView):
+    """
+    POST /api/auth/invitations/decline/ { token }
+    """
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):

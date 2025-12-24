@@ -15,6 +15,8 @@ export default function InvitationAccept() {
   const [meta, setMeta] = useState(null);
   const [err, setErr] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [declineLoading, setDeclineLoading] = useState(false);
+  const [declined, setDeclined] = useState(false);
 
   const [form, setForm] = useState({
     username: "",
@@ -77,6 +79,27 @@ export default function InvitationAccept() {
     }
   };
 
+  const decline = async () => {
+    if (!token) return;
+    setErr("");
+    setDeclineLoading(true);
+    try {
+      await api.post("/api/auth/invitations/decline/", { token });
+      setDeclined(true);
+    } catch (e2) {
+      const msg = e2?.response?.data?.detail || "Impossible de refuser l’invitation.";
+      setErr(msg);
+    } finally {
+      setDeclineLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!err) return undefined;
+    const timer = window.setTimeout(() => setErr(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [err]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4">
       <Helmet>
@@ -88,7 +111,9 @@ export default function InvitationAccept() {
         <div className="p-6 space-y-4">
           <div>
             <div className="text-xs uppercase tracking-[0.2em] text-white/60">Invitation</div>
-            <h1 className="text-2xl font-black">Créer ton mot de passe</h1>
+            <h1 className="text-2xl font-black">
+              {declined ? "Invitation refusée" : "Créer ton mot de passe"}
+            </h1>
             {meta?.tenant?.name ? (
               <p className="text-white/70 mt-1">
                 Commerce : <span className="font-semibold">{meta.tenant.name}</span>
@@ -104,7 +129,13 @@ export default function InvitationAccept() {
             </div>
           ) : null}
 
-          {!loading && meta?.status === "OK" ? (
+          {declined ? (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+              Invitation refusée ✅ Vous pouvez fermer cette page.
+            </div>
+          ) : null}
+
+          {!loading && meta?.status === "OK" && !declined ? (
             <>
               <div className="text-sm text-white/70">
                 Email invité : <span className="font-semibold">{meta.email}</span>
@@ -148,9 +179,17 @@ export default function InvitationAccept() {
                   Valider et rejoindre
                 </Button>
 
-                <div className="text-xs text-white/60">
-                  Mot de passe : 8 caractères minimum.
-                </div>
+                <Button
+                  className="w-full justify-center"
+                  type="button"
+                  variant="secondary"
+                  onClick={decline}
+                  loading={declineLoading}
+                >
+                  Refuser l’invitation
+                </Button>
+
+                <div className="text-xs text-white/60">Mot de passe : 8 caractères minimum.</div>
               </form>
             </>
           ) : null}

@@ -170,3 +170,26 @@ body {
     background-size: 32px 32px;
   }
 }
+
+@keyframes floatSoft {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-2px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-floatSoft {
+  animation: floatSoft 3.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-skeleton-shimmer {
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}

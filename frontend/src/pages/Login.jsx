@@ -1,5 +1,4 @@
-
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
@@ -7,22 +6,32 @@ import Card from "../ui/Card";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 
+function safeFromLocation(locState) {
+  const raw = locState?.from;
+  if (!raw) return "/app/dashboard";
+  if (typeof raw === "string") return raw;
+  if (typeof raw === "object" && raw?.pathname) return raw.pathname + (raw?.search || "") + (raw?.hash || "");
+  return "/app/dashboard";
+}
+
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
+
   const invited = loc.state?.invited;
- const invitedEmail = loc.state?.email;
+  const invitedEmail = loc.state?.email;
 
   const [form, setForm] = useState({ username: "", password: "" });
-  useEffect(() => {
-    if (invitedEmail) setForm((p) => ({ ...p, username: invitedEmail }));
- }, [invitedEmail]);
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const from = loc.state?.from || "/app/dashboard";
+  const from = useMemo(() => safeFromLocation(loc.state), [loc.state]);
+
+  useEffect(() => {
+    if (invitedEmail) setForm((p) => ({ ...p, username: invitedEmail }));
+  }, [invitedEmail]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -49,7 +58,9 @@ export default function Login() {
       <Helmet>
         <title>Connexion | StockScan</title>
         <meta name="description" content="Connectez-vous à StockScan pour gérer vos inventaires." />
+        <meta name="robots" content="noindex, nofollow" />
       </Helmet>
+
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-blue-600 blur-[120px] opacity-40" />
       <div className="absolute -bottom-24 right-0 h-72 w-72 rounded-full bg-cyan-400 blur-[120px] opacity-30" />
@@ -61,22 +72,29 @@ export default function Login() {
             <h1 className="text-3xl font-black leading-tight">Connexion</h1>
             <p className="text-white/70 mt-1">Accède à ton espace StockScan.</p>
           </div>
-                {invited ? (
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-          Invitation acceptée ✅ {invitedEmail ? `Connecte-toi avec ${invitedEmail}.` : "Tu peux te connecter."}
-        </div>
-      ) : null}
-          {err && (
-            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+
+          {invited ? (
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+              Invitation acceptée ✅ {invitedEmail ? `Connecte-toi avec ${invitedEmail}.` : "Tu peux te connecter."}
+            </div>
+          ) : null}
+
+          {err ? (
+            <div
+              className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
+              role="alert"
+              aria-live="polite"
+            >
               {err}
             </div>
-          )}
+          ) : null}
 
           <form onSubmit={submit} className="space-y-3">
             <Input
               label="Nom d’utilisateur ou email"
               placeholder="vous@commerce.fr"
               value={form.username}
+              autoFocus
               onChange={(e) => {
                 setForm((p) => ({ ...p, username: e.target.value }));
                 if (err) setErr("");
@@ -97,7 +115,7 @@ export default function Login() {
               rightSlot={
                 <button
                   type="button"
-                  className="text-xs font-semibold text-white/80 px-2 py-1 rounded-full border border-white/20 hover:bg-white/10"
+                  className="text-xs font-semibold text-white/80 px-2 py-1 rounded-full border border-white/20 hover:bg-white/10 transition"
                   onClick={() => setShow((s) => !s)}
                 >
                   {show ? "Cacher" : "Voir"}
@@ -109,7 +127,7 @@ export default function Login() {
               type="submit"
               className="w-full justify-center"
               loading={loading}
-              disabled={!form.username || !form.password}
+              disabled={!form.username || !form.password || loading}
             >
               Se connecter
             </Button>

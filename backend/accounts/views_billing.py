@@ -29,10 +29,6 @@ def _init_stripe():
 
 
 def _get_price_id(plan_code: str, cycle: str) -> Optional[str]:
-    """
-    plan_code: BOUTIQUE | PRO
-    cycle: MONTHLY | YEARLY
-    """
     plan_code = (plan_code or "").upper().strip()
     cycle = (cycle or "").upper().strip()
 
@@ -51,8 +47,6 @@ def _get_or_create_plan(plan_code: str) -> Optional[Plan]:
     code = (plan_code or "").upper().strip()
     if not code:
         return None
-    # Si tu as déjà seed tes plans, ça match direct.
-    # Sinon on crée un placeholder propre (prix en cents à 0 si inconnu).
     plan, _ = Plan.objects.get_or_create(
         code=code,
         defaults={
@@ -73,37 +67,30 @@ def _set_tenant_subscription_state(
     *,
     plan_code: str,
     cycle: str,
-    status_value: str,
+    status_value: str,  # ACTIVE | PAST_DUE | CANCELED | NONE
     period_end: Optional[datetime] = None,
     stripe_customer_id: str = "",
     stripe_subscription_id: str = "",
     grace_started_at: Optional[datetime] = None,
     canceled_at: Optional[datetime] = None,
 ):
-    """
-    status_value: ACTIVE | PAST_DUE | CANCELED | NONE
-    cycle: MONTHLY | YEARLY
-    """
     plan_obj = _get_or_create_plan(plan_code) if plan_code else None
 
     tenant.plan = plan_obj
     tenant.plan_source = "PAID" if status_value == "ACTIVE" else tenant.plan_source
     tenant.billing_cycle = (cycle or "MONTHLY").upper()
     tenant.subscription_status = status_value
+
     if stripe_customer_id:
         tenant.stripe_customer_id = stripe_customer_id
 
-    # Licence / accès
     if status_value == "ACTIVE" and period_end:
         tenant.license_expires_at = period_end
         tenant.grace_started_at = None
-    elif status_value in ("PAST_DUE",):
-        # démarre la grâce si pas déjà démarrée
+    elif status_value == "PAST_DUE":
         if not tenant.grace_started_at:
             tenant.grace_started_at = grace_started_at or timezone.now()
     elif status_value in ("CANCELED", "NONE"):
-        # conserve expires_at si tu veux laisser finir la période;
-        # sinon tu peux couper immédiatement. Ici: on respecte period_end si fourni.
         if period_end:
             tenant.license_expires_at = period_end
 
@@ -117,7 +104,6 @@ def _set_tenant_subscription_state(
         "stripe_customer_id",
     ])
 
-    # Subscription row (one-to-one)
     sub, _ = Subscription.objects.get_or_create(tenant=tenant, defaults={"provider": "STRIPE"})
     sub.provider = "STRIPE"
     if stripe_subscription_id:
@@ -129,13 +115,11 @@ def _set_tenant_subscription_state(
     sub.save()
 
 
-class StripeCheckoutSessionView(APIView):
+class CreateCheckoutSessionView(APIView):
     """
     POST /api/auth/billing/checkout/
-    Body:
-      { "plan_code": "BOUTIQUE"|"PRO", "cycle": "MONTHLY"|"YEARLY" }
-    Return:
-      { "url": "<stripe_checkout_url>" }
+    Body: { "plan_code": "BOUTIQUE"|"PRO", "cycle": "MONTHLY"|"YEARLY" }
+    Return: { "url": "<stripe_checkout_url>" }
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -153,24 +137,14 @@ class StripeCheckoutSessionView(APIView):
         cycle = (request.data.get("cycle") or "MONTHLY").upper().strip()
 
         if plan_code not in ("BOUTIQUE", "PRO"):
-            return Response(
-                {"detail": "Plan invalide. Choisissez BOUTIQUE ou PRO."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Plan invalide. Choisissez BOUTIQUE ou PRO."}, status=400)
         if cycle not in ("MONTHLY", "YEARLY"):
-            return Response(
-                {"detail": "Cycle invalide. Choisissez MONTHLY ou YEARLY."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Cycle invalide. Choisissez MONTHLY ou YEARLY."}, status=400)
 
         price_id = _get_price_id(plan_code, cycle)
         if not price_id:
-            return Response(
-                {"detail": "Prix Stripe manquant (PRICE_ID non configuré)."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+            return Response({"detail": "Prix Stripe manquant (PRICE_ID non configuré)."}, status=500)
 
-        # Customer
         customer_id = tenant.stripe_customer_id or ""
         if not customer_id:
             customer = stripe.Customer.create(
@@ -186,7 +160,6 @@ class StripeCheckoutSessionView(APIView):
             tenant.stripe_customer_id = customer_id
             tenant.save(update_fields=["stripe_customer_id"])
         else:
-            # Optionnel: update metadata
             try:
                 stripe.Customer.modify(customer_id, metadata={"tenant_id": str(tenant.id)})
             except Exception:
@@ -220,35 +193,25 @@ class StripeCheckoutSessionView(APIView):
             return Response({"url": session["url"]})
         except Exception as e:
             LOGGER.exception("Stripe checkout error: %s", e)
-            return Response(
-                {"detail": "Impossible de créer la session de paiement."},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return Response({"detail": "Impossible de créer la session de paiement."}, status=502)
 
 
-class StripePortalSessionView(APIView):
+class CreateBillingPortalView(APIView):
     """
     POST /api/auth/billing/portal/
-    Return:
-      { "url": "<stripe_portal_url>" }
+    Return: { "url": "<stripe_portal_url>" }
     """
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         if not _stripe_ready():
-            return Response(
-                {"detail": "Stripe n’est pas configuré côté serveur."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+            return Response({"detail": "Stripe n’est pas configuré côté serveur."}, status=503)
 
         _init_stripe()
 
         tenant = get_tenant_for_request(request)
         if not tenant.stripe_customer_id:
-            return Response(
-                {"detail": "Aucun client Stripe associé à ce commerce."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return Response({"detail": "Aucun client Stripe associé à ce commerce."}, status=400)
 
         try:
             portal = stripe.billing_portal.Session.create(
@@ -258,20 +221,12 @@ class StripePortalSessionView(APIView):
             return Response({"url": portal["url"]})
         except Exception as e:
             LOGGER.exception("Stripe portal error: %s", e)
-            return Response(
-                {"detail": "Impossible d’ouvrir le portail Stripe."},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return Response({"detail": "Impossible d’ouvrir le portail Stripe."}, status=502)
 
 
 class StripeWebhookView(APIView):
     """
     POST /api/auth/billing/webhook/
-    Stripe enverra les events ici.
-
-    IMPORTANT:
-    - Mettre STRIPE_WEBHOOK_SECRET
-    - Ajouter l’URL webhook dans Stripe Dashboard
     """
     permission_classes = [permissions.AllowAny]
 
@@ -297,14 +252,12 @@ class StripeWebhookView(APIView):
         event_type = event.get("type")
         data_object = (event.get("data") or {}).get("object") or {}
 
-        # Helper: resolve tenant
         tenant_id = None
         try:
             tenant_id = (data_object.get("metadata") or {}).get("tenant_id")
         except Exception:
             tenant_id = None
 
-        # fallback: if subscription/customer events without metadata
         customer_id = data_object.get("customer") or ""
         if not tenant_id and customer_id:
             t = Tenant.objects.filter(stripe_customer_id=customer_id).first()
@@ -312,15 +265,10 @@ class StripeWebhookView(APIView):
 
         tenant = Tenant.objects.filter(id=tenant_id).first() if tenant_id else None
         if not tenant:
-            # On ne casse pas Stripe: on ACK quand même.
             return Response({"received": True})
 
         try:
-            # -------------------------
-            # checkout.session.completed
-            # -------------------------
             if event_type == "checkout.session.completed":
-                # session contains subscription id + customer id
                 sub_id = data_object.get("subscription") or ""
                 cust_id = data_object.get("customer") or ""
                 plan_code = (data_object.get("metadata") or {}).get("plan_code") or ""
@@ -346,9 +294,6 @@ class StripeWebhookView(APIView):
                     stripe_subscription_id=sub_id,
                 )
 
-            # -------------------------
-            # subscription updated
-            # -------------------------
             elif event_type == "customer.subscription.updated":
                 sub_id = data_object.get("id") or ""
                 cust_id = data_object.get("customer") or ""
@@ -367,7 +312,6 @@ class StripeWebhookView(APIView):
                 elif status_stripe in ("canceled", "incomplete_expired"):
                     status_value = "CANCELED"
                 else:
-                    # fallback
                     status_value = "NONE"
 
                 _set_tenant_subscription_state(
@@ -382,16 +326,12 @@ class StripeWebhookView(APIView):
                     canceled_at=timezone.now() if status_value == "CANCELED" else None,
                 )
 
-            # -------------------------
-            # subscription deleted
-            # -------------------------
             elif event_type == "customer.subscription.deleted":
                 sub_id = data_object.get("id") or ""
                 cust_id = data_object.get("customer") or ""
                 cur_end = data_object.get("current_period_end")
                 period_end = datetime.fromtimestamp(cur_end, tz=timezone.utc) if cur_end else None
 
-                # On laisse finir jusqu’à period_end (si fourni), mais statut CANCELED
                 _set_tenant_subscription_state(
                     tenant,
                     plan_code=(tenant.plan.code if tenant.plan else "ESSENTIEL"),
@@ -403,11 +343,7 @@ class StripeWebhookView(APIView):
                     canceled_at=timezone.now(),
                 )
 
-            # -------------------------
-            # invoice payment failed/succeeded
-            # -------------------------
             elif event_type == "invoice.payment_failed":
-                # Past_due => grâce
                 _set_tenant_subscription_state(
                     tenant,
                     plan_code=(tenant.plan.code if tenant.plan else "ESSENTIEL"),
@@ -419,7 +355,6 @@ class StripeWebhookView(APIView):
                 )
 
             elif event_type == "invoice.payment_succeeded":
-                # Remet ACTIVE et met à jour period_end si possible
                 sub_id = data_object.get("subscription") or ""
                 period_end = None
                 if sub_id:
@@ -441,10 +376,7 @@ class StripeWebhookView(APIView):
                     stripe_subscription_id=sub_id,
                 )
 
-            # On ACK
             return Response({"received": True})
         except Exception as e:
             LOGGER.exception("Webhook processing error: %s", e)
-            # Stripe réessaie si non-2xx. Ici on préfère ACK pour éviter la tempête,
-            # mais on loggue l’erreur.
             return Response({"received": True})

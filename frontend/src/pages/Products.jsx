@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
@@ -10,12 +10,27 @@ import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { ScanLine, X } from "lucide-react";
+
+function isBarcodeDetectorSupported() {
+  return typeof window !== "undefined" && "BarcodeDetector" in window;
+}
+
+function normalizeScannedCode(raw) {
+  const v = String(raw || "").trim();
+  // garde uniquement chiffres si EAN/UPC classique, sinon renvoie brut
+  const digits = v.replace(/[^\d]/g, "");
+  if (digits.length >= 8) return digits;
+  return v;
+}
 
 export default function Products() {
   const { serviceId, services, selectService, serviceFeatures, countingMode, tenant, serviceProfile } = useAuth();
   const pushToast = useToast();
 
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef(null);
+
   const [editId, setEditId] = useState(null);
   const [editMonth, setEditMonth] = useState(null);
   const currentMonth = useMemo(() => new Date().toISOString().slice(0, 7), []);
@@ -34,6 +49,7 @@ export default function Products() {
     tva: "20",
     unit: "pcs",
   });
+  const barcodeInputRef = useRef(null);
 
   const [items, setItems] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -41,6 +57,19 @@ export default function Products() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+
+  // Scanner modal state
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanErr, setScanErr] = useState("");
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanManual, setScanManual] = useState("");
+
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef = useRef(null);
+  const detectorRef = useRef(null);
+
+  const resultsRef = useRef(null);
 
   const isAllServices = services?.length > 1 && String(serviceId) === "all";
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
@@ -51,6 +80,7 @@ export default function Products() {
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const familyIdentifiers = familyMeta?.identifiers ?? {};
   const familyModules = familyMeta?.modules ?? [];
+
   const brandLabelByFamily = {
     pharmacie: "Laboratoire / marque",
     bar: "Marque / distillerie",
@@ -66,9 +96,7 @@ export default function Products() {
 
   const getFeatureFlag = (key, fallback = false) => {
     const cfg = serviceFeatures?.[key];
-    if (cfg && typeof cfg.enabled === "boolean") {
-      return cfg.enabled;
-    }
+    if (cfg && typeof cfg.enabled === "boolean") return cfg.enabled;
     return fallback;
   };
 
@@ -85,7 +113,6 @@ export default function Products() {
     "Catalogue (référentiel) : aucune quantité ici. Le comptage et les pertes se font dans Inventaire.";
 
   const priceCfg = serviceFeatures?.prices || {};
-
   const purchaseEnabled = priceCfg.purchase_enabled !== false;
   const sellingEnabled = priceCfg.selling_enabled !== false;
   const priceRecommended = priceCfg.recommended === true;
@@ -113,9 +140,9 @@ export default function Products() {
     if (countingMode === "mixed") return ["pcs", "kg", "g", "l", "ml"];
     return ["pcs"];
   }, [countingMode]);
+
   const vatOptions = ["0", "5.5", "10", "20"];
   const showUnit = multiUnitEnabled || countingMode !== "unit";
-
   const readableServiceName = (id) => services?.find((s) => String(s.id) === String(id))?.name || id;
 
   const load = async () => {
@@ -126,11 +153,11 @@ export default function Products() {
     try {
       if (isAllServices) {
         const calls = services.map((s) =>
-          api
-            .get(`/api/products/?service=${s.id}`)
-            .then((res) => ({ service: s, items: Array.isArray(res.data) ? res.data : [] }))
+          api.get(`/api/products/?service=${s.id}`).then((res) => ({
+            service: s,
+            items: Array.isArray(res.data) ? res.data : [],
+          }))
         );
-
         const results = await Promise.all(calls);
         const merged = results.flatMap((r) => r.items.map((it) => ({ ...it, __service_name: r.service.name })));
         setItems(merged);
@@ -167,7 +194,6 @@ export default function Products() {
     loadCats();
   }, [serviceId, isAllServices]);
 
-  // adapter unité par défaut
   useEffect(() => {
     setForm((prev) => ({ ...prev, unit: unitOptions[0] }));
   }, [unitOptions]);
@@ -220,24 +246,18 @@ export default function Products() {
         notes: form.notes.trim() || "",
       };
 
-      // identifiants
       const cleanedBarcode = (form.barcode || "").trim();
       const cleanedSku = (form.internal_sku || "").trim();
 
       if (barcodeEnabled) payload.barcode = cleanedBarcode;
       else payload.barcode = "";
 
-      if (skuEnabled) {
-        payload.internal_sku = cleanedSku;
-      } else {
-        payload.internal_sku = "";
-      }
+      if (skuEnabled) payload.internal_sku = cleanedSku;
+      else payload.internal_sku = "";
 
       if (purchaseEnabled) payload.purchase_price = form.purchase_price || null;
       if (sellingEnabled) payload.selling_price = form.selling_price || null;
-      if (tvaEnabled && (purchaseEnabled || sellingEnabled)) {
-        payload.tva = form.tva === "" ? null : Number(form.tva);
-      }
+      if (tvaEnabled && (purchaseEnabled || sellingEnabled)) payload.tva = form.tva === "" ? null : Number(form.tva);
       if (itemTypeEnabled) payload.product_role = form.product_role || null;
 
       let res;
@@ -245,9 +265,8 @@ export default function Products() {
       else res = await api.post("/api/products/", payload);
 
       const warnings = res?.data?.warnings || [];
-      if (warnings.length) {
-        pushToast?.({ message: warnings.join(" "), type: "warn" });
-      } else {
+      if (warnings.length) pushToast?.({ message: warnings.join(" "), type: "warn" });
+      else {
         pushToast?.({
           message: editId ? `${itemLabel} mis à jour.` : `${itemLabel} ajouté.`,
           type: "success",
@@ -262,7 +281,6 @@ export default function Products() {
         e2?.response?.data?.detail ||
         e2?.response?.data?.non_field_errors?.[0] ||
         "Action impossible. Vérifiez les champs, les doublons et vos droits.";
-
       setErr(apiMsg);
       pushToast?.({ message: apiMsg, type: "error" });
     } finally {
@@ -292,9 +310,7 @@ export default function Products() {
       if (monthA === monthB) {
         const dateA = item.created_at ? new Date(item.created_at).getTime() : 0;
         const dateB = existing.created_at ? new Date(existing.created_at).getTime() : 0;
-        if (dateA > dateB) {
-          map.set(key, item);
-        }
+        if (dateA > dateB) map.set(key, item);
       }
     });
     return Array.from(map.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -317,9 +333,7 @@ export default function Products() {
   const PAGE_SIZE = 12;
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages);
-    }
+    if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
   useEffect(() => {
@@ -327,13 +341,153 @@ export default function Products() {
     const timer = window.setTimeout(() => setErr(""), 7000);
     return () => window.clearTimeout(timer);
   }, [err]);
-  useEffect(() => {
-    setPage(1);
-  }, [search, totalPages]);
+
+  useEffect(() => setPage(1), [search, totalPages]);
+
   const paginatedItems = useMemo(() => {
     const start = (page - 1) * PAGE_SIZE;
     return filteredItems.slice(start, start + PAGE_SIZE);
   }, [filteredItems, page]);
+
+  // ---------------------------------------
+  // Scanner camera (BarcodeDetector)
+  // ---------------------------------------
+
+  const stopScanner = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+
+    const stream = streamRef.current;
+    if (stream) {
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+    }
+    streamRef.current = null;
+
+    detectorRef.current = null;
+    setScanLoading(false);
+  };
+
+  const applyScannedCode = (raw) => {
+    const code = normalizeScannedCode(raw);
+    if (!code) return;
+
+    // 1) recherche
+    setSearch(code);
+    // 2) remplit formulaire code-barres (si activé)
+    if (barcodeEnabled) {
+      setForm((p) => ({ ...p, barcode: code }));
+      // focus dans le champ code-barres si visible
+      window.setTimeout(() => {
+        try {
+          barcodeInputRef.current?.focus?.();
+        } catch (_) {}
+      }, 50);
+    } else {
+      // sinon on met dans SKU (si dispo)
+      if (skuEnabled) setForm((p) => ({ ...p, internal_sku: code }));
+    }
+
+    // 3) toast + scroll résultats
+    pushToast?.({ message: `Scan détecté : ${code}`, type: "success" });
+
+    window.setTimeout(() => {
+      try {
+        resultsRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      } catch (_) {}
+    }, 50);
+
+    // 4) ferme modal
+    setScanOpen(false);
+  };
+
+  const tickScan = async () => {
+    const video = videoRef.current;
+    const detector = detectorRef.current;
+    if (!video || !detector) return;
+
+    try {
+      // detect() peut throw selon implémentation
+      const codes = await detector.detect(video);
+      if (Array.isArray(codes) && codes.length) {
+        const val = codes[0]?.rawValue || "";
+        if (val) {
+          stopScanner();
+          applyScannedCode(val);
+          return;
+        }
+      }
+    } catch (e) {
+      // ignore: on continue
+    }
+
+    rafRef.current = requestAnimationFrame(tickScan);
+  };
+
+  const startScanner = async () => {
+    setScanErr("");
+    setScanLoading(true);
+    setScanManual("");
+
+    if (!isBarcodeDetectorSupported()) {
+      setScanLoading(false);
+      setScanErr("Scan caméra non supporté sur ce navigateur. Utilisez la saisie manuelle ci-dessous.");
+      return;
+    }
+
+    try {
+      // eslint-disable-next-line no-undef
+      detectorRef.current = new BarcodeDetector({
+        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+
+      const video = videoRef.current;
+      if (!video) throw new Error("video_ref_missing");
+
+      video.srcObject = stream;
+      await video.play();
+
+      setScanLoading(false);
+      rafRef.current = requestAnimationFrame(tickScan);
+    } catch (e) {
+      stopScanner();
+      setScanLoading(false);
+
+      const name = e?.name || "";
+      if (name === "NotAllowedError") {
+        setScanErr("Permission caméra refusée. Autorisez la caméra puis réessayez.");
+      } else if (name === "NotFoundError") {
+        setScanErr("Aucune caméra détectée sur cet appareil.");
+      } else {
+        setScanErr("Impossible de démarrer la caméra. Réessayez ou utilisez la saisie manuelle.");
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!scanOpen) {
+      stopScanner();
+      return;
+    }
+    startScanner();
+
+    return () => stopScanner();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanOpen]);
+
+  // ---------------------------------------
 
   return (
     <PageTransition>
@@ -341,6 +495,86 @@ export default function Products() {
         <title>{wording.itemPlural} | StockScan</title>
         <meta name="description" content={ux.productsIntro} />
       </Helmet>
+
+      {/* Modal scanner */}
+      {scanOpen && (
+        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+              <div className="font-semibold text-slate-900 flex items-center gap-2">
+                <ScanLine className="w-5 h-5" />
+                Scanner un code-barres
+              </div>
+              <button
+                type="button"
+                className="p-2 rounded-xl hover:bg-slate-100"
+                onClick={() => setScanOpen(false)}
+                aria-label="Fermer"
+              >
+                <X className="w-5 h-5 text-slate-700" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="rounded-2xl overflow-hidden bg-black relative">
+                <video ref={videoRef} className="w-full h-[320px] object-cover" playsInline muted />
+                <div className="absolute inset-0 pointer-events-none">
+                  <div className="absolute inset-x-10 top-1/2 -translate-y-1/2 border-2 border-emerald-400/70 rounded-xl h-40" />
+                  <div className="absolute left-10 right-10 top-1/2 -translate-y-1/2 h-0.5 bg-emerald-400/80" />
+                </div>
+                {scanLoading && (
+                  <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
+                    Démarrage caméra…
+                  </div>
+                )}
+              </div>
+
+              {scanErr ? (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  {scanErr}
+                </div>
+              ) : (
+                <div className="text-xs text-slate-600">
+                  Astuce : place le code-barres dans le cadre, bien éclairé. Le scan se fait automatiquement.
+                </div>
+              )}
+
+              {/* fallback manuel */}
+              <div className="grid gap-2">
+                <Input
+                  label="Ou saisir le code manuellement"
+                  placeholder="Ex. 3268840001008"
+                  value={scanManual}
+                  onChange={(e) => setScanManual(e.target.value)}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    className="justify-center"
+                    onClick={() => {
+                      const v = normalizeScannedCode(scanManual);
+                      if (!v) return setScanErr("Veuillez saisir un code valide.");
+                      stopScanner();
+                      applyScannedCode(v);
+                    }}
+                  >
+                    Utiliser ce code
+                  </Button>
+                  <Button variant="secondary" type="button" onClick={() => setScanOpen(false)}>
+                    Annuler
+                  </Button>
+                </div>
+              </div>
+
+              {!isBarcodeDetectorSupported() && (
+                <div className="text-xs text-slate-500">
+                  Note : sur iPhone Safari, le scan caméra peut ne pas être supporté. (Android Chrome = OK)
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <Card className="p-6 space-y-2">
@@ -374,10 +608,24 @@ export default function Products() {
               label="Recherche"
               placeholder={ux.searchHint}
               value={search}
+              inputRef={searchInputRef}
               onChange={(e) => {
                 setSearch(e.target.value);
                 if (err) setErr("");
               }}
+              rightSlot={
+                barcodeEnabled ? (
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-slate-700 px-2 py-1 rounded-full border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"
+                    onClick={() => setScanOpen(true)}
+                    title="Scanner un code-barres"
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    Scanner
+                  </button>
+                ) : null
+              }
             />
 
             <div className="flex gap-2">
@@ -390,6 +638,7 @@ export default function Products() {
                 onClick={() => {
                   setSearch("");
                   pushToast?.({ message: "Recherche réinitialisée.", type: "info" });
+                  window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
                 }}
                 disabled={loading}
               >
@@ -443,7 +692,7 @@ export default function Products() {
 
               {showUnit && (
                 <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">{unitLabel}</span>
+                  <span className="text-sm font-medium text-slate-700">{unitLabel}</span>
                   <select
                     value={form.unit}
                     onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
@@ -484,8 +733,20 @@ export default function Products() {
                   label={wording.barcodeLabel}
                   placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
                   value={form.barcode}
+                  inputRef={barcodeInputRef}
                   onChange={(e) => setForm((p) => ({ ...p, barcode: e.target.value }))}
                   helper={helpers.barcode}
+                  rightSlot={
+                    <button
+                      type="button"
+                      className="text-xs font-semibold text-slate-700 px-2 py-1 rounded-full border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"
+                      onClick={() => setScanOpen(true)}
+                      title="Scanner un code-barres"
+                    >
+                      <ScanLine className="w-4 h-4" />
+                      Scanner
+                    </button>
+                  }
                 />
               )}
 
@@ -551,9 +812,7 @@ export default function Products() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500">
-                    Prix saisis en HT. La TVA sert aux exports et estimations.
-                  </p>
+                  <p className="text-xs text-slate-500">Prix saisis en HT. La TVA sert aux exports et estimations.</p>
                 </label>
               )}
 
@@ -568,7 +827,6 @@ export default function Products() {
                 <Button type="submit" loading={loading} disabled={isAllServices}>
                   {editId ? "Mettre à jour" : "Ajouter"}
                 </Button>
-
                 <Button variant="secondary" type="button" onClick={resetForm} disabled={isAllServices || loading}>
                   Réinitialiser
                 </Button>
@@ -579,7 +837,7 @@ export default function Products() {
           {err && <div className="text-sm text-red-600">{err}</div>}
         </Card>
 
-        <Card className="p-6 space-y-4">
+        <Card className="p-6 space-y-4" ref={resultsRef}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
               <div className="text-sm text-slate-500">Résultats</div>
@@ -628,16 +886,13 @@ export default function Products() {
                       <td className="px-4 py-3">
                         <div className="font-semibold text-slate-900">{p.name}</div>
                         {p.product_role && (
-                          <div className="text-xs text-slate-500">
-                            Type : {productRoleLabels[p.product_role] || p.product_role}
-                          </div>
+                          <div className="text-xs text-slate-500">Type : {productRoleLabels[p.product_role] || p.product_role}</div>
                         )}
                         {(p.brand || p.supplier) && (
-                          <div className="text-xs text-slate-500">
-                            {[p.brand, p.supplier].filter(Boolean).join(" · ")}
-                          </div>
+                          <div className="text-xs text-slate-500">{[p.brand, p.supplier].filter(Boolean).join(" · ")}</div>
                         )}
                       </td>
+
                       <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
 
                       {isAllServices && (
@@ -654,9 +909,7 @@ export default function Products() {
                       {(purchaseEnabled || sellingEnabled) && (
                         <td className="px-4 py-3 text-slate-700">
                           <div className="space-y-1">
-                            {purchaseEnabled && (
-                              <div>Achat: {p.purchase_price ? `${p.purchase_price} €` : "—"}</div>
-                            )}
+                            {purchaseEnabled && <div>Achat: {p.purchase_price ? `${p.purchase_price} €` : "—"}</div>}
                             {sellingEnabled && (
                               <div className="text-xs text-slate-500">
                                 Vente: {p.selling_price ? `${p.selling_price} €` : "—"}
@@ -695,6 +948,7 @@ export default function Products() {
                                 message: `Fiche ${itemLabelLower} pré-remplie : modifiez puis validez.`,
                                 type: "info",
                               });
+                              window.setTimeout(() => barcodeInputRef.current?.focus?.(), 80);
                             }}
                           >
                             Pré-remplir

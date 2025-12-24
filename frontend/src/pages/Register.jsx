@@ -9,23 +9,20 @@ import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
 import { api } from "../lib/api";
 
 const servicePresets = (family, isMulti, linkedMode = "separate") => {
-  const primary = {
-    retail: { service_type: "grocery_food", service_name: "Épicerie" },
-    mode: { service_type: "retail_general", service_name: "Boutique (mode)" },
-    bar: { service_type: "bar", service_name: "Bar" },
-    restauration: { service_type: "kitchen", service_name: "Restaurant" },
-    boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
-    pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
-  }[family] || { service_type: "other", service_name: "Service principal" };
+  const primary =
+    {
+      retail: { service_type: "grocery_food", service_name: "Épicerie" },
+      mode: { service_type: "retail_general", service_name: "Boutique (mode)" },
+      bar: { service_type: "bar", service_name: "Bar" },
+      restauration: { service_type: "kitchen", service_name: "Restaurant" },
+      boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
+      pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
+    }[family] || { service_type: "other", service_name: "Service principal" };
 
-  if (!isMulti) {
-    return [{ id: "svc-1", ...primary }];
-  }
+  if (!isMulti) return [{ id: "svc-1", ...primary }];
 
   if (family === "restauration") {
-    if (linkedMode === "merge") {
-      return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
-    }
+    if (linkedMode === "merge") return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
     return [
       { id: "svc-1", service_type: "kitchen", service_name: "Cuisine" },
       { id: "svc-2", service_type: "restaurant_dining", service_name: "Salle" },
@@ -33,9 +30,7 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
   }
 
   if (family === "boulangerie") {
-    if (linkedMode === "merge") {
-      return [{ id: "svc-1", service_type: "bakery", service_name: "Boulangerie & Pâtisserie" }];
-    }
+    if (linkedMode === "merge") return [{ id: "svc-1", service_type: "bakery", service_name: "Boulangerie & Pâtisserie" }];
     return [
       { id: "svc-1", service_type: "bakery", service_name: "Boulangerie" },
       { id: "svc-2", service_type: "bakery", service_name: "Pâtisserie" },
@@ -44,9 +39,7 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
 
   if (family === "pharmacie") {
     if (linkedMode === "merge") {
-      return [
-        { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" },
-      ];
+      return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
     }
     return [
       { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
@@ -68,6 +61,7 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
         active ? "bg-blue-500 border-blue-400" : "border-white/20"
       } flex items-center justify-center text-white`}
       onClick={() => onToggle(moduleId)}
+      aria-pressed={active}
     >
       {active ? "✓" : "+"}
     </button>
@@ -78,21 +72,20 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
   </div>
 );
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export default function Register() {
   const { register } = useAuth();
   const nav = useNavigate();
-  const [form, setForm] = useState({
-    storeName: "",
-    email: "",
-    password: "",
-    passwordConfirm: "",
-  });
+
+  const [form, setForm] = useState({ storeName: "", email: "", password: "", passwordConfirm: "" });
   const [familyId, setFamilyId] = useState(FAMILLES[0].id);
   const [isGroundedMulti, setIsGroundedMulti] = useState(false);
   const [linkedMode, setLinkedMode] = useState("separate");
   const [stepIndex, setStepIndex] = useState(0);
-  const [modules, setModules] = useState(DEFAULT_MODULES[familyId] || []);
-  const [serviceList, setServiceList] = useState(() => servicePresets(familyId, false));
+
+  const [modules, setModules] = useState(DEFAULT_MODULES[FAMILLES[0].id] || []);
+  const [serviceList, setServiceList] = useState(() => servicePresets(FAMILLES[0].id, false));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -115,9 +108,7 @@ export default function Register() {
   const currentStep = flowSteps[stepIndex];
 
   useEffect(() => {
-    if (stepIndex > flowSteps.length - 1) {
-      setStepIndex(flowSteps.length - 1);
-    }
+    if (stepIndex > flowSteps.length - 1) setStepIndex(flowSteps.length - 1);
   }, [flowSteps, stepIndex]);
 
   useEffect(() => {
@@ -133,103 +124,87 @@ export default function Register() {
   };
 
   const handleToggleModule = (id) => {
-    setModules((prev) => (prev.includes(id) ? prev.filter((module) => module !== id) : [...prev, id]));
+    setModules((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
   };
 
   const handleServiceNameChange = (idx, value) => {
-    setServiceList((prev) =>
-      prev.map((svc, index) => (index === idx ? { ...svc, service_name: value } : svc))
-    );
+    setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_name: value } : svc)));
   };
 
-  const nextStep = () => {
-    setStepIndex((prev) => Math.min(prev + 1, flowSteps.length - 1));
-  };
-
-  const prevStep = () => {
-    setStepIndex((prev) => Math.max(prev - 1, 0));
-  };
+  const nextStep = () => setStepIndex((prev) => Math.min(prev + 1, flowSteps.length - 1));
+  const prevStep = () => setStepIndex((prev) => Math.max(prev - 1, 0));
 
   const updateForm = (key) => (event) => {
     setForm((prev) => ({ ...prev, [key]: event.target.value }));
     if (error) setError("");
   };
 
+  const canGoNext =
+    (currentStep === "mode") ||
+    (currentStep === "family") ||
+    (currentStep === "combo") ||
+    (currentStep === "services") ||
+    (currentStep === "account");
+
   const applyModuleDefaults = async () => {
     if (!modules?.length) return;
-    try {
-      const res = await api.get("/api/auth/services/");
-      const services = Array.isArray(res?.data) ? res.data : [];
-      if (!services.length) return;
-      const moduleSet = new Set(modules);
-      const identifiers = familyMeta?.identifiers || {};
 
-      await Promise.all(
-        services.map(async (svc) => {
-          const nextFeatures = { ...(svc.features || {}) };
-          const identifierEnabled = moduleSet.has("identifier");
-          const pricingEnabled = moduleSet.has("pricing");
+    // petit retry: après register(), selon ton AuthProvider, le token peut être posé juste après.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const res = await api.get("/api/auth/services/");
+        const services = Array.isArray(res?.data) ? res.data : [];
+        if (!services.length) return;
 
-          nextFeatures.barcode = {
-            ...(nextFeatures.barcode || {}),
-            enabled: identifierEnabled ? Boolean(identifiers.barcode) : false,
-          };
-          nextFeatures.sku = {
-            ...(nextFeatures.sku || {}),
-            enabled: identifierEnabled ? Boolean(identifiers.sku) : false,
-          };
-          nextFeatures.dlc = {
-            ...(nextFeatures.dlc || {}),
-            enabled: moduleSet.has("expiry"),
-          };
-          nextFeatures.lot = {
-            ...(nextFeatures.lot || {}),
-            enabled: moduleSet.has("lot"),
-          };
-          nextFeatures.variants = {
-            ...(nextFeatures.variants || {}),
-            enabled: moduleSet.has("variants"),
-          };
-          nextFeatures.multi_unit = {
-            ...(nextFeatures.multi_unit || {}),
-            enabled: moduleSet.has("multiUnit"),
-          };
-          nextFeatures.open_container_tracking = {
-            ...(nextFeatures.open_container_tracking || {}),
-            enabled: moduleSet.has("opened"),
-          };
-          nextFeatures.item_type = {
-            ...(nextFeatures.item_type || {}),
-            enabled: moduleSet.has("itemType"),
-          };
-          nextFeatures.prices = {
-            ...(nextFeatures.prices || {}),
-            purchase_enabled: pricingEnabled,
-            selling_enabled: pricingEnabled,
-          };
-          nextFeatures.tva = {
-            ...(nextFeatures.tva || {}),
-            enabled: pricingEnabled,
-          };
+        const moduleSet = new Set(modules);
+        const identifiers = familyMeta?.identifiers || {};
+        const identifierEnabled = moduleSet.has("identifier");
+        const pricingEnabled = moduleSet.has("pricing");
 
-          await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
-        })
-      );
-    } catch (e) {
-      // On ne bloque pas l'inscription si un preset de module échoue.
+        await Promise.all(
+          services.map(async (svc) => {
+            const nextFeatures = { ...(svc.features || {}) };
+
+            nextFeatures.barcode = { ...(nextFeatures.barcode || {}), enabled: identifierEnabled ? Boolean(identifiers.barcode) : false };
+            nextFeatures.sku = { ...(nextFeatures.sku || {}), enabled: identifierEnabled ? Boolean(identifiers.sku) : false };
+            nextFeatures.dlc = { ...(nextFeatures.dlc || {}), enabled: moduleSet.has("expiry") };
+            nextFeatures.lot = { ...(nextFeatures.lot || {}), enabled: moduleSet.has("lot") };
+            nextFeatures.variants = { ...(nextFeatures.variants || {}), enabled: moduleSet.has("variants") };
+            nextFeatures.multi_unit = { ...(nextFeatures.multi_unit || {}), enabled: moduleSet.has("multiUnit") };
+            nextFeatures.open_container_tracking = { ...(nextFeatures.open_container_tracking || {}), enabled: moduleSet.has("opened") };
+            nextFeatures.item_type = { ...(nextFeatures.item_type || {}), enabled: moduleSet.has("itemType") };
+            nextFeatures.prices = { ...(nextFeatures.prices || {}), purchase_enabled: pricingEnabled, selling_enabled: pricingEnabled };
+            nextFeatures.tva = { ...(nextFeatures.tva || {}), enabled: pricingEnabled };
+
+            await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
+          })
+        );
+
+        return;
+      } catch (e) {
+        // on retente brièvement, puis on abandonne sans bloquer l'onboarding
+        await sleep(250);
+      }
     }
   };
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setError("");
-    if (!form.storeName || !form.email || !form.password || form.password !== form.passwordConfirm) {
-      setError("Il manque un champ ou les mots de passe ne correspondent pas.");
+
+    if (!form.storeName || !form.email || !form.password) {
+      setError("Il manque un champ.");
       return;
     }
+    if (form.password !== form.passwordConfirm) {
+      setError("Les mots de passe ne correspondent pas.");
+      return;
+    }
+
     setLoading(true);
     try {
       const [primaryService, ...extraServices] = serviceList;
+
       const businessTypeByFamily = {
         retail: "grocery",
         mode: "retail",
@@ -238,6 +213,7 @@ export default function Register() {
         boulangerie: "grocery",
         pharmacie: "pharmacy",
       };
+
       const domainByFamily = {
         retail: "food",
         bar: "food",
@@ -246,6 +222,7 @@ export default function Register() {
         mode: "general",
         pharmacie: "general",
       };
+
       await register({
         password: form.password,
         email: form.email,
@@ -259,6 +236,7 @@ export default function Register() {
           name: svc.service_name || "Secondaire",
         })),
       });
+
       await applyModuleDefaults();
       nav("/app/dashboard");
     } catch (err) {
@@ -268,22 +246,24 @@ export default function Register() {
     }
   };
 
-  const comboSummary = {
-    restauration: "Restaurant + Cuisine",
-    boulangerie: "Boulangerie + Pâtisserie",
-    pharmacie: "Pharmacie + Parapharmacie",
-  }[familyId];
+  const comboSummary =
+    {
+      restauration: "Restaurant + Cuisine",
+      boulangerie: "Boulangerie + Pâtisserie",
+      pharmacie: "Pharmacie + Parapharmacie",
+    }[familyId] || "";
 
   return (
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center py-10 px-4">
       <Helmet>
         <title>Créer mon espace | StockScan</title>
+        <meta name="description" content="Créez votre espace StockScan en quelques minutes : famille métier, services, modules et accès." />
+        <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
       <h1 className="text-3xl font-black mb-2 text-center">Créer mon espace</h1>
       <p className="text-center text-slate-400 max-w-xl">
-        Choisis ta famille métier, active les modules qui te parlent, et garde un onboarding pensé pour
-        ton quotidien.
+        Choisis ta famille métier, active les modules qui te parlent, et garde un onboarding pensé pour ton quotidien.
       </p>
 
       <div className="w-full max-w-4xl mt-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-6">
@@ -305,6 +285,7 @@ export default function Register() {
                   Choisis si tu veux suivre un seul inventaire ou séparer plusieurs espaces.
                 </p>
               </div>
+
               <div className="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
@@ -321,6 +302,7 @@ export default function Register() {
                   <div className="font-semibold">Un seul service</div>
                   <div className="text-sm text-slate-400">Simple, rapide, parfait pour une équipe compacte.</div>
                 </button>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -344,8 +326,9 @@ export default function Register() {
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Famille métier</h2>
-                <p className="text-sm text-slate-400">{familyMeta.copy.subline}</p>
+                <p className="text-sm text-slate-400">{familyMeta.copy?.subline}</p>
               </div>
+
               <div className="grid gap-3 md:grid-cols-2">
                 {FAMILLES.map((family) => (
                   <button
@@ -359,7 +342,7 @@ export default function Register() {
                     }`}
                   >
                     <div className="font-semibold text-white">{family.name}</div>
-                    <div className="text-sm text-slate-400">{family.copy.headline}</div>
+                    <div className="text-sm text-slate-400">{family.copy?.headline}</div>
                   </button>
                 ))}
               </div>
@@ -374,6 +357,7 @@ export default function Register() {
                   On te propose une organisation adaptée à {familyMeta.name.toLowerCase()}.
                 </p>
               </div>
+
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <div className="text-sm text-slate-400">Combo conseillé</div>
                 <div className="text-lg font-semibold text-white">{comboSummary}</div>
@@ -388,10 +372,9 @@ export default function Register() {
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Organisation des services</h2>
-                <p className="text-sm text-slate-400">
-                  Ajuste les noms et choisis si tu veux regrouper ou séparer les inventaires.
-                </p>
+                <p className="text-sm text-slate-400">Ajuste les noms et choisis si tu veux regrouper ou séparer.</p>
               </div>
+
               {linkedFamilies.has(familyId) && isGroundedMulti && (
                 <div className="flex items-center gap-3">
                   <label className="text-sm text-slate-300">Regrouper ou séparer ?</label>
@@ -408,17 +391,19 @@ export default function Register() {
                   </select>
                 </div>
               )}
+
               <div className="space-y-3">
                 {serviceList.map((service, index) => (
                   <Input
                     key={service.id}
                     label={`Service ${index + 1}`}
                     value={service.service_name}
-                    placeholder={`${familyMeta.defaults.categoryLabel || "Service"} ${index + 1}`}
+                    placeholder={`Service ${index + 1}`}
                     onChange={(event) => handleServiceNameChange(index, event.target.value)}
                   />
                 ))}
               </div>
+
               {isGroundedMulti && (
                 <Button
                   variant="ghost"
@@ -444,42 +429,38 @@ export default function Register() {
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Compte & accès</h2>
-                <p className="text-sm text-slate-400">
-                  Crée ton espace {familyMeta.name.toLowerCase()} et active les modules utiles dès le départ.
-                </p>
+                <p className="text-sm text-slate-400">Crée ton espace et commence tout de suite.</p>
               </div>
+
               <form onSubmit={handleRegister} className="space-y-3">
                 <Input
                   label="Nom du commerce"
-                  placeholder={familyMeta.copy.headline}
+                  placeholder="Ex : Boulangerie du Centre"
                   value={form.storeName}
                   onChange={updateForm("storeName")}
                 />
                 <Input
                   label="Email professionnel"
-                  placeholder={`contact@${familyMeta.name.toLowerCase().replace(/\s+/g, "")}.com`}
+                  placeholder="contact@commerce.fr"
                   type="email"
                   value={form.email}
                   onChange={updateForm("email")}
                 />
-                <Input
-                  label="Mot de passe"
-                  type="password"
-                  value={form.password}
-                  onChange={updateForm("password")}
-                />
+                <Input label="Mot de passe" type="password" value={form.password} onChange={updateForm("password")} />
                 <Input
                   label="Confirme le mot de passe"
                   type="password"
                   value={form.passwordConfirm}
                   onChange={updateForm("passwordConfirm")}
                 />
+
                 {error && (
-                  <div className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100">
+                  <div className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100" role="alert">
                     {error}
                   </div>
                 )}
-                <Button type="submit" className="w-full" loading={loading}>
+
+                <Button type="submit" className="w-full" loading={loading} disabled={loading}>
                   Créer mon espace personnalisé
                 </Button>
               </form>
@@ -487,30 +468,25 @@ export default function Register() {
           )}
 
           <div className="flex items-center justify-between mt-3">
-            <Button
-              variant="secondary"
-              onClick={nextStep}
-              disabled={stepIndex === flowSteps.length - 1}
-            >
+            <Button variant="secondary" onClick={nextStep} disabled={!canGoNext || stepIndex === flowSteps.length - 1}>
               {stepIndex === flowSteps.length - 1 ? "Réviser" : "Étape suivante"}
             </Button>
-            <div>
-              {stepIndex > 0 && (
-                <Button variant="ghost" size="sm" onClick={prevStep}>
-                  ← Revenir
-                </Button>
-              )}
-            </div>
+
+            {stepIndex > 0 ? (
+              <Button variant="ghost" size="sm" onClick={prevStep}>
+                ← Revenir
+              </Button>
+            ) : (
+              <span />
+            )}
           </div>
         </Card>
 
         <Card className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-white/10 p-6 space-y-5">
           <div>
-            <span className="text-xs uppercase tracking-[0.3em] text-slate-500">
-              Configuration métier
-            </span>
+            <span className="text-xs uppercase tracking-[0.3em] text-slate-500">Configuration métier</span>
             <h2 className="text-2xl font-black mt-1">{familyMeta.name}</h2>
-            <p className="text-slate-300">{familyMeta.copy.headline}</p>
+            <p className="text-slate-300">{familyMeta.copy?.headline}</p>
           </div>
 
           <div className="space-y-3">
@@ -534,21 +510,6 @@ export default function Register() {
               {familyMeta.identifiers?.sku ? "SKU activé" : "SKU désactivé"}
             </div>
             <div className="text-xs text-slate-500">Modifiable ensuite dans Settings → Modules.</div>
-          </div>
-
-          <div className="text-sm text-slate-500">
-            <p>Personnalise les champs disponibles et garde une expérience cible “famille métier”.</p>
-            <p className="mt-2">
-              Besoin de changer la famille ou de réactiver le guide ? Tu peux revenir en arrière sans perdre
-              ton avance.
-            </p>
-          </div>
-
-          <div className="border border-dashed border-slate-800 rounded-2xl px-4 py-3 text-sm text-slate-300 bg-slate-900/40">
-            <p>Copy system activé :</p>
-            <p className="text-xs text-slate-500">
-              {modules.length === 0 ? "Active un module pour voir les champs visibles." : modules.join(", ")}
-            </p>
           </div>
 
           <Link to="/login" className="text-sm text-blue-400">
