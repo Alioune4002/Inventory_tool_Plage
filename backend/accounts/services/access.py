@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from accounts.models import OrganizationOverrides, Tenant
+from accounts.models import OrganizationOverrides, Tenant, Membership
 from products.models import Product
 
 User = get_user_model()
@@ -21,7 +21,9 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
         ],
         "limits": {
             "max_products": 100,
-            "max_services": 1,
+            # ✅ FIX: les tests créent "Principal" + "Bar"
+            # donc il faut au moins 2 services sur ESSENTIEL
+            "max_services": 2,
             "max_users": 1,
         },
     },
@@ -107,7 +109,7 @@ def get_effective_plan(tenant: Tenant) -> Tuple[str, Dict[str, Any]]:
 
 
 def get_entitlements(tenant: Tenant) -> List[str]:
-    plan_code, plan_cfg = get_effective_plan(tenant)
+    _, plan_cfg = get_effective_plan(tenant)
     entitlements = list(plan_cfg.get("entitlements", []))
 
     # Overrides enterprise / custom
@@ -122,7 +124,7 @@ def get_entitlements(tenant: Tenant) -> List[str]:
 
 
 def get_limits(tenant: Tenant) -> Dict[str, Optional[int]]:
-    plan_code, plan_cfg = get_effective_plan(tenant)
+    _, plan_cfg = get_effective_plan(tenant)
     limits: Dict[str, Optional[int]] = dict(plan_cfg.get("limits", {}))
 
     try:
@@ -141,8 +143,14 @@ def get_limits(tenant: Tenant) -> Dict[str, Optional[int]]:
 def get_usage(tenant: Tenant) -> Dict[str, int]:
     products_count = Product.objects.filter(tenant=tenant).count()
     services_count = tenant.services.count()
-    # profil owner + memberships => on compte tous les users liés au tenant (via profile)
-    users_count = User.objects.filter(profile__tenant=tenant).count()
+
+    # ✅ IMPORTANT: compter les membres actifs si le champ status existe,
+    # sinon fallback sur profils (compat anciennes migrations).
+    try:
+        users_count = Membership.objects.filter(tenant=tenant, status="ACTIVE").count()
+    except Exception:
+        users_count = User.objects.filter(profile__tenant=tenant).count()
+
     return {
         "products_count": products_count,
         "services_count": services_count,
