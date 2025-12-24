@@ -384,24 +384,23 @@ const inviteMember = async () => {
             </div>
 
                   {lastInviteLink ? (
-                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                        <div className="font-semibold">Lien d’invitation</div>
-                        <div className="text-xs opacity-80">
-                          (à utiliser si l’email n’a pas été reçu)
-                        </div>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={async () => {
-                      const ok = await copyToClipboard(lastInviteLink);
-                      pushToast?.({ message: ok ? "Lien copié." : "Copie impossible.", type: ok ? "success" : "error" });
-                    }}
-                  >
-                    Copier
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                      <div className="font-semibold">Lien d'invitation</div>
+                      <div className="text-xs opacity-80">
+                        (à utiliser si l'email n'a pas été reçu)
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={async () => {
+                          const ok = await copyToClipboard(lastInviteLink);
+                          pushToast?.({ message: ok ? "Lien copié." : "Copie impossible.", type: ok ? "success" : "error" });
+                        }}
+                      >
+                        Copier
+                      </Button>
+                    </div>
+                  ) : null}
 
             <Divider />
 
