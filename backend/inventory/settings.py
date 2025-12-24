@@ -5,12 +5,15 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from datetime import timedelta
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-@change-this-in-production')
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-@change-this-in-production")
 
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://stockscan.app')
+DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() == "true"
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "https://stockscan.app")
+
 
 def _split_csv(value: str):
     return [p.strip() for p in (value or "").replace("\n", ",").split(",") if p.strip()]
@@ -37,59 +40,66 @@ def _sanitize_host(entry: str):
     return s.split(":")[0] or None
 
 
-_default_hosts = 'localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com'
-_raw_hosts = os.environ.get('DJANGO_ALLOWED_HOSTS', _default_hosts)
+_default_hosts = "localhost,127.0.0.1,0.0.0.0,testserver,inventory-tool-plage.onrender.com"
+_raw_hosts = os.environ.get("DJANGO_ALLOWED_HOSTS", _default_hosts)
 _base_hosts = {"localhost", "127.0.0.1", "0.0.0.0", "testserver"}
 _env_hosts = {h for h in (_sanitize_host(x) for x in _split_csv(_raw_hosts)) if h}
 ALLOWED_HOSTS = sorted(_base_hosts | _env_hosts)
 
+
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'accounts',
-    'rest_framework',
-    'corsheaders',
-    #'products',
-    'products.apps.ProductsConfig',
-    'ai_assistant',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "accounts",
+    "rest_framework",
+    "corsheaders",
+    # "products",
+    "products.apps.ProductsConfig",
+    "ai_assistant",
 ]
+
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # ✅ avant CommonMiddleware
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'inventory.urls'
+
+ROOT_URLCONF = "inventory.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'inventory.wsgi.application'
+WSGI_APPLICATION = "inventory.wsgi.application"
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+
+# -------------------
+# Database
+# -------------------
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
     parsed = urlparse(DATABASE_URL)
@@ -101,60 +111,60 @@ if DATABASE_URL:
     elif not DEBUG:
         # Render Postgres typically requires SSL; keep local dev unchanged.
         options["sslmode"] = os.environ.get("DB_SSLMODE", "require")
+
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': parsed.path.lstrip('/'),
-            'USER': parsed.username,
-            'PASSWORD': parsed.password,
-            'HOST': parsed.hostname,
-            'PORT': parsed.port or '',
-            'CONN_MAX_AGE': int(os.environ.get("DB_CONN_MAX_AGE", "60")),
-            **({'OPTIONS': options} if options else {}),
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": parsed.path.lstrip("/"),
+            "USER": parsed.username,
+            "PASSWORD": parsed.password,
+            "HOST": parsed.hostname,
+            "PORT": parsed.port or "",
+            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+            **({"OPTIONS": options} if options else {}),
         }
     }
 else:
     DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': os.environ.get('INVENTORY_DB_PATH', BASE_DIR / 'db.sqlite3'),
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": os.environ.get("INVENTORY_DB_PATH", BASE_DIR / "db.sqlite3"),
         }
     }
 
+
+# -------------------
+# Auth / i18n
+# -------------------
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
-LANGUAGE_CODE = 'fr-fr'
-
-TIME_ZONE = 'UTC'
-
+LANGUAGE_CODE = "fr-fr"
+TIME_ZONE = "UTC"
 USE_I18N = True
-
 USE_TZ = True
 
-STATIC_URL = 'static/'
 
+# -------------------
+# Static
+# -------------------
+STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
+# -------------------
+# CORS
+# -------------------
 CORS_ALLOW_ALL_ORIGINS = os.environ.get(
-    'CORS_ALLOW_ALL_ORIGINS',
-    'True' if DEBUG else 'False',
-).lower() == 'true'
+    "CORS_ALLOW_ALL_ORIGINS",
+    "True" if DEBUG else "False",
+).lower() == "true"
+
 
 def _origin_variants(origin: str):
     """
@@ -178,7 +188,7 @@ def _origin_variants(origin: str):
 
 
 _cors_origins = set()
-for origin in _split_csv(os.environ.get('CORS_ALLOWED_ORIGINS', "")):
+for origin in _split_csv(os.environ.get("CORS_ALLOWED_ORIGINS", "")):
     _cors_origins.update(_origin_variants(origin) or [origin])
 
 # Dev-friendly defaults
@@ -195,46 +205,65 @@ if DEBUG and not os.environ.get("CORS_ALLOWED_ORIGINS"):
 _cors_origins.update(_origin_variants(FRONTEND_URL))
 CORS_ALLOWED_ORIGINS = sorted(_cors_origins)
 
+# ✅ FIX: autoriser tes headers custom (préflight bloquait tout)
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-service-id",
+    "x-service-mode",
+]
+
+
+# -------------------
+# DRF / JWT
+# -------------------
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
     # Par défaut, on autorise l'accès public. Chaque vue protégée définit explicitement
     # IsAuthenticated + permissions de rôle.
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.AllowAny',
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",
     ),
-    'DEFAULT_THROTTLE_RATES': {
-        'ai_assistant': os.environ.get('AI_THROTTLE_RATE', '10/min'),
+    "DEFAULT_THROTTLE_RATES": {
+        "ai_assistant": os.environ.get("AI_THROTTLE_RATE", "10/min"),
     },
-    'EXCEPTION_HANDLER': 'utils.drf_exceptions.custom_exception_handler',
+    "EXCEPTION_HANDLER": "utils.drf_exceptions.custom_exception_handler",
 }
-
-from datetime import timedelta
 
 SIMPLE_JWT = {
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.environ.get('ACCESS_TOKEN_LIFETIME_MIN', 30))),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=int(os.environ.get('REFRESH_TOKEN_LIFETIME_DAYS', 7))),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get("ACCESS_TOKEN_LIFETIME_MIN", 30))),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("REFRESH_TOKEN_LIFETIME_DAYS", 7))),
 }
 
+
+# -------------------
 # AI Assistant
-AI_ENABLED = os.environ.get('AI_ENABLED', 'False').lower() == 'true'
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
-AI_MODEL = os.environ.get('AI_MODEL', 'gpt-4o-mini')
+# -------------------
+AI_ENABLED = os.environ.get("AI_ENABLED", "False").lower() == "true"
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+AI_MODEL = os.environ.get("AI_MODEL", "gpt-4o-mini")
 
+
+# -------------------
 # Billing / Stripe
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY')
-STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET')
-STRIPE_SUCCESS_URL = os.environ.get('STRIPE_SUCCESS_URL', f"{FRONTEND_URL}/billing/success")
-STRIPE_CANCEL_URL = os.environ.get('STRIPE_CANCEL_URL', f"{FRONTEND_URL}/billing/cancel")
-STRIPE_PRICE_BOUTIQUE_MONTHLY = os.environ.get('STRIPE_PRICE_BOUTIQUE_MONTHLY')
-STRIPE_PRICE_BOUTIQUE_YEARLY = os.environ.get('STRIPE_PRICE_BOUTIQUE_YEARLY')
-STRIPE_PRICE_PRO_MONTHLY = os.environ.get('STRIPE_PRICE_PRO_MONTHLY')
-STRIPE_PRICE_PRO_YEARLY = os.environ.get('STRIPE_PRICE_PRO_YEARLY')
+# -------------------
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
+STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", f"{FRONTEND_URL}/billing/success")
+STRIPE_CANCEL_URL = os.environ.get("STRIPE_CANCEL_URL", f"{FRONTEND_URL}/billing/cancel")
+STRIPE_PRICE_BOUTIQUE_MONTHLY = os.environ.get("STRIPE_PRICE_BOUTIQUE_MONTHLY")
+STRIPE_PRICE_BOUTIQUE_YEARLY = os.environ.get("STRIPE_PRICE_BOUTIQUE_YEARLY")
+STRIPE_PRICE_PRO_MONTHLY = os.environ.get("STRIPE_PRICE_PRO_MONTHLY")
+STRIPE_PRICE_PRO_YEARLY = os.environ.get("STRIPE_PRICE_PRO_YEARLY")
 
+
+# -------------------
 # Emails (SendGrid)
-SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
-SENDGRID_FROM_EMAIL = os.environ.get('SENDGRID_FROM_EMAIL', 'no-reply@stockscan.app')
-INVITATIONS_SEND_EMAILS = os.environ.get('INVITATIONS_SEND_EMAILS', 'true').lower() == 'true'
-EMAIL_VERIFICATION_REQUIRED = os.environ.get('EMAIL_VERIFICATION_REQUIRED', 'true').lower() == 'true'
+# -------------------
+SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
+SENDGRID_FROM_EMAIL = os.environ.get("SENDGRID_FROM_EMAIL", "no-reply@stockscan.app")
+INVITATIONS_SEND_EMAILS = os.environ.get("INVITATIONS_SEND_EMAILS", "true").lower() == "true"
+EMAIL_VERIFICATION_REQUIRED = os.environ.get("EMAIL_VERIFICATION_REQUIRED", "true").lower() == "true"
