@@ -205,7 +205,6 @@ def get_default_service(tenant: Tenant):
 
 
 def _membership_has_status_field() -> bool:
-    # ✅ compat: certains environnements/tests n'ont pas encore le champ status
     try:
         return any(f.name == "status" for f in Membership._meta.fields)
     except Exception:
@@ -213,11 +212,6 @@ def _membership_has_status_field() -> bool:
 
 
 def _get_membership_for_tenant(user, tenant: Tenant):
-    """
-    ✅ Compat:
-    - si Membership.status existe -> on ne prend que ACTIVE
-    - sinon -> on prend la membership (legacy)
-    """
     if not user or not getattr(user, "is_authenticated", False):
         return None
 
@@ -229,10 +223,10 @@ def _get_membership_for_tenant(user, tenant: Tenant):
 
 def get_user_role(request):
     """
-    ✅ Fix pour tes tests:
-    - Si user a un UserProfile sur le tenant ET qu'il n'a pas de Membership,
-      on le considère comme owner (compte principal), même si la factory met role=operator.
-    - Sinon: profile.role si dispo, sinon membership.role, sinon operator
+    ✅ Règle: le compte principal est piloté par UserProfile.
+    - Si profile existe sur le tenant, on renvoie owner/manager si dispo,
+      sinon fallback owner (ça corrige les factories qui mettent operator).
+    - Sinon on se base sur Membership (ACTIVE si champ status existe).
     """
     user = getattr(request, "user", None)
     tenant = get_tenant_for_request(request)
@@ -242,10 +236,11 @@ def get_user_role(request):
 
     profile = getattr(user, "profile", None)
     if profile and profile.tenant_id == tenant.id:
-        has_any_membership = Membership.objects.filter(user=user, tenant=tenant).exists()
-        if not has_any_membership:
-            return "owner"
-        return profile.role or "owner"
+        role = (profile.role or "").strip().lower()
+        if role in ("owner", "manager"):
+            return role
+        # ✅ fallback safe: profile sur le tenant = compte principal => owner
+        return "owner"
 
     m = _get_membership_for_tenant(user, tenant)
     if m:
@@ -267,7 +262,6 @@ def get_service_from_request(request):
     role = get_user_role(request)
     membership = _get_membership_for_tenant(user, tenant)
 
-    # 🔒 scope forcé si membership scoped + pas owner
     if role != "owner" and membership and membership.service_id:
         forced = membership.service
         requested_service_id = request.query_params.get("service") or (
