@@ -1,5 +1,6 @@
 # Deployed backend: https://inventory-tool-plage.onrender.com
 from copy import deepcopy
+
 from django.utils.text import slugify
 from rest_framework import exceptions
 
@@ -40,108 +41,124 @@ def apply_service_preset(service_type: str, domain: str = None):
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": True},
-                 "sku": {"enabled": False, "recommended": False},
-                 "dlc": {"enabled": True, "recommended": True},
-                 "multi_unit": {"enabled": True, "recommended": False},
-                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": True},
+                    "sku": {"enabled": False, "recommended": False},
+                    "dlc": {"enabled": True, "recommended": True},
+                    "multi_unit": {"enabled": True, "recommended": False},
+                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
         "bulk_food": {
             "counting_mode": "weight",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": False},
-                 "sku": {"enabled": True, "recommended": True},
-                 "dlc": {"enabled": True, "recommended": False},
-                 "multi_unit": {"enabled": True, "recommended": True},
-                 "open_container_tracking": {"enabled": True},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": False},
+                    "sku": {"enabled": True, "recommended": True},
+                    "dlc": {"enabled": True, "recommended": False},
+                    "multi_unit": {"enabled": True, "recommended": True},
+                    "open_container_tracking": {"enabled": True},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
         "bar": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": True},
-                 "sku": {"enabled": False, "recommended": False},
-                 "prices": {"purchase_enabled": True, "selling_enabled": False, "recommended": False},
-                 "dlc": {"enabled": True, "recommended": False},
-                 "lot": {"enabled": True, "recommended": True},
-                 "multi_unit": {"enabled": True, "recommended": False},
-                 "open_container_tracking": {"enabled": True},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": True},
+                    "sku": {"enabled": False, "recommended": False},
+                    "prices": {"purchase_enabled": True, "selling_enabled": False, "recommended": False},
+                    "dlc": {"enabled": True, "recommended": False},
+                    "lot": {"enabled": True, "recommended": True},
+                    "multi_unit": {"enabled": True, "recommended": False},
+                    "open_container_tracking": {"enabled": True},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
         "kitchen": {
             "counting_mode": "weight",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": False},
-                 "sku": {"enabled": True, "recommended": False},
-                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                 "dlc": {"enabled": True, "recommended": False},
-                 "lot": {"enabled": True, "recommended": False},
-                 "multi_unit": {"enabled": True, "recommended": False},
-                 "open_container_tracking": {"enabled": True},
-                 "item_type": {"enabled": True, "recommended": True},
-                 "tva": {"enabled": False, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": False},
+                    "sku": {"enabled": True, "recommended": False},
+                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                    "dlc": {"enabled": True, "recommended": False},
+                    "lot": {"enabled": True, "recommended": False},
+                    "multi_unit": {"enabled": True, "recommended": False},
+                    "open_container_tracking": {"enabled": True},
+                    "item_type": {"enabled": True, "recommended": True},
+                    "tva": {"enabled": False, "recommended": False},
+                },
             ),
         },
         "retail_general": {
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": False, "recommended": False},
-                 "sku": {"enabled": True, "recommended": True},
-                 "dlc": {"enabled": False, "recommended": False},
-                 "variants": {"enabled": True, "recommended": True},
-                 "open_container_tracking": {"enabled": False},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": False, "recommended": False},
+                    "sku": {"enabled": True, "recommended": True},
+                    "dlc": {"enabled": False, "recommended": False},
+                    "variants": {"enabled": True, "recommended": True},
+                    "open_container_tracking": {"enabled": False},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
         "pharmacy_parapharmacy": {
             "counting_mode": "unit",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": True},
-                 "sku": {"enabled": True, "recommended": True},
-                 "dlc": {"enabled": True, "recommended": True},
-                 "lot": {"enabled": True, "recommended": True},
-                 "open_container_tracking": {"enabled": False},
-                 "tva": {"enabled": True, "recommended": True},
-                 "suppliers": {"enabled": True}},
+                {
+                    "barcode": {"enabled": True, "recommended": True},
+                    "sku": {"enabled": True, "recommended": True},
+                    "dlc": {"enabled": True, "recommended": True},
+                    "lot": {"enabled": True, "recommended": True},
+                    "open_container_tracking": {"enabled": False},
+                    "tva": {"enabled": True, "recommended": True},
+                    "suppliers": {"enabled": True},
+                },
             ),
         },
         "bakery": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": False},
-                 "sku": {"enabled": True, "recommended": True},
-                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                 "dlc": {"enabled": True, "recommended": True},
-                 "lot": {"enabled": True, "recommended": True},
-                 "multi_unit": {"enabled": True, "recommended": False},
-                 "open_container_tracking": {"enabled": True},
-                 "item_type": {"enabled": True, "recommended": True},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": False},
+                    "sku": {"enabled": True, "recommended": True},
+                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                    "dlc": {"enabled": True, "recommended": True},
+                    "lot": {"enabled": True, "recommended": True},
+                    "multi_unit": {"enabled": True, "recommended": False},
+                    "open_container_tracking": {"enabled": True},
+                    "item_type": {"enabled": True, "recommended": True},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
         "restaurant_dining": {
             "counting_mode": "mixed",
             "features": _merge_features(
                 base,
-                {"barcode": {"enabled": True, "recommended": False},
-                 "sku": {"enabled": True, "recommended": False},
-                 "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
-                 "dlc": {"enabled": True, "recommended": True},
-                 "lot": {"enabled": True, "recommended": False},
-                 "multi_unit": {"enabled": True, "recommended": False},
-                 "open_container_tracking": {"enabled": True},
-                 "item_type": {"enabled": True, "recommended": True},
-                 "tva": {"enabled": True, "recommended": False}},
+                {
+                    "barcode": {"enabled": True, "recommended": False},
+                    "sku": {"enabled": True, "recommended": False},
+                    "prices": {"purchase_enabled": True, "selling_enabled": True, "recommended": True},
+                    "dlc": {"enabled": True, "recommended": True},
+                    "lot": {"enabled": True, "recommended": False},
+                    "multi_unit": {"enabled": True, "recommended": False},
+                    "open_container_tracking": {"enabled": True},
+                    "item_type": {"enabled": True, "recommended": True},
+                    "tva": {"enabled": True, "recommended": False},
+                },
             ),
         },
     }
@@ -168,9 +185,11 @@ def get_tenant_for_request(request):
     user = getattr(request, "user", None)
     if not user or not user.is_authenticated:
         return get_or_create_default_tenant()
+
     profile = getattr(user, "profile", None)
     if profile:
         return profile.tenant
+
     tenant = get_or_create_default_tenant()
     UserProfile.objects.create(user=user, tenant=tenant, role="owner")
     return tenant
@@ -186,30 +205,37 @@ def get_default_service(tenant: Tenant):
 
 
 def _get_membership_for_tenant(user, tenant: Tenant):
+    """
+    ✅ On ne considère que les memberships ACTIVE pour les droits/scopes.
+    """
     if not user or not getattr(user, "is_authenticated", False):
         return None
-    return Membership.objects.filter(user=user, tenant=tenant).select_related("service").first()
+    return (
+        Membership.objects.filter(user=user, tenant=tenant, status="ACTIVE")
+        .select_related("service")
+        .first()
+    )
 
 
 def get_service_from_request(request):
     """
     ✅ IMPORTANT (scope service):
     - owner => libre de choisir n'importe quel service du tenant via ?service=
-    - non-owner avec membership.service défini => service forcé (Salle only / Cuisine only)
+    - non-owner avec membership ACTIVE + membership.service défini => service forcé
     - non-owner sans scope => comportement historique (param ?service= sinon Principal)
     """
     tenant = get_tenant_for_request(request)
     user = getattr(request, "user", None)
 
-    # owner = pas de restriction
     role = get_user_role(request)
     membership = _get_membership_for_tenant(user, tenant)
 
     # 🔒 Si scope fixé et non owner => on force le service
     if role != "owner" and membership and membership.service_id:
         forced = membership.service
-        # Si le front tente de passer un autre service => interdit
-        requested_service_id = request.query_params.get("service") or (request.data.get("service") if hasattr(request, "data") else None)
+        requested_service_id = request.query_params.get("service") or (
+            request.data.get("service") if hasattr(request, "data") else None
+        )
         if requested_service_id and str(requested_service_id) != str(forced.id):
             raise exceptions.PermissionDenied("Accès limité : vous n'avez pas accès à ce service.")
         return forced
@@ -229,19 +255,30 @@ def get_service_from_request(request):
 
 
 def get_user_role(request):
+    """
+    ✅ Fix critique:
+    - On privilégie le rôle du UserProfile (owner par défaut) quand il existe.
+    - Ensuite seulement, on regarde Membership ACTIVE.
+    - Les INVITED ne doivent ni donner des droits, ni écraser le rôle owner.
+    """
     user = getattr(request, "user", None)
     tenant = get_tenant_for_request(request)
+
     if not user or not user.is_authenticated:
         return "operator"
 
-    membership = getattr(user, "memberships", None)
-    if membership:
-        m = user.memberships.filter(tenant=tenant).first()
-        if m:
-            return m.role
-
+    # ✅ 1) Profile d'abord (source principale pour le "propriétaire" du tenant)
     profile = getattr(user, "profile", None)
     if profile and profile.tenant_id == tenant.id:
-        return profile.role
+        return profile.role or "owner"
+
+    # ✅ 2) Puis membership ACTIVE
+    m = (
+        Membership.objects.filter(user=user, tenant=tenant, status="ACTIVE")
+        .only("role")
+        .first()
+    )
+    if m:
+        return m.role
 
     return "operator"
