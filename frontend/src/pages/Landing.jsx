@@ -107,14 +107,14 @@ export default function Landing() {
               </div>
 
               <h1 className="text-4xl md:text-5xl font-black leading-[1.05] text-white">
-                L’app qui donne (vraiment) envie de faire son inventaire
+                L’App qui donne (vraiment) envie de faire son inventaire
               </h1>
 
               <p className="text-lg text-slate-200">
                 StockScan vous aide à{" "}
                 <span className="font-semibold text-white">garder une base produits propre</span> et à{" "}
-                <span className="font-semibold text-white">réaliser vos inventaires mensuels</span> rapidement.
-                Simple, lisible, pensé pour le terrain.
+                <span className="font-semibold text-white">réaliser vos inventaires mensuels ou annuels</span> rapidement.
+                Simple, lisible, pensée pour le terrain.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3">
