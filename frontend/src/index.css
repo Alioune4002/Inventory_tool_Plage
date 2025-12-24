@@ -32,10 +32,28 @@
   --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
 }
 
+/* ✅ anti overflow mobile */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+  overflow-x: hidden; /* ✅ stop débordement à droite */
+}
+
+/* Sécurise médias (souvent responsables du overflow) */
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 body {
@@ -168,6 +186,11 @@ body {
     background-image: linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
       linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
     background-size: 32px 32px;
+  }
+
+  /* ✅ util: évite overflow dans flex/grid (min-width: auto => débordements) */
+  .min-w-0-safe {
+    min-width: 0;
   }
 }
 

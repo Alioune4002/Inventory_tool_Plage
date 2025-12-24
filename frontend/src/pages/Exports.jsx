@@ -1,397 +1,459 @@
-  import React, { useEffect, useMemo, useState } from "react";
-  import { Helmet } from "react-helmet-async";
-  import { api } from "../lib/api";
-  import PageTransition from "../components/PageTransition";
-  import Card from "../ui/Card";
-  import Button from "../ui/Button";
-  import Input from "../ui/Input";
-  import { useAuth } from "../app/AuthProvider";
-  import { useToast } from "../app/ToastContext";
-  import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
-  import { getWording } from "../lib/labels";
+import React, { useEffect, useMemo, useState } from "react";
+import { Helmet } from "react-helmet-async";
+import { api } from "../lib/api";
+import PageTransition from "../components/PageTransition";
+import Card from "../ui/Card";
+import Button from "../ui/Button";
+import Input from "../ui/Input";
+import { useAuth } from "../app/AuthProvider";
+import { useToast } from "../app/ToastContext";
+import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { getWording } from "../lib/labels";
 
-  export default function Exports() {
-    const { serviceId, services, serviceFeatures, tenant, serviceProfile } = useAuth();
-    const pushToast = useToast();
-    const [periodFrom, setPeriodFrom] = useState("");
-    const [periodTo, setPeriodTo] = useState("");
-    const [availableCategories, setAvailableCategories] = useState([]);
-    const [selectedCategories, setSelectedCategories] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [mode, setMode] = useState("all");
-    const [email, setEmail] = useState("");
-    const [message, setMessage] = useState("");
-    const [includeCharts, setIncludeCharts] = useState(true);
-    const [includeSummary, setIncludeSummary] = useState(true);
-    const [toast, setToast] = useState("");
+function parseFilenameFromContentDisposition(contentDisposition, fallback) {
+  try {
+    if (!contentDisposition) return fallback;
+    // ex: attachment; filename="export_avance.xlsx"
+    const match = String(contentDisposition).match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/i);
+    const raw = decodeURIComponent(match?.[1] || match?.[2] || match?.[3] || "");
+    return raw ? raw.replace(/[/\\]/g, "_") : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
-    const pricingCfg = serviceFeatures?.prices || {};
-    const purchaseEnabled = pricingCfg.purchase_enabled !== false;
-    const sellingEnabled = pricingCfg.selling_enabled !== false;
-    const tvaEnabled = serviceFeatures?.tva?.enabled !== false;
-    const showOpenFilter = serviceFeatures?.open_container_tracking?.enabled === true;
+async function blobToJsonSafe(blob) {
+  try {
+    const text = await blob.text();
+    // si c'est HTML, JSON.parse va throw
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
 
-    const currentService = services?.find((s) => String(s.id) === String(serviceId));
-    const serviceType = serviceProfile?.service_type || currentService?.service_type;
-    const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
-    const familyId = resolveFamilyId(serviceType, serviceDomain);
-    const familyMeta = FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0];
-    const familyIdentifiers = familyMeta?.identifiers ?? {};
-    const wording = getWording(serviceType, serviceDomain);
-    const itemLabelLower = (wording.itemLabel || "élément").toLowerCase();
-    const categoryLabelLower = (wording.categoryLabel || "catégorie").toLowerCase();
+function downloadBlob({ blob, filename }) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "export.xlsx";
+  link.rel = "noopener";
+  link.target = "_blank"; // iOS/Safari friendly
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 800);
+}
 
-    const getFeatureFlag = (key, fallback = false) => {
-      const cfg = serviceFeatures?.[key];
-      if (cfg && typeof cfg.enabled === "boolean") {
-        return cfg.enabled;
-      }
-      return fallback;
-    };
+export default function Exports() {
+  const { serviceId, services, serviceFeatures, tenant, serviceProfile } = useAuth();
+  const pushToast = useToast();
 
-    const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
-    const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
-    const identifierEnabled = barcodeEnabled || skuEnabled;
-    const itemTypeEnabled = getFeatureFlag("item_type", familyMeta?.modules?.includes("itemType"));
+  const [periodFrom, setPeriodFrom] = useState("");
+  const [periodTo, setPeriodTo] = useState("");
+  const [availableCategories, setAvailableCategories] = useState([]);
+  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState("all");
+  const [email, setEmail] = useState("");
+  const [message, setMessage] = useState("");
+  const [includeCharts, setIncludeCharts] = useState(true);
+  const [includeSummary, setIncludeSummary] = useState(true);
+  const [toast, setToast] = useState("");
 
-    const fieldOptions = useMemo(() => {
-      const fields = [
-        { key: "name", label: `Nom ${itemLabelLower}`, helper: `Nom du ${itemLabelLower} catalogue.` },
-        { key: "category", label: wording.categoryLabel, helper: `${wording.categoryLabel} métier.` },
-        { key: "quantity", label: "Quantité comptée", helper: "Comptage du mois." },
-        { key: "unit", label: "Unité", helper: "Unité de comptage." },
-        { key: "inventory_month", label: "Mois", helper: "Mois d’inventaire." },
-        { key: "service", label: "Service", helper: "Service concerné." },
-        { key: "purchase_price", label: "Prix achat (€)", helper: "Prix d’achat HT." },
-        { key: "selling_price", label: "Prix vente (€)", helper: "Prix de vente HT." },
-        { key: "tva", label: "TVA (%)", helper: "Taux de TVA." },
-        { key: "dlc", label: "DLC / DDM", helper: "Dates limites." },
-        { key: "brand", label: "Marque", helper: "Marque optionnelle." },
-        { key: "supplier", label: "Fournisseur", helper: "Fournisseur optionnel." },
-        ...(itemTypeEnabled
-          ? [{ key: "product_role", label: `Type ${itemLabelLower}`, helper: "Matière première / produit fini." }]
-          : []),
-        { key: "notes", label: "Notes", helper: "Notes internes." },
-      ];
-      if (identifierEnabled) {
-        fields.splice(4, 0, {
-          key: "identifier",
-          label: `Identifiant (${wording.identifierLabel || "code-barres / SKU"})`,
-          helper: "Identifiant principal catalogue.",
-        });
-      }
-      return fields;
-    }, [identifierEnabled, itemTypeEnabled, wording.identifierLabel, wording.categoryLabel, itemLabelLower]);
+  const pricingCfg = serviceFeatures?.prices || {};
+  const purchaseEnabled = pricingCfg.purchase_enabled !== false;
+  const sellingEnabled = pricingCfg.selling_enabled !== false;
+  const tvaEnabled = serviceFeatures?.tva?.enabled !== false;
+  const showOpenFilter = serviceFeatures?.open_container_tracking?.enabled === true;
 
-    const defaultFields = useMemo(() => {
-      const base = ["name", "category", "quantity", "unit"];
-      if (identifierEnabled) base.push("identifier");
-      base.push("inventory_month", "service");
-      if (purchaseEnabled) base.push("purchase_price");
-      if (sellingEnabled) base.push("selling_price");
-      if (tvaEnabled && (purchaseEnabled || sellingEnabled)) base.push("tva");
-      return base;
-    }, [identifierEnabled, purchaseEnabled, sellingEnabled, tvaEnabled]);
+  const currentService = services?.find((s) => String(s.id) === String(serviceId));
+  const serviceType = serviceProfile?.service_type || currentService?.service_type;
+  const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
 
-    const [selectedFields, setSelectedFields] = useState(defaultFields);
-    const essentialFields = identifierEnabled
-      ? ["name", "category", "quantity", "unit", "identifier", "inventory_month", "service"]
-      : ["name", "category", "quantity", "unit", "inventory_month", "service"];
-    const allFieldKeys = useMemo(() => fieldOptions.map((field) => field.key), [fieldOptions]);
+  const familyId = resolveFamilyId(serviceType, serviceDomain);
+  const familyMeta = FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0];
+  const familyIdentifiers = familyMeta?.identifiers ?? {};
 
-    useEffect(() => {
-      setSelectedFields(defaultFields);
-    }, [serviceId, defaultFields]);
+  const wording = getWording(serviceType, serviceDomain);
+  const itemLabelLower = (wording.itemLabel || "élément").toLowerCase();
+  const categoryLabelLower = (wording.categoryLabel || "catégorie").toLowerCase();
 
-    useEffect(() => {
-      if (!showOpenFilter) setMode("all");
-    }, [showOpenFilter]);
+  const getFeatureFlag = (key, fallback = false) => {
+    const cfg = serviceFeatures?.[key];
+    if (cfg && typeof cfg.enabled === "boolean") return cfg.enabled;
+    return fallback;
+  };
 
-    useEffect(() => {
-      if (!toast) return undefined;
-      const timer = window.setTimeout(() => setToast(""), 7000);
-      return () => window.clearTimeout(timer);
-    }, [toast]);
+  const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
+  const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
+  const identifierEnabled = barcodeEnabled || skuEnabled;
+  const itemTypeEnabled = getFeatureFlag("item_type", familyMeta?.modules?.includes("itemType"));
 
-    const toggleField = (key) => {
-      setSelectedFields((prev) => {
-        if (prev.includes(key)) {
-          const next = prev.filter((field) => field !== key);
-          return next.length > 0 ? next : prev;
-        }
-        return [...prev, key];
+  const fieldOptions = useMemo(() => {
+    const fields = [
+      { key: "name", label: `Nom ${itemLabelLower}`, helper: `Nom du ${itemLabelLower} catalogue.` },
+      { key: "category", label: wording.categoryLabel, helper: `${wording.categoryLabel} métier.` },
+      { key: "quantity", label: "Quantité comptée", helper: "Comptage du mois." },
+      { key: "unit", label: "Unité", helper: "Unité de comptage." },
+      { key: "inventory_month", label: "Mois", helper: "Mois d’inventaire." },
+      { key: "service", label: "Service", helper: "Service concerné." },
+      { key: "purchase_price", label: "Prix achat (€)", helper: "Prix d’achat HT." },
+      { key: "selling_price", label: "Prix vente (€)", helper: "Prix de vente HT." },
+      { key: "tva", label: "TVA (%)", helper: "Taux de TVA." },
+      { key: "dlc", label: "DLC / DDM", helper: "Dates limites." },
+      { key: "brand", label: "Marque", helper: "Marque optionnelle." },
+      { key: "supplier", label: "Fournisseur", helper: "Fournisseur optionnel." },
+      ...(itemTypeEnabled
+        ? [{ key: "product_role", label: `Type ${itemLabelLower}`, helper: "Matière première / produit fini." }]
+        : []),
+      { key: "notes", label: "Notes", helper: "Notes internes." },
+    ];
+
+    if (identifierEnabled) {
+      fields.splice(4, 0, {
+        key: "identifier",
+        label: `Identifiant (${wording.identifierLabel || "code-barres / SKU"})`,
+        helper: "Identifiant principal catalogue.",
       });
-    };
+    }
+    return fields;
+  }, [identifierEnabled, itemTypeEnabled, wording.identifierLabel, wording.categoryLabel, itemLabelLower]);
 
-    const includeTVA = selectedFields.includes("tva");
-    const includeDLC = selectedFields.includes("dlc");
-    const includeIdentifier = selectedFields.includes("identifier");
+  const defaultFields = useMemo(() => {
+    const base = ["name", "category", "quantity", "unit"];
+    if (identifierEnabled) base.push("identifier");
+    base.push("inventory_month", "service");
+    if (purchaseEnabled) base.push("purchase_price");
+    if (sellingEnabled) base.push("selling_price");
+    if (tvaEnabled && (purchaseEnabled || sellingEnabled)) base.push("tva");
+    return base;
+  }, [identifierEnabled, purchaseEnabled, sellingEnabled, tvaEnabled]);
 
-    const doExport = async (format = "xlsx") => {
-      if (!serviceId) {
-        setToast("Choisissez un service d’abord.");
-        return;
+  const [selectedFields, setSelectedFields] = useState(defaultFields);
+
+  const essentialFields = identifierEnabled
+    ? ["name", "category", "quantity", "unit", "identifier", "inventory_month", "service"]
+    : ["name", "category", "quantity", "unit", "inventory_month", "service"];
+
+  const allFieldKeys = useMemo(() => fieldOptions.map((field) => field.key), [fieldOptions]);
+
+  useEffect(() => {
+    setSelectedFields(defaultFields);
+  }, [serviceId, defaultFields]);
+
+  useEffect(() => {
+    if (!showOpenFilter) setMode("all");
+  }, [showOpenFilter]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(""), 7000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const toggleField = (key) => {
+    setSelectedFields((prev) => {
+      if (prev.includes(key)) {
+        const next = prev.filter((field) => field !== key);
+        return next.length > 0 ? next : prev;
       }
-      if (!selectedFields.length) {
-        setToast("Sélectionnez au moins un champ à exporter.");
-        return;
+      return [...prev, key];
+    });
+  };
+
+  const includeTVA = selectedFields.includes("tva");
+  const includeDLC = selectedFields.includes("dlc");
+  const includeIdentifier = selectedFields.includes("identifier");
+
+  const doExport = async (format = "xlsx") => {
+    if (!serviceId) {
+      setToast("Choisissez un service d’abord.");
+      return;
+    }
+    if (!selectedFields.length) {
+      setToast("Sélectionnez au moins un champ à exporter.");
+      return;
+    }
+
+    setLoading(true);
+    setToast("");
+
+    try {
+      const chartsAllowed = format !== "csv" && includeCharts;
+      const summaryAllowed = format !== "csv" && includeSummary;
+
+      if (format === "csv" && (includeCharts || includeSummary)) {
+        pushToast?.({ message: "CSV : graphiques et synthèse ignorés.", type: "info" });
       }
-      setLoading(true);
-      setToast("");
-      try {
-        const chartsAllowed = format !== "csv" && includeCharts;
-        const summaryAllowed = format !== "csv" && includeSummary;
-        if (format === "csv" && (includeCharts || includeSummary)) {
-          pushToast?.({ message: "CSV : graphiques et synthèse ignorés.", type: "info" });
-        }
-        const payload = {
-          service: serviceId,
-          mode,
-          include_tva: includeTVA,
-          include_dlc: includeDLC,
-          include_sku: includeIdentifier,
-          include_charts: chartsAllowed,
-          include_summary: summaryAllowed,
-          categories: selectedCategories,
-          from_month: periodFrom,
-          to_month: periodTo,
-          format,
-          email,
-          message,
-          fields: selectedFields,
-        };
-        const res = await api.post("/api/export-advanced/", payload, { responseType: "blob" });
-        const blob = new Blob([res.data], {
-          type:
-            format === "csv"
-              ? "text/csv"
-              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.setAttribute("download", `export.${format}`);
-        document.body.appendChild(link);
-        link.click();
-        link.parentNode.removeChild(link);
-        window.URL.revokeObjectURL(url);
-        const emailMsg = email ? " & envoi email demandé" : "";
-        setToast(`Export lancé${emailMsg}.`);
-        pushToast?.({ message: `Export lancé${emailMsg}`, type: "success" });
-      } catch (e) {
-        setToast("Échec de l’export, vérifie les filtres.");
-        pushToast?.({ message: "Échec de l’export", type: "error" });
-      } finally {
-        setLoading(false);
+
+      const payload = {
+        service: serviceId,
+        mode,
+        include_tva: includeTVA,
+        include_dlc: includeDLC,
+        include_sku: includeIdentifier,
+        include_charts: chartsAllowed,
+        include_summary: summaryAllowed,
+        categories: selectedCategories,
+        from_month: periodFrom,
+        to_month: periodTo,
+        format,
+        email,
+        message,
+        fields: selectedFields,
+      };
+
+      const res = await api.post("/api/export-advanced/", payload, {
+        responseType: "blob",
+        headers: { Accept: format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      });
+
+      // ✅ si backend renvoie JSON d'erreur en blob, on l'affiche au lieu de télécharger
+      const contentType = res?.headers?.["content-type"] || "";
+      const maybeJson = contentType.includes("application/json") || contentType.includes("text/json");
+
+      if (maybeJson) {
+        const data = await blobToJsonSafe(res.data);
+        const msg = data?.detail || data?.error || data?.message || "Export refusé / impossible.";
+        const extra = data?.code ? ` (${data.code})` : "";
+        throw new Error(`${msg}${extra}`);
       }
-    };
 
-    useEffect(() => {
-      if (!serviceId) return;
-      api
-        .get("/api/categories/", { params: { service: serviceId } })
-        .then((res) => setAvailableCategories(res.data || []))
-        .catch(() => setAvailableCategories([]));
-    }, [serviceId]);
+      const fallbackName = `export.${format}`;
+      const filename = parseFilenameFromContentDisposition(res?.headers?.["content-disposition"], fallbackName);
 
-    const toggleCategory = (slug) => {
-      setSelectedCategories((prev) =>
-        prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]
-      );
-    };
+      const blob = new Blob([res.data], {
+        type:
+          format === "csv"
+            ? "text/csv;charset=utf-8"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
 
-    return (
-      <PageTransition>
-        <Helmet>
-          <title>Exports | StockScan</title>
-          <meta name="description" content="Exports avancés CSV/XLSX avec filtres." />
-        </Helmet>
+      downloadBlob({ blob, filename });
 
-        <div className="space-y-4">
-          <Card className="p-6 space-y-3">
-            <div className="text-sm text-slate-500">Exports</div>
-            <div className="text-2xl font-black tracking-tight">Exports CSV / Excel</div>
-            <div className="text-sm text-slate-600">Choisissez les filtres, puis lancez un export.</div>
-          </Card>
+      const emailMsg = email ? " & envoi email demandé" : "";
+      setToast(`Export prêt${emailMsg}.`);
+      pushToast?.({ message: `Export prêt${emailMsg}`, type: "success" });
+    } catch (e) {
+      const msg =
+        e?.message ||
+        e?.friendlyMessage ||
+        e?.response?.data?.detail ||
+        "Échec de l’export. Vérifie les filtres / droits / plan.";
+      setToast(msg);
+      pushToast?.({ message: msg, type: "error" });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          <Card className="p-6 space-y-4">
-            <div className="grid md:grid-cols-3 gap-3">
-              <Input label="Période (début)" type="month" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
-              <Input label="Période (fin)" type="month" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
-              {services?.length > 0 && (
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">Service</span>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-                    value={serviceId || ""}
-                    onChange={(e) => setToast("Change le service dans la topbar.")}
-                    disabled
-                  >
-                    {services.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-slate-500">Service sélectionné dans la topbar.</span>
-                </label>
-              )}
-              {showOpenFilter && (
-                <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">Mode</span>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-                    value={mode}
-                    onChange={(e) => setMode(e.target.value)}
-                  >
-                    <option value="all">Tout</option>
-                    <option value="SEALED">Non entamé</option>
-                    <option value="OPENED">Entamé</option>
-                  </select>
-                  <span className="text-xs text-slate-500">Sélectionne entamé/non entamé si besoin.</span>
-                </label>
-              )}
-              <Input
-                label="Partage email (optionnel)"
-                type="email"
-                placeholder="destinataire@exemple.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                helper="Le fichier est téléchargé et envoyé par email si renseigné."
-              />
-              <Input
-                label="Message (optionnel)"
-                placeholder="Contexte de l’inventaire…"
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-              />
-              <div className="space-y-2">
-                <span className="text-sm font-medium text-slate-700">{wording.categoryLabel}</span>
-                <div className="flex flex-wrap gap-2">
-                  {availableCategories.length === 0 ? (
-                    <span className="text-xs text-slate-400">Chargement des catégories…</span>
-                  ) : (
-                    availableCategories.map((category) => {
-                      const value = category.name || category.title || category.slug || category.id;
-                      const label = category.name || category.title || value;
-                      return (
-                        <button
-                          type="button"
-                          key={value}
-                          onClick={() => toggleCategory(value)}
-                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                            selectedCategories.includes(value)
-                              ? "border-blue-500 bg-blue-500/20 text-blue-200"
-                              : "border-white/20 bg-white/5 text-white/80"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-                <p className="text-xs text-slate-500">
-                  Sélectionne les {categoryLabelLower} à intégrer. Sans sélection, l’export prend tout.
-                </p>
-                {selectedCategories.length > 0 && (
-                  <p className="text-xs text-emerald-300">
-                    Catégories choisies : {selectedCategories.join(", ")}
-                  </p>
-                )}
-              </div>
-            </div>
+  useEffect(() => {
+    if (!serviceId) return;
+    api
+      .get("/api/categories/", { params: { service: serviceId } })
+      .then((res) => setAvailableCategories(res.data || []))
+      .catch(() => setAvailableCategories([]));
+  }, [serviceId]);
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <span className="text-sm font-medium text-slate-700">Champs exportés</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                    onClick={() => setSelectedFields(essentialFields)}
-                  >
-                    Base
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                    onClick={() => setSelectedFields(allFieldKeys)}
-                  >
-                    Complet
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                    onClick={() => setSelectedFields(defaultFields)}
-                  >
-                    Réinitialiser
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {fieldOptions.map((field) => {
-                  const active = selectedFields.includes(field.key);
-                  return (
-                    <button
-                      key={field.key}
-                      type="button"
-                      onClick={() => toggleField(field.key)}
-                      className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                        active
-                          ? "border-blue-500 bg-blue-500/20 text-blue-100"
-                          : "border-white/10 bg-white/5 text-white/70"
-                      }`}
-                    >
-                      {field.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-slate-500">
-                Sélectionne exactement ce que tu veux récupérer dans le fichier.
-              </p>
-            </div>
+  const toggleCategory = (slug) => {
+    setSelectedCategories((prev) => (prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]));
+  };
+
+  return (
+    <PageTransition>
+      <Helmet>
+        <title>Exports | StockScan</title>
+        <meta name="description" content="Exports avancés CSV/XLSX avec filtres." />
+      </Helmet>
+
+      <div className="space-y-4">
+        <Card className="p-6 space-y-3">
+          <div className="text-sm text-slate-500">Exports</div>
+          <div className="text-2xl font-black tracking-tight">Exports CSV / Excel</div>
+          <div className="text-sm text-slate-600">Choisissez les filtres, puis lancez un export.</div>
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <div className="grid md:grid-cols-3 gap-3">
+            <Input label="Période (début)" type="month" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} />
+            <Input label="Période (fin)" type="month" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} />
+
+            {services?.length > 0 && (
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">Service</span>
+                <select
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  value={serviceId || ""}
+                  onChange={() => setToast("Change le service dans la topbar.")}
+                  disabled
+                >
+                  {services.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                  <option value="all">Tous les services</option>
+                </select>
+                <span className="text-xs text-slate-500">Service sélectionné dans la topbar.</span>
+              </label>
+            )}
+
+            {showOpenFilter && (
+              <label className="space-y-1.5">
+                <span className="text-sm font-medium text-slate-700">Mode</span>
+                <select
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value)}
+                >
+                  <option value="all">Tout</option>
+                  <option value="SEALED">Non entamé</option>
+                  <option value="OPENED">Entamé</option>
+                </select>
+                <span className="text-xs text-slate-500">Sélectionne entamé/non entamé si besoin.</span>
+              </label>
+            )}
+
+            <Input
+              label="Partage email (optionnel)"
+              type="email"
+              placeholder="destinataire@exemple.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              helper="Le fichier est téléchargé et envoyé par email si renseigné."
+            />
+
+            <Input
+              label="Message (optionnel)"
+              placeholder="Contexte de l’inventaire…"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-slate-700">Extras graphiques</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
-                      includeCharts ? "bg-green-500/20 text-green-200" : "bg-white/5 text-white/60"
-                    }`}
-                    onClick={() => setIncludeCharts((prev) => !prev)}
-                  >
-                    {includeCharts ? "Graphiques ON" : "Graphiques OFF"}
-                  </button>
-                  <button
-                    type="button"
-                    className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
-                      includeSummary ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-white/60"
-                    }`}
-                    onClick={() => setIncludeSummary((prev) => !prev)}
-                  >
-                    {includeSummary ? "Synthèse ON" : "Synthèse OFF"}
-                  </button>
-                </div>
+              <span className="text-sm font-medium text-slate-700">{wording.categoryLabel}</span>
+              <div className="flex flex-wrap gap-2">
+                {availableCategories.length === 0 ? (
+                  <span className="text-xs text-slate-400">Chargement des catégories…</span>
+                ) : (
+                  availableCategories.map((category) => {
+                    const value = category.name || category.title || category.slug || category.id;
+                    const label = category.name || category.title || value;
+                    return (
+                      <button
+                        type="button"
+                        key={value}
+                        onClick={() => toggleCategory(value)}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          selectedCategories.includes(value)
+                            ? "border-blue-500 bg-blue-500/20 text-blue-200"
+                            : "border-white/20 bg-white/5 text-white/80"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })
+                )}
               </div>
               <p className="text-xs text-slate-500">
-                Les graphiques & la synthèse sont inclus dans un onglet Excel dédié (non disponibles en CSV).
+                Sélectionne les {categoryLabelLower} à intégrer. Sans sélection, l’export prend tout.
               </p>
+              {selectedCategories.length > 0 && (
+                <p className="text-xs text-emerald-300">Catégories choisies : {selectedCategories.join(", ")}</p>
+              )}
             </div>
+          </div>
 
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={() => doExport("xlsx")} loading={loading}>Export Excel</Button>
-              <Button variant="secondary" onClick={() => doExport("csv")} loading={loading}>Export CSV</Button>
-            </div>
-
-            {toast && (
-              <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2">
-                {toast}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="text-sm font-medium text-slate-700">Champs exportés</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
+                  onClick={() => setSelectedFields(essentialFields)}
+                >
+                  Base
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
+                  onClick={() => setSelectedFields(allFieldKeys)}
+                >
+                  Complet
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
+                  onClick={() => setSelectedFields(defaultFields)}
+                >
+                  Réinitialiser
+                </button>
               </div>
-            )}
-          </Card>
-        </div>
-      </PageTransition>
-    );
-  }
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {fieldOptions.map((field) => {
+                const active = selectedFields.includes(field.key);
+                return (
+                  <button
+                    key={field.key}
+                    type="button"
+                    onClick={() => toggleField(field.key)}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      active ? "border-blue-500 bg-blue-500/20 text-blue-100" : "border-white/10 bg-white/5 text-white/70"
+                    }`}
+                  >
+                    {field.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-xs text-slate-500">Sélectionne exactement ce que tu veux récupérer dans le fichier.</p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Extras graphiques</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
+                    includeCharts ? "bg-green-500/20 text-green-200" : "bg-white/5 text-white/60"
+                  }`}
+                  onClick={() => setIncludeCharts((prev) => !prev)}
+                >
+                  {includeCharts ? "Graphiques ON" : "Graphiques OFF"}
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
+                    includeSummary ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-white/60"
+                  }`}
+                  onClick={() => setIncludeSummary((prev) => !prev)}
+                >
+                  {includeSummary ? "Synthèse ON" : "Synthèse OFF"}
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              Les graphiques & la synthèse sont inclus dans un onglet Excel dédié (non disponibles en CSV).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={() => doExport("xlsx")} loading={loading}>Export Excel</Button>
+            <Button variant="secondary" onClick={() => doExport("csv")} loading={loading}>Export CSV</Button>
+          </div>
+
+          {toast && (
+            <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2">
+              {toast}
+            </div>
+          )}
+        </Card>
+      </div>
+    </PageTransition>
+  );
+}

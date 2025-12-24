@@ -1,3 +1,4 @@
+# backend/accounts/views_invitations.py
 from datetime import timedelta
 import secrets
 
@@ -44,6 +45,11 @@ class InvitationCreateView(APIView):
     ✅ Anti-réinvitation:
       - si une invitation active existe déjà (SENT/PENDING non expirée) => 409 (on ne recrée pas)
       - si membership existe déjà (INVITED ou ACTIVE) => 409
+
+    ✅ Robustesse email:
+      - respecte settings.INVITATIONS_SEND_EMAILS
+      - renvoie email_sent: true/false
+      - si email pas envoyé => on renvoie quand même invite_link (utile pour fallback)
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -92,6 +98,7 @@ class InvitationCreateView(APIView):
                     "email": email,
                     "expires_at": existing_active_inv.expires_at.isoformat(),
                     "invite_link": _invite_link(existing_active_inv.token),
+                    "email_sent": True,  # supposé déjà envoyé au moment de la création initiale
                 },
                 status=409,
             )
@@ -132,9 +139,9 @@ class InvitationCreateView(APIView):
             created_by=request.user,
         )
 
-        # ✅ Si user existe, on matérialise le membership INVITED (statut côté membership)
+        # ✅ Si user existe, on matérialise le membership INVITED
         if existing_user:
-            mem, created = Membership.objects.update_or_create(
+            Membership.objects.update_or_create(
                 user=existing_user,
                 tenant=tenant,
                 defaults={
@@ -156,8 +163,9 @@ class InvitationCreateView(APIView):
             meta={"email": email, "role": inv_role},
         )
 
-        # Email
         link = _invite_link(token)
+
+        # Email
         subject = f"Invitation StockScan — {tenant.name}"
         text_body = (
             f"Vous avez été invité à rejoindre {tenant.name} sur StockScan.\n\n"
@@ -165,23 +173,43 @@ class InvitationCreateView(APIView):
             f"Ce lien expire le {expires_at.strftime('%d/%m/%Y %H:%M')}."
         )
 
-        from utils.sendgrid_email import send_email_with_sendgrid
+        email_sent = False
+        email_error = None
 
-        send_email_with_sendgrid(
-            to_email=email,
-            subject=subject,
-            text_body=text_body,
-            html_body=None,
-            filename="",
-            file_bytes=None,
-            mimetype="text/plain",
-            fallback_to_django=True,
-        )
+        send_emails = getattr(settings, "INVITATIONS_SEND_EMAILS", True)
+        if send_emails:
+            try:
+                from utils.sendgrid_email import send_email_with_sendgrid
+                email_sent = bool(
+                    send_email_with_sendgrid(
+                        to_email=email,
+                        subject=subject,
+                        text_body=text_body,
+                        html_body=None,
+                        filename="",
+                        file_bytes=None,
+                        mimetype="text/plain",
+                        fallback_to_django=True,
+                    )
+                )
+            except Exception as exc:
+                email_sent = False
+                email_error = str(exc)
+        else:
+            email_sent = False
 
-        return Response(
-            {"ok": True, "email": email, "expires_at": expires_at.isoformat(), "invite_link": link},
-            status=201,
-        )
+        payload = {
+            "ok": True,
+            "email": email,
+            "expires_at": expires_at.isoformat(),
+            "invite_link": link,
+            "email_sent": email_sent,
+        }
+        # on ne leak pas l'erreur en prod, mais utile en debug
+        if settings.DEBUG and email_error:
+            payload["email_error"] = email_error
+
+        return Response(payload, status=201)
 
 
 class InvitationAcceptView(APIView):
@@ -272,16 +300,13 @@ class InvitationAcceptView(APIView):
             user = User.objects.create_user(username=final, email=email, password=password)
             created = True
         else:
-            # Comportement voulu: l’invité définit/écrase son mot de passe
             user.set_password(password)
             user.save(update_fields=["password"])
 
-        # Login bloque si is_active=False => on active
         if not user.is_active:
             user.is_active = True
             user.save(update_fields=["is_active"])
 
-        # ✅ Membership: INVITED -> ACTIVE (ou création directe ACTIVE)
         existing_mem = Membership.objects.filter(user=user, tenant=tenant).first()
         if existing_mem and existing_mem.status == "ACTIVE":
             return Response({"detail": "Vous êtes déjà membre de ce commerce."}, status=409)
@@ -294,7 +319,6 @@ class InvitationAcceptView(APIView):
                 "service": service_obj,
                 "status": "ACTIVE",
                 "activated_at": now,
-                # si le membership existait déjà en INVITED, on conserve invited_at
                 "invited_at": existing_mem.invited_at if existing_mem else now,
             },
         )
@@ -317,7 +341,6 @@ class InvitationAcceptView(APIView):
         inv.accepted_at = now
         inv.save(update_fields=["status", "accepted_at"])
 
-        # ✅ optionnel mais propre: annule toute autre invitation active pour le même email/tenant
         Invitation.objects.filter(
             tenant=tenant,
             email=email,

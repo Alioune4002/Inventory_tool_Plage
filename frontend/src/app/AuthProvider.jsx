@@ -1,4 +1,4 @@
-// src/app/AuthProvider.jsx
+// frontend/src/app/AuthProvider.jsx
 import React, {
   createContext,
   useContext,
@@ -37,28 +37,87 @@ function pickInitialServiceId(services, stored) {
 
   if (!list.length) return "";
 
-  // Autoriser "all" uniquement s'il y a plusieurs services
   if (storedId === "all") {
     return canUseAll(list) ? "all" : normalizeId(list[0].id);
   }
 
-  // Si stored valide, on le garde
   const isValid = storedId && list.some((s) => normalizeId(s.id) === storedId);
   if (isValid) return storedId;
 
-  // Sinon on prend le premier
   return normalizeId(list[0].id);
+}
+
+function looksLikeHtml(value) {
+  return typeof value === "string" && /<\s*(!doctype|html|head|body)\b/i.test(value);
+}
+
+function isNetworkError(err) {
+  return Boolean(err) && !err.response;
+}
+
+function friendlyAuthError(err, fallback) {
+  if (err?.friendlyMessage) return String(err.friendlyMessage);
+
+  if (isNetworkError(err)) {
+    return "Impossible de joindre le serveur. Vérifie ta connexion internet et réessaie.";
+  }
+
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+
+  if (looksLikeHtml(data)) {
+    return "Service indisponible pour le moment. Réessaie dans quelques instants.";
+  }
+
+  const code = data?.code;
+  if (code === "email_not_verified") {
+    return "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.";
+  }
+
+  if (typeof data?.detail === "string" && data.detail.trim()) return data.detail;
+
+  if (Array.isArray(data?.non_field_errors) && data.non_field_errors.length) {
+    return String(data.non_field_errors[0]);
+  }
+
+  if (data && typeof data === "object") {
+    const parts = [];
+    Object.keys(data).forEach((k) => {
+      if (k === "detail" || k === "code" || k === "non_field_errors") return;
+      const v = data[k];
+      if (Array.isArray(v) && v.length) parts.push(v.join(" · "));
+      else if (typeof v === "string" && v) parts.push(v);
+    });
+    if (parts.length) return parts.join(" · ");
+  }
+
+  if (status === 401) return "Identifiants incorrects.";
+  if (status === 403) return "Accès refusé.";
+  if (status >= 500) return "Service indisponible pour le moment. Réessaie dans quelques instants.";
+
+  return fallback || "Une erreur est survenue. Réessaie.";
 }
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(getStoredToken());
-  const [me, setMe] = useState(null); // user + tenant
+  const [me, setMe] = useState(null);
   const [services, setServices] = useState([]);
   const [serviceId, setServiceId] = useState(getStoredServiceId());
   const [serviceProfile, setServiceProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // bootstrap token in axios
+  // ✅ Theme bootstrap (important sur mobile + refresh)
+  useEffect(() => {
+    try {
+      const storedTheme = localStorage.getItem("theme");
+      if (storedTheme === "light" || storedTheme === "dark") {
+        document.documentElement.setAttribute("data-theme", storedTheme);
+      }
+    } catch {
+      // noop
+    }
+  }, []);
+
   useEffect(() => {
     setAuthToken(token);
   }, [token]);
@@ -90,7 +149,6 @@ export function AuthProvider({ children }) {
       const found = list.find((s) => normalizeId(s.id) === normalizeId(chosen)) || null;
       setServiceProfile(found);
     } else {
-      // "all" => pas de serviceProfile unique
       setServiceProfile(null);
     }
 
@@ -118,7 +176,6 @@ export function AuthProvider({ children }) {
 
       await fetchServices();
     } catch (e) {
-      // token invalide
       clearToken();
       setToken("");
       setMe(null);
@@ -139,7 +196,7 @@ export function AuthProvider({ children }) {
     async ({ username, password }) => {
       try {
         const data = await apiLogin({ username, password });
-        if (!data?.access) throw new Error("Token manquant dans la réponse login");
+        if (!data?.access) throw new Error("Réponse serveur invalide.");
 
         storeToken(data.access);
         setToken(data.access);
@@ -157,20 +214,10 @@ export function AuthProvider({ children }) {
 
         return data;
       } catch (e) {
-        if (!e?.response) {
-          throw new Error(
-            "API inaccessible (vérifie que le backend tourne et que l’URL API est correcte)."
-          );
-        }
-        const detail =
-          e.response?.data?.detail ||
-          (e.response?.data?.code === "email_not_verified"
-            ? "Email non vérifié. Vérifie ton email pour activer ton compte."
-            : null) ||
-          e.response?.data?.non_field_errors?.[0] ||
-          "Connexion impossible. Vérifiez vos identifiants.";
-        const err = new Error(detail);
-        err.code = e.response?.data?.code;
+        const err = new Error(
+          friendlyAuthError(e, "Connexion impossible. Vérifie tes identifiants et réessaie.")
+        );
+        err.code = e?.response?.data?.code;
         throw err;
       }
     },
@@ -214,7 +261,7 @@ export function AuthProvider({ children }) {
           return data;
         }
 
-        if (!data?.access) throw new Error("Token manquant dans la réponse register");
+        if (!data?.access) throw new Error("Réponse serveur invalide.");
 
         storeToken(data.access);
         setToken(data.access);
@@ -232,45 +279,14 @@ export function AuthProvider({ children }) {
 
         return data;
       } catch (e) {
-        if (!e?.response) {
-          throw new Error(
-            "API inaccessible (vérifie que le backend tourne et que l’URL API est correcte)."
-          );
-        }
-      const data = e.response?.data;
-      const looksLikeHtml = (value) =>
-        typeof value === "string" && /<\s*(!doctype|html|head|body)\b/i.test(value);
-      const flattenErrors = (payload) => {
-        if (!payload) return [];
-        if (typeof payload === "string") {
-          if (looksLikeHtml(payload)) {
-            return ["Erreur serveur (API). Réessaie dans quelques instants."];
-          }
-          return [payload];
-        }
-        const parts = [];
-        const addEntry = (key, value) => {
-          if (Array.isArray(value)) {
-            parts.push(`${key}: ${value.join(" · ")}`);
-          } else if (typeof value === "object") {
-            parts.push(`${key}: ${JSON.stringify(value)}`);
-          } else if (value) {
-            parts.push(`${key}: ${value}`);
-          }
-        };
-        if (payload.detail) addEntry("detail", payload.detail);
-        if (payload.non_field_errors) addEntry("erreur", payload.non_field_errors.join(" · "));
-        Object.keys(payload).forEach((key) => {
-          if (key === "detail" || key === "non_field_errors") return;
-          addEntry(key, payload[key]);
-        });
-        return parts;
-      };
-      const messages = flattenErrors(data);
-      const apiMsg = messages.length
-        ? messages.join(" · ")
-        : "Création impossible. Vérifiez email, mot de passe et nom du commerce.";
-      throw new Error(apiMsg);
+        const err = new Error(
+          friendlyAuthError(
+            e,
+            "Création impossible. Vérifie l’email, le mot de passe et le nom du commerce."
+          )
+        );
+        err.code = e?.response?.data?.code;
+        throw err;
       }
     },
     [fetchServices, refreshMe]
@@ -280,14 +296,11 @@ export function AuthProvider({ children }) {
     (id) => {
       const next = normalizeId(id);
 
-      // sécurise "all"
       if (next === "all" && !canUseAll(services)) {
         const fallback = services?.[0] ? normalizeId(services[0].id) : "";
         setServiceId(fallback);
         storeServiceId(fallback);
-        setServiceProfile(
-          services.find((s) => normalizeId(s.id) === fallback) || null
-        );
+        setServiceProfile(services.find((s) => normalizeId(s.id) === fallback) || null);
         return;
       }
 
@@ -305,7 +318,6 @@ export function AuthProvider({ children }) {
     [services]
   );
 
-  // keep serviceProfile in sync when services list or serviceId change
   useEffect(() => {
     if (!services?.length) return;
 
@@ -331,8 +343,6 @@ export function AuthProvider({ children }) {
   }, [services, serviceId]);
 
   const tenant = me?.tenant || null;
-
-  // exposer un profil "actif" utile côté UI (si pas de serviceProfile, fallback currentService)
   const activeServiceProfile = serviceProfile || currentService || null;
 
   const serviceFeatures = activeServiceProfile?.features || {};
@@ -359,13 +369,13 @@ export function AuthProvider({ children }) {
       selectService,
       refreshServices: fetchServices,
       refreshMe,
-      bootstrap, // utile si tu veux forcer un re-bootstrap après une action critique
+      bootstrap,
 
       login,
       register,
       logout,
 
-      setMe, // utile si tu updates profile plus tard
+      setMe,
     }),
     [
       token,

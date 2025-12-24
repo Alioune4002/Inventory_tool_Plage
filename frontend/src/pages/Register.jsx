@@ -1,3 +1,4 @@
+// frontend/src/pages/Register.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -7,6 +8,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
 import { api } from "../lib/api";
+import { formatApiError } from "../lib/errorUtils";
 
 const servicePresets = (family, isMulti, linkedMode = "separate") => {
   const primary =
@@ -57,9 +59,7 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
   <div className="border border-slate-800 rounded-2xl p-3 flex items-start gap-3 bg-slate-900">
     <button
       type="button"
-      className={`w-10 h-10 rounded-full border ${
-        active ? "bg-blue-500 border-blue-400" : "border-white/20"
-      } flex items-center justify-center text-white`}
+      className={`w-10 h-10 rounded-full border ${active ? "bg-blue-500 border-blue-400" : "border-white/20"} flex items-center justify-center text-white`}
       onClick={() => onToggle(moduleId)}
       aria-pressed={active}
     >
@@ -140,11 +140,11 @@ export default function Register() {
   };
 
   const canGoNext =
-    (currentStep === "mode") ||
-    (currentStep === "family") ||
-    (currentStep === "combo") ||
-    (currentStep === "services") ||
-    (currentStep === "account");
+    currentStep === "mode" ||
+    currentStep === "family" ||
+    currentStep === "combo" ||
+    currentStep === "services" ||
+    currentStep === "account";
 
   const applyModuleDefaults = async () => {
     if (!modules?.length) return;
@@ -165,15 +165,28 @@ export default function Register() {
           services.map(async (svc) => {
             const nextFeatures = { ...(svc.features || {}) };
 
-            nextFeatures.barcode = { ...(nextFeatures.barcode || {}), enabled: identifierEnabled ? Boolean(identifiers.barcode) : false };
-            nextFeatures.sku = { ...(nextFeatures.sku || {}), enabled: identifierEnabled ? Boolean(identifiers.sku) : false };
+            nextFeatures.barcode = {
+              ...(nextFeatures.barcode || {}),
+              enabled: identifierEnabled ? Boolean(identifiers.barcode) : false,
+            };
+            nextFeatures.sku = {
+              ...(nextFeatures.sku || {}),
+              enabled: identifierEnabled ? Boolean(identifiers.sku) : false,
+            };
             nextFeatures.dlc = { ...(nextFeatures.dlc || {}), enabled: moduleSet.has("expiry") };
             nextFeatures.lot = { ...(nextFeatures.lot || {}), enabled: moduleSet.has("lot") };
             nextFeatures.variants = { ...(nextFeatures.variants || {}), enabled: moduleSet.has("variants") };
             nextFeatures.multi_unit = { ...(nextFeatures.multi_unit || {}), enabled: moduleSet.has("multiUnit") };
-            nextFeatures.open_container_tracking = { ...(nextFeatures.open_container_tracking || {}), enabled: moduleSet.has("opened") };
+            nextFeatures.open_container_tracking = {
+              ...(nextFeatures.open_container_tracking || {}),
+              enabled: moduleSet.has("opened"),
+            };
             nextFeatures.item_type = { ...(nextFeatures.item_type || {}), enabled: moduleSet.has("itemType") };
-            nextFeatures.prices = { ...(nextFeatures.prices || {}), purchase_enabled: pricingEnabled, selling_enabled: pricingEnabled };
+            nextFeatures.prices = {
+              ...(nextFeatures.prices || {}),
+              purchase_enabled: pricingEnabled,
+              selling_enabled: pricingEnabled,
+            };
             nextFeatures.tva = { ...(nextFeatures.tva || {}), enabled: pricingEnabled };
 
             await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
@@ -240,7 +253,7 @@ export default function Register() {
       await applyModuleDefaults();
       nav("/app/dashboard");
     } catch (err) {
-      setError(err?.message || "Impossible de créer le compte pour le moment.");
+      setError(formatApiError(err, { context: "register" }));
     } finally {
       setLoading(false);
     }
@@ -361,9 +374,7 @@ export default function Register() {
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <div className="text-sm text-slate-400">Combo conseillé</div>
                 <div className="text-lg font-semibold text-white">{comboSummary}</div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Tu pourras choisir regrouper ou séparer à l’étape suivante.
-                </div>
+                <div className="text-xs text-slate-500 mt-1">Tu pourras choisir regrouper ou séparer à l’étape suivante.</div>
               </div>
             </section>
           )}
@@ -455,7 +466,10 @@ export default function Register() {
                 />
 
                 {error && (
-                  <div className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100" role="alert">
+                  <div
+                    className="rounded-2xl bg-red-500/10 border border-red-500/40 px-4 py-3 text-sm text-red-100"
+                    role="alert"
+                  >
                     {error}
                   </div>
                 )}

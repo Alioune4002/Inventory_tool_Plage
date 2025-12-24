@@ -1,3 +1,4 @@
+// frontend/src/pages/Login.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -5,6 +6,7 @@ import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import { formatApiError } from "../lib/errorUtils";
 
 function safeFromLocation(locState) {
   const raw = locState?.from;
@@ -41,7 +43,7 @@ export default function Login() {
       await login(form);
       nav(from, { replace: true });
     } catch (e2) {
-      setErr(e2?.message || "Connexion impossible. Vérifie tes identifiants.");
+      setErr(formatApiError(e2, { context: "login" }));
     } finally {
       setLoading(false);
     }

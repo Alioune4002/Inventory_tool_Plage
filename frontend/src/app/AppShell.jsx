@@ -1,3 +1,4 @@
+// frontend/src/app/AppShell.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
@@ -10,10 +11,12 @@ import BillingBanners from "../components/BillingBanners";
 import useEntitlements from "./useEntitlements";
 import MobileNav from "../components/MobileNav";
 import GuidedTour from "../components/GuidedTour";
+import ErrorBoundary from "./ErrorBoundary";
+import { formatApiError } from "../lib/errorUtils";
 
 export default function AppShell() {
   const location = useLocation();
-  const { isAuthed, loading, tenant, me, logout } = useAuth();
+  const { isAuthed, tenant, me, logout } = useAuth();
   const { data: entitlements } = useEntitlements();
   const [toast, setToast] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
@@ -45,6 +48,20 @@ export default function AppShell() {
     localStorage.setItem("theme", theme);
   }, [theme]);
 
+  // ✅ Evite le "silence" en cas de promesse rejetée non catchée
+  useEffect(() => {
+    const onUnhandled = (event) => {
+      try {
+        const msg = formatApiError(event?.reason, { context: "generic" });
+        setToast({ message: msg, type: "error" });
+      } catch {
+        setToast({ message: "Une erreur est survenue. Réessaie.", type: "error" });
+      }
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, []);
+
   return (
     <ToastProvider pushToast={setToast}>
       <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
@@ -62,7 +79,11 @@ export default function AppShell() {
           <div className="flex-1 min-w-0">
             <main className="mx-auto max-w-6xl px-4 py-6">
               {isAppSection && isAuthed && <BillingBanners entitlements={entitlements} />}
-              <AppRoutes setToast={setToast} />
+
+              {/* ✅ Empêche l’app de “disparaître” en cas d’erreur React */}
+              <ErrorBoundary>
+                <AppRoutes setToast={setToast} />
+              </ErrorBoundary>
             </main>
           </div>
         </div>

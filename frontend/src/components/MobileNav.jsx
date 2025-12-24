@@ -1,9 +1,19 @@
-import React from "react";
+// frontend/src/components/MobileNav.jsx
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
+import { Moon, Sun } from "lucide-react";
 import Button from "../ui/Button";
 
-export default function MobileNav({ open, onClose, items }) {
+function isLightTheme() {
+  const t = document?.documentElement?.getAttribute("data-theme");
+  return t === "light";
+}
+
+export default function MobileNav({ open, onClose, items, onToggleTheme }) {
+  const light = useMemo(() => isLightTheme(), [document?.documentElement?.getAttribute?.("data-theme")]);
+
   if (!open) return null;
+
   return (
     <div className="fixed inset-0 z-40 flex items-stretch">
       <div className="absolute inset-0 bg-black/60 backdrop-blur" onClick={onClose} />
@@ -17,6 +27,21 @@ export default function MobileNav({ open, onClose, items }) {
             Fermer
           </Button>
         </div>
+
+        {onToggleTheme ? (
+          <div className="mb-3">
+            <Button
+              variant="secondary"
+              className="w-full justify-center"
+              onClick={onToggleTheme}
+              title={light ? "Passer en sombre" : "Passer en clair"}
+            >
+              {light ? <Moon size={16} /> : <Sun size={16} />}
+              <span className="ml-2">{light ? "Sombre" : "Clair"}</span>
+            </Button>
+          </div>
+        ) : null}
+
         <nav className="flex flex-1 flex-col gap-2 overflow-y-auto">
           {items.map((item) => (
             <Link
@@ -30,6 +55,7 @@ export default function MobileNav({ open, onClose, items }) {
             </Link>
           ))}
         </nav>
+
         <div className="mt-4">
           <Button className="w-full" onClick={() => onClose()}>
             Retour au dashboard

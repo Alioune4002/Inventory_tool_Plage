@@ -116,47 +116,61 @@ export default function Settings() {
 
   useEffect(() => {
     loadMembers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
-  // ✅ Invite: guest creates password
-  const inviteMember = async () => {
-    if (!inviteForm.email.trim()) {
-      pushToast?.({ message: "Email requis.", type: "error" });
-      return;
+  
+const inviteMember = async () => {
+  if (!inviteForm.email.trim()) {
+    pushToast?.({ message: "Email requis.", type: "error" });
+    return;
+  }
+  setMembersLoading(true);
+  setLastInviteLink("");
+  try {
+    const payload = {
+      email: inviteForm.email.trim(),
+      role: inviteForm.role,
+      service_id: inviteForm.service_id ? Number(inviteForm.service_id) : null,
+    };
+
+    const res = await api.post("/api/auth/invitations/", payload);
+
+    const link = res?.data?.invite_link || "";
+    const emailSent = res?.data?.email_sent === true;
+
+    setInviteForm({ email: "", role: "operator", service_id: "" });
+
+    // Fallback: si email non envoyé, on conserve le lien pour partage manuel
+    if (link && (!emailSent || import.meta.env.DEV)) {
+      setLastInviteLink(link);
     }
-    setMembersLoading(true);
-    setLastInviteLink("");
-    try {
-      const payload = {
-        email: inviteForm.email.trim(),
-        role: inviteForm.role,
-        service_id: inviteForm.service_id ? Number(inviteForm.service_id) : null,
-      };
 
-      const res = await api.post("/api/auth/invitations/", payload);
-      const link = res?.data?.invite_link || "";
-
-      setInviteForm({ email: "", role: "operator", service_id: "" });
-      if (link) setLastInviteLink(link);
-
+    if (emailSent) {
       pushToast?.({
-        message: "Invitation envoyée. L’invité va créer son mot de passe via le lien.",
+        message: "Invitation envoyée par email. L’invité va créer son mot de passe via le lien.",
         type: "success",
       });
-
-      await loadMembers();
-      refetchEntitlements?.();
-    } catch (e) {
-      const msg =
-        e?.response?.data?.detail ||
-        e?.response?.data?.email ||
-        "Impossible d’envoyer l’invitation.";
-      pushToast?.({ message: typeof msg === "string" ? msg : "Invitation impossible.", type: "error" });
-    } finally {
-      setMembersLoading(false);
+    } else {
+      pushToast?.({
+        message:
+          "Invitation créée, mais l’email n’a pas pu être envoyé. Copie le lien d’invitation et partage-le manuellement.",
+        type: "warn",
+      });
     }
-  };
+
+    await loadMembers();
+    refetchEntitlements?.();
+  } catch (e) {
+    const msg =
+      e?.response?.data?.detail ||
+      e?.response?.data?.email ||
+      "Impossible d’envoyer l’invitation.";
+    pushToast?.({ message: typeof msg === "string" ? msg : "Invitation impossible.", type: "error" });
+  } finally {
+    setMembersLoading(false);
+  }
+};
 
   const updateMember = async (membershipId, patch) => {
     setMembersLoading(true);
@@ -369,11 +383,12 @@ export default function Settings() {
               </Button>
             </div>
 
-            {lastInviteLink ? (
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
-                <div className="font-semibold">Lien d’invitation (debug)</div>
-                <div className="break-all opacity-90">{lastInviteLink}</div>
-                <div className="mt-2 flex gap-2 flex-wrap">
+                  {lastInviteLink ? (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                        <div className="font-semibold">Lien d’invitation</div>
+                        <div className="text-xs opacity-80">
+                          (à utiliser si l’email n’a pas été reçu)
+                        </div>
                   <Button
                     size="sm"
                     variant="secondary"

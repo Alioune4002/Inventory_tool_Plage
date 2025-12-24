@@ -16,11 +16,39 @@ export const setAuthToken = (token) => {
   }
 };
 
-// Bootstrap token (utile si l’app charge avant AuthProvider)
 const bootToken = getStoredToken?.() || "";
 if (bootToken) setAuthToken(bootToken);
 
-// Déconnexion silencieuse en cas de 401
+function buildFriendlyMessage(error) {
+  const status = error?.response?.status;
+  const data = error?.response?.data;
+  const code = data?.code;
+
+  // Pas de réponse => réseau/CORS/back down
+  if (!error?.response) {
+    return "Impossible de joindre le service. Vérifie ta connexion internet, puis réessaie.";
+  }
+
+  if (status === 503 || code === "db_unavailable") {
+    return "Le service est temporairement indisponible. Réessaie dans quelques instants.";
+  }
+
+  if (status === 401) {
+    // Laisse Login/Register gérer précisément si besoin
+    return "Connexion requise. Merci de te reconnecter.";
+  }
+
+  if (status >= 500) {
+    return "Une erreur est survenue côté serveur. Réessaie dans quelques instants.";
+  }
+
+  // DRF: detail
+  if (data?.detail && typeof data.detail === "string") return data.detail;
+
+  return null;
+}
+
+// Déconnexion silencieuse en cas de 401 (mais avec message propre)
 api.interceptors.response.use(
   (res) => res,
   (error) => {
@@ -33,17 +61,23 @@ api.interceptors.response.use(
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";
         error.friendlyMessage = detail;
       } else if (code === "FEATURE_NOT_INCLUDED") {
-        const detail =
-          error.response?.data?.detail ||
-          "Cette fonctionnalité nécessite un plan supérieur.";
+        const detail = error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
         error.friendlyMessage = detail;
       }
+    }
+
+    // Friendly global
+    if (!error.friendlyMessage) {
+      const msg = buildFriendlyMessage(error);
+      if (msg) error.friendlyMessage = msg;
     }
 
     // Auth expirée
     if (error?.response?.status === 401) {
       clearToken();
-      if (!window.location.pathname.startsWith("/login")) {
+      const path = window.location.pathname || "";
+      const isAuthPage = path.startsWith("/login") || path.startsWith("/register");
+      if (!isAuthPage) {
         window.location.href = "/login";
       }
     }
@@ -55,7 +89,6 @@ api.interceptors.response.use(
 // -----------------------------
 // Billing helpers (Stripe)
 // -----------------------------
-
 function requireAuthOrRedirect(nextUrl) {
   const token = getStoredToken?.();
   if (!token) {
