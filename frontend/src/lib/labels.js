@@ -1,6 +1,3 @@
-// frontend/src/lib/labels.js
-// Centralise le wording + les textes UX + les placeholders selon famille metier.
-// Objectif : experience ultra personnalisee par metier, coherente et maintenable.
 
 import { FAMILLES, resolveFamilyId } from "./famillesConfig";
 

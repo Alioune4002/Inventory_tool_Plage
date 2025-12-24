@@ -225,7 +225,7 @@ def get_user_role(request):
     """
     ✅ Règle: le compte principal est piloté par UserProfile.
     - Si profile existe sur le tenant, on renvoie owner/manager si dispo,
-      sinon fallback owner (ça corrige les factories qui mettent operator).
+      sinon fallback owner.
     - Sinon on se base sur Membership (ACTIVE si champ status existe).
     """
     user = getattr(request, "user", None)
@@ -239,7 +239,6 @@ def get_user_role(request):
         role = (profile.role or "").strip().lower()
         if role in ("owner", "manager"):
             return role
-        # ✅ fallback safe: profile sur le tenant = compte principal => owner
         return "owner"
 
     m = _get_membership_for_tenant(user, tenant)
@@ -249,12 +248,31 @@ def get_user_role(request):
     return "operator"
 
 
+def _extract_service_id_from_headers(request):
+    """
+    Front envoie X-Service-Id pour fixer le contexte service.
+    Supporte aussi X-Service (fallback).
+    """
+    raw = (
+        request.headers.get("X-Service-Id")
+        or request.headers.get("X-Service")
+        or request.META.get("HTTP_X_SERVICE_ID")
+        or request.META.get("HTTP_X_SERVICE")
+    )
+    if raw is None:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    return raw
+
+
 def get_service_from_request(request):
     """
     ✅ IMPORTANT (scope service):
-    - owner => libre via ?service=
+    - owner => libre via ?service= / body / header X-Service-Id
     - non-owner + membership ACTIVE + membership.service défini => service forcé
-    - sinon => ?service= ou Principal
+    - sinon => ?service= / body / header, ou Principal
     """
     tenant = get_tenant_for_request(request)
     user = getattr(request, "user", None)
@@ -262,23 +280,30 @@ def get_service_from_request(request):
     role = get_user_role(request)
     membership = _get_membership_for_tenant(user, tenant)
 
-    if role != "owner" and membership and membership.service_id:
-        forced = membership.service
-        requested_service_id = request.query_params.get("service") or (
-            request.data.get("service") if hasattr(request, "data") else None
-        )
-        if requested_service_id and str(requested_service_id) != str(forced.id):
-            raise exceptions.PermissionDenied("Accès limité : vous n'avez pas accès à ce service.")
-        return forced
-
+    # 1) service demandé (query/body/header)
     service_id = request.query_params.get("service") or (
         request.data.get("service") if hasattr(request, "data") else None
     )
+    if not service_id:
+        service_id = _extract_service_id_from_headers(request)
 
+    # Si "all" (mode lecture), on ne peut pas sélectionner un service concret => fallback
+    if service_id and str(service_id).lower() == "all":
+        service_id = None
+
+    # 2) membership scope forcé
+    if role != "owner" and membership and membership.service_id:
+        forced = membership.service
+        if service_id and str(service_id) != str(forced.id):
+            raise exceptions.PermissionDenied("Accès limité : vous n'avez pas accès à ce service.")
+        return forced
+
+    # 3) owner / manager: utiliser service demandé si présent
     if service_id:
         try:
             return Service.objects.get(id=service_id, tenant=tenant)
         except (Service.DoesNotExist, ValueError, TypeError):
             pass
 
+    # 4) fallback
     return get_default_service(tenant)

@@ -213,7 +213,7 @@ class LossEventSerializer(serializers.ModelSerializer):
 
         product = attrs.get("product")
         if product and (product.tenant_id != tenant.id or product.service_id != service.id):
-            raise serializers.ValidationError({"product": "Produit hors du service/tenant courant."})
+            raise serializers.ValidationError({"product": "Ce produit appartient à un autre service. Sélectionnez le bon service puis réessayez."})
 
         occurred_at = attrs.get("occurred_at") or timezone.now()
         attrs["inventory_month"] = occurred_at.strftime("%Y-%m")

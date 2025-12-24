@@ -15,7 +15,11 @@ try:
 except Exception:  # pragma: no cover
     OpenAI = None
 
-from products.models import Product, LossEvent
+try:
+    from products.models import Product, LossEvent
+except ImportError:  # pragma: no cover
+    Product = None
+    LossEvent = None
 
 LOGGER = logging.getLogger(__name__)
 

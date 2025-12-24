@@ -1,4 +1,4 @@
-// frontend/src/lib/api.js
+
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
@@ -19,12 +19,69 @@ export const setAuthToken = (token) => {
 const bootToken = getStoredToken?.() || "";
 if (bootToken) setAuthToken(bootToken);
 
+// -----------------------------
+// Service context (multi-service)
+// -----------------------------
+const SERVICE_KEY = "serviceId";
+const LAST_SERVICE_KEY = "lastConcreteServiceId";
+
+function getStoredServiceIdSafe() {
+  try {
+    return localStorage.getItem(SERVICE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function getLastConcreteServiceId() {
+  try {
+    return localStorage.getItem(LAST_SERVICE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function setLastConcreteServiceId(id) {
+  try {
+    if (!id) return;
+    localStorage.setItem(LAST_SERVICE_KEY, String(id));
+  } catch {
+    // noop
+  }
+}
+
+function resolveServiceHeaderValue() {
+  const current = String(getStoredServiceIdSafe() || "").trim();
+  if (!current) return "";
+  if (current === "all") {
+    // En mode "Tous les services" (lecture), les endpoints write doivent
+    // quand même avoir un contexte => on fallback sur le dernier service concret.
+    return String(getLastConcreteServiceId() || "").trim();
+  }
+  return current;
+}
+
+// Inject header for every request
+api.interceptors.request.use((config) => {
+  const svc = resolveServiceHeaderValue();
+  if (svc) {
+    config.headers = config.headers || {};
+    config.headers["X-Service-Id"] = svc;
+    // Optionnel: utile pour debug / analytics
+    config.headers["X-Service-Mode"] = String(getStoredServiceIdSafe() || "");
+    setLastConcreteServiceId(svc);
+  }
+  return config;
+});
+
+// -----------------------------
+// Friendly errors
+// -----------------------------
 function buildFriendlyMessage(error) {
   const status = error?.response?.status;
   const data = error?.response?.data;
   const code = data?.code;
 
-  // Pas de réponse => réseau/CORS/back down
   if (!error?.response) {
     return "Impossible de joindre le service. Vérifie ta connexion internet, puis réessaie.";
   }
@@ -34,16 +91,19 @@ function buildFriendlyMessage(error) {
   }
 
   if (status === 401) {
-    // Laisse Login/Register gérer précisément si besoin
     return "Connexion requise. Merci de te reconnecter.";
+  }
+
+  if (status === 406) {
+    return "Export indisponible pour le moment. Réessaie, ou contacte le support si ça persiste.";
   }
 
   if (status >= 500) {
     return "Une erreur est survenue côté serveur. Réessaie dans quelques instants.";
   }
 
-  // DRF: detail
   if (data?.detail && typeof data.detail === "string") return data.detail;
+  if (data?.error && typeof data.error === "string") return data.error;
 
   return null;
 }
@@ -61,12 +121,12 @@ api.interceptors.response.use(
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";
         error.friendlyMessage = detail;
       } else if (code === "FEATURE_NOT_INCLUDED") {
-        const detail = error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
+        const detail =
+          error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
         error.friendlyMessage = detail;
       }
     }
 
-    // Friendly global
     if (!error.friendlyMessage) {
       const msg = buildFriendlyMessage(error);
       if (msg) error.friendlyMessage = msg;
@@ -120,4 +180,20 @@ export async function openBillingPortal() {
   const url = res?.data?.url;
   if (!url) throw new Error("URL portail Stripe manquante.");
   return url;
+}
+
+// -----------------------------
+// Export helpers (avoid 406)
+// -----------------------------
+export async function downloadInventoryExcel({ month }) {
+  if (!month) throw new Error("Mois requis.");
+
+  const res = await api.get(`/api/export-excel/?month=${encodeURIComponent(month)}`, {
+    responseType: "blob",
+    headers: {
+      Accept: "*/*",
+    },
+  });
+
+  return res?.data; // blob
 }

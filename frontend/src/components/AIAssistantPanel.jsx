@@ -130,8 +130,23 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
       setAttempted(true);
 
+      // Si entitlements chargés et IA interdite => paywall immédiat côté front
       if (!canUseAI) {
         showNotice("Cette fonctionnalité est disponible avec le plan Multi.");
+        // On évite l’état “indisponible” : on affiche un message propre
+        setData((prev) => ({
+          ...prev,
+          message: "Plan Multi requis pour utiliser l’assistant IA.",
+          insights: [
+            {
+              title: "Accès limité",
+              description: "Passez au plan Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
+              severity: "warning",
+            },
+          ],
+          suggested_actions: [],
+          question: null,
+        }));
         return;
       }
 
@@ -144,11 +159,48 @@ export default function AIAssistantPanel({ month, serviceId }) {
           question: userQuestion || undefined,
         });
 
-        setData(resp?.data || {});
+        const payload = resp?.data || {};
+
+        // ✅ Backend “soft paywall” / IA désactivée => pas d’erreur, mais enabled=false
+        if (payload?.enabled === false) {
+          showNotice(payload?.message || "Cette fonctionnalité nécessite le plan Multi.");
+          setData({
+            message: payload?.message || "Plan Multi requis pour utiliser l’assistant IA.",
+            insights: payload?.insights || [],
+            suggested_actions: payload?.suggested_actions || [],
+            question: payload?.question ?? null,
+          });
+          if (userQuestion) setQuestion("");
+          return;
+        }
+
+        setData(payload);
         if (userQuestion) setQuestion("");
       } catch (e) {
-        showNotice("L’assistant n’est pas disponible pour le moment. Réessayez dans quelques secondes.");
-        pushToast?.({ message: "Assistant IA indisponible.", type: "error" });
+        // ✅ Distinction paywall vs panne
+        const apiMsg = e?.friendlyMessage || e?.response?.data?.detail || e?.message;
+
+        // Si jamais ça arrive encore en 403 (au cas où), on le traite proprement
+        const code = e?.response?.data?.code;
+        if (e?.response?.status === 403 && (code === "FEATURE_NOT_INCLUDED" || code?.startsWith?.("LIMIT_"))) {
+          showNotice("Plan Multi requis pour l’assistant IA.");
+          setData((prev) => ({
+            ...prev,
+            message: "Plan Multi requis pour utiliser l’assistant IA.",
+            insights: [
+              {
+                title: "Plan requis",
+                description: "Passez au plan Multi pour activer l’assistant IA.",
+                severity: "warning",
+              },
+            ],
+            suggested_actions: [],
+            question: null,
+          }));
+        } else {
+          showNotice(apiMsg || "L’assistant n’est pas disponible pour le moment. Réessayez dans quelques secondes.");
+          pushToast?.({ message: "Assistant IA indisponible.", type: "error" });
+        }
       } finally {
         setLoading(false);
       }
@@ -181,7 +233,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
       pushToast?.({ message: "Action appliquée.", type: "success" });
       runAssistant("");
     } catch (e) {
-      pushToast?.({ message: "Impossible d'exécuter cette action.", type: "error" });
+      pushToast?.({ message: e?.friendlyMessage || "Impossible d'exécuter cette action.", type: "error" });
     }
   };
 
@@ -201,7 +253,12 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
         <div className="flex items-center gap-2">
           {disabledBecausePaywall && attempted && <Badge className="bg-amber-100 text-amber-700">Plan Multi</Badge>}
-          <Button size="sm" onClick={handleAnalyze} loading={loading} disabled={loading || disabledBecauseNoService || disabledBecausePaywall}>
+          <Button
+            size="sm"
+            onClick={handleAnalyze}
+            loading={loading}
+            disabled={loading || disabledBecauseNoService || disabledBecausePaywall}
+          >
             Analyser
           </Button>
         </div>
@@ -248,7 +305,12 @@ export default function AIAssistantPanel({ month, serviceId }) {
           />
           <div className="flex items-center justify-between pt-2 text-xs text-slate-500">
             <span>{disabledBecausePaywall ? "Disponible avec le plan Multi." : "Réponses basées sur vos données."}</span>
-            <Button size="sm" onClick={handleAsk} loading={loading} disabled={loading || disabledBecauseNoService || disabledBecausePaywall}>
+            <Button
+              size="sm"
+              onClick={handleAsk}
+              loading={loading}
+              disabled={loading || disabledBecauseNoService || disabledBecausePaywall}
+            >
               Envoyer
             </Button>
           </div>

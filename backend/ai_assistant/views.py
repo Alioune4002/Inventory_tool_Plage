@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework import status
+from accounts.services.paywall import paywall_response
 
 from .services.assistant import build_context, call_llm, validate_llm_json, SYSTEM_PROMPT
 from accounts.services.access import check_entitlement
@@ -28,13 +29,15 @@ class AiAssistantView(APIView):
     throttle_classes = [AiAssistantRateThrottle]
 
     def post(self, request, *args, **kwargs):
-        # ✅ IMPORTANT: si IA désactivée, on renvoie 200 (pas 403) et on skip entitlement/LLM
+      
         if not getattr(settings, "AI_ENABLED", True):
             return Response(
                 {
                     "enabled": False,
                     "message": "Assistant IA désactivé.",
-                    "data": [],
+                    "insights": [],
+                    "suggested_actions": [],
+                    "question": None,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -51,8 +54,34 @@ class AiAssistantView(APIView):
 
         tenant = get_tenant_for_request(request)
 
-        # ✅ seulement si IA activée
-        check_entitlement(tenant, "ai_assistant_basic")
+       
+        try:
+            check_entitlement(tenant, "ai_assistant_basic")
+        except Exception as exc:
+            code = getattr(exc, "code", None) or "FEATURE_NOT_INCLUDED"
+            detail = getattr(exc, "detail", None) or "Cette fonctionnalité nécessite le plan Multi."
+
+            return Response(
+                {
+                    "enabled": False,
+                    "code": code,
+                    "message": str(detail),
+                    "insights": [
+                        {
+                            "title": "Plan requis",
+                            "description": "Activez un plan supérieur pour accéder à l’assistant IA.",
+                            "severity": "warning",
+                        }
+                    ],
+                    "suggested_actions": [],
+                    "question": None,
+                    "request_id": request_id,
+                    "mode": "paywall",
+                    "duration_ms": int((time.time() - started) * 1000),
+                    "invalid_json": False,
+                },
+                status=status.HTTP_200_OK,
+            )
 
         context = build_context(
             request.user,
@@ -70,6 +99,7 @@ class AiAssistantView(APIView):
         duration_ms = int((time.time() - started) * 1000)
         data.update(
             {
+                "enabled": True,
                 "request_id": raw.get("request_id") if isinstance(raw, dict) else request_id,
                 "mode": raw.get("mode", "fallback") if isinstance(raw, dict) else "fallback",
                 "duration_ms": duration_ms,
