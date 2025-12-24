@@ -5,7 +5,7 @@ const FAMILLES = [
     copy: {
       headline: "Un inventaire alimentaire plus rapide, plus fiable",
       subline:
-        "Rayons clairs, produits sans doublons, dates (DLC/DDM) activables. Export prêt pour l’équipe ou le comptable.",
+        "Rayons clairs, produits sans doublons, dates (DLC/DDM) activables. Exports prêts pour l’équipe ou le comptable.",
       seoKeywords: ["épicerie", "magasin", "inventaire alimentaire", "gestion stock", "export Excel", "DLC", "DDM"],
       landing: {
         title: "Inventaire épicerie & retail alimentaire",
@@ -68,9 +68,9 @@ const FAMILLES = [
     id: "mode",
     name: "Boutique, mode & accessoires",
     copy: {
-      headline: "Une gestion de stock simple pour les boutiques",
+      headline: "Une gestion de stock simple pour les boutiques !",
       subline:
-        "Référence interne prioritaire, collections claires, variantes (tailles/couleurs) activables. Pas de champs inutiles.",
+        "Références internes prioritaires, collections claires, variantes (tailles/couleurs) activables. Pas de champs inutiles.",
       seoKeywords: ["boutique", "mode", "vêtements", "accessoires", "inventaire boutique", "référence interne"],
       landing: {
         title: "Inventaire boutique, mode & accessoires",
@@ -133,9 +133,9 @@ const FAMILLES = [
     id: "bar",
     name: "Bar & boissons",
     copy: {
-      headline: "Un inventaire bar sans prise de tête",
+      headline: "Un inventaire bar sans prise de tête !",
       subline:
-        "Bouteilles, softs, cave : unités adaptées, entamés optionnels, lots et dates activables. Export direct.",
+        "Bouteilles, softs, cave : unités adaptées, entamés optionnels, lots et dates activables. Exports directs.",
       seoKeywords: ["bar", "boissons", "inventaire bar", "cave", "bouteilles", "entamé"],
       landing: {
         title: "Inventaire bar & cave",
@@ -200,7 +200,7 @@ const FAMILLES = [
     copy: {
       headline: "Cuisine et salle alignées, inventaire enfin lisible",
       subline:
-        "Séparez ou regroupez vos zones (cuisine/bar/salle), suivez pertes et options métier. Export CSV/Excel.",
+        "Séparez ou regroupez vos zones (cuisine/bar/salle), suivez pertes et options métier. Exports CSV/Excel.",
       seoKeywords: ["restaurant", "cuisine", "inventaire restaurant", "stock cuisine", "pertes", "export Excel"],
       landing: {
         title: "Inventaire restauration",
@@ -265,7 +265,7 @@ const FAMILLES = [
     copy: {
       headline: "Ingrédients, produits finis et fournées : tout devient plus net",
       subline:
-        "Options lots, dates, multi-unités et classification. Inventaire simple, export lisible.",
+        "Options lots, dates, multi-unités et classification. Inventaire simple, exports lisibles.",
       seoKeywords: ["boulangerie", "pâtisserie", "inventaire boulangerie", "production", "lots", "DLC", "DDM"],
       landing: {
         title: "Inventaire boulangerie & pâtisserie",
