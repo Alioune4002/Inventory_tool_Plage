@@ -146,19 +146,9 @@ class Membership(models.Model):
         ("manager", "Manager"),
         ("operator", "Operator"),
     )
-    STATUS_CHOICES = (
-        ("INVITED", "Invited"),
-        ("ACTIVE", "Active"),
-    )
-
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="memberships")
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="operator")
-
-    # ✅ NEW: statut membership (invité → actif)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="ACTIVE", db_index=True)
-    invited_at = models.DateTimeField(null=True, blank=True)
-    activated_at = models.DateTimeField(null=True, blank=True)
 
     # ✅ Scope service (null = accès multi-services pour ce tenant)
     service = models.ForeignKey(
@@ -177,14 +167,6 @@ class Membership(models.Model):
     def __str__(self):
         scope = self.service.name if self.service_id else "ALL"
         return f"{self.user.username} - {self.tenant.name} ({self.role}) [{scope}]"
-
-    def mark_invited(self):
-        self.status = "INVITED"
-        self.invited_at = self.invited_at or timezone.now()
-
-    def mark_active(self):
-        self.status = "ACTIVE"
-        self.activated_at = self.activated_at or timezone.now()
 
 
 class OrganizationOverrides(models.Model):

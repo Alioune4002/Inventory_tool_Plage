@@ -1,8 +1,8 @@
 import json
-
 import time
 from uuid import uuid4
 
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -28,8 +28,20 @@ class AiAssistantView(APIView):
     throttle_classes = [AiAssistantRateThrottle]
 
     def post(self, request, *args, **kwargs):
+        # ✅ IMPORTANT: si IA désactivée, on renvoie 200 (pas 403) et on skip entitlement/LLM
+        if not getattr(settings, "AI_ENABLED", True):
+            return Response(
+                {
+                    "enabled": False,
+                    "message": "Assistant IA désactivé.",
+                    "data": [],
+                },
+                status=status.HTTP_200_OK,
+            )
+
         started = time.time()
         request_id = str(uuid4())
+
         payload = request.data or {}
         scope = payload.get("scope") or "inventory"
         period_start = payload.get("period_start")
@@ -38,6 +50,8 @@ class AiAssistantView(APIView):
         question = payload.get("question") or payload.get("user_question")
 
         tenant = get_tenant_for_request(request)
+
+        # ✅ seulement si IA activée
         check_entitlement(tenant, "ai_assistant_basic")
 
         context = build_context(
@@ -48,9 +62,11 @@ class AiAssistantView(APIView):
             filters,
             user_question=question,
         )
+
         context_json = json.dumps(context, ensure_ascii=False)
         raw = call_llm(SYSTEM_PROMPT, context_json, context)
         data, invalid_json = validate_llm_json(raw)
+
         duration_ms = int((time.time() - started) * 1000)
         data.update(
             {
