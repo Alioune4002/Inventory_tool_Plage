@@ -28,18 +28,21 @@ function extractEmailFromUsername(value) {
 }
 
 function isEmailNotVerifiedError(err) {
+ 
+  const directCode = (err?.code || "").toLowerCase();
+  if (directCode === "email_not_verified") return true;
+
   const data = err?.response?.data || {};
-  const code = String(data.code || "").toLowerCase();
-  const detail = String(data.detail || data.message || "").toLowerCase();
-  const nonField = Array.isArray(data.non_field_errors) ? String(data.non_field_errors[0] || "").toLowerCase() : "";
+  const code = (data.code || "").toLowerCase();
+  const detail = (data.detail || data.message || "").toLowerCase();
+  const nonField = Array.isArray(data.non_field_errors)
+    ? String(data.non_field_errors[0] || "").toLowerCase()
+    : "";
 
   if (code === "email_not_verified") return true;
 
   const hay = `${detail} ${nonField}`;
-  return (
-    hay.includes("email") &&
-    (hay.includes("verify") || hay.includes("vérif") || hay.includes("verification") || hay.includes("non vérifié"))
-  );
+  return hay.includes("email") && (hay.includes("verify") || hay.includes("vérif") || hay.includes("non vérifié"));
 }
 
 export default function Login() {

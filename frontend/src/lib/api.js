@@ -67,7 +67,6 @@ api.interceptors.request.use((config) => {
   if (svc) {
     config.headers = config.headers || {};
     config.headers["X-Service-Id"] = svc;
-    // Optionnel: utile pour debug / analytics
     config.headers["X-Service-Mode"] = String(getStoredServiceIdSafe() || "");
     setLastConcreteServiceId(svc);
   }
@@ -77,29 +76,28 @@ api.interceptors.request.use((config) => {
 // -----------------------------
 // Friendly errors
 // -----------------------------
+function extractErrorCode(error) {
+  const data = error?.response?.data;
+  // DRF AuthenticationFailed peut renvoyer {detail, code} ou parfois detail string
+  return (data?.code || data?.detail?.code || "").toString();
+}
+
 function buildFriendlyMessage(error) {
   const status = error?.response?.status;
   const data = error?.response?.data;
-  const code = data?.code;
+  const code = extractErrorCode(error);
 
   if (!error?.response) {
     return "Impossible de joindre le service. Vérifie ta connexion internet, puis réessaie.";
   }
 
+  // ✅ IMPORTANT: cas email non vérifié (401 mais on ne veut PAS logout)
+  if (code === "email_not_verified") {
+    return "Email non vérifié. Vérifie ta boîte mail (et les spams) puis clique sur le lien de confirmation.";
+  }
+
   if (status === 503 || code === "db_unavailable") {
     return "Le service est temporairement indisponible. Réessaie dans quelques instants.";
-  }
-
-  // ✅ IMPORTANT : ne pas transformer email_not_verified en "Connexion requise"
-  if (code === "email_not_verified") {
-    return (
-      (typeof data?.detail === "string" && data.detail.trim()) ||
-      "Email non vérifié. Vérifie ta boîte mail pour activer ton compte."
-    );
-  }
-
-  if (status === 401) {
-    return "Connexion requise. Merci de te reconnecter.";
   }
 
   if (status === 406) {
@@ -110,14 +108,24 @@ function buildFriendlyMessage(error) {
     return "Une erreur est survenue côté serveur. Réessaie dans quelques instants.";
   }
 
+  // DRF standard
   if (data?.detail && typeof data.detail === "string") return data.detail;
   if (data?.error && typeof data.error === "string") return data.error;
+
+  // 401 générique (identifiants, token, etc.)
+  if (status === 401) return "Connexion requise. Merci de te reconnecter.";
 
   return null;
 }
 
+function isAuthPagePath(pathname) {
+  const p = String(pathname || "");
+  return p.startsWith("/login") || p.startsWith("/register") || p.startsWith("/check-email");
+}
+
 function isAuthEndpoint(url) {
   const u = String(url || "");
+  // endpoints d’auth où un 401 ne doit pas provoquer un logout/redirect agressif
   return (
     u.includes("/api/auth/login/") ||
     u.includes("/api/auth/register/") ||
@@ -127,26 +135,23 @@ function isAuthEndpoint(url) {
   );
 }
 
-function isAuthPagePath(pathname) {
-  const p = String(pathname || "");
-  return p.startsWith("/login") || p.startsWith("/register") || p.startsWith("/check-email");
-}
-
-// Déconnexion silencieuse en cas de 401 (mais avec message propre)
+// Déconnexion silencieuse en cas de 401 (mais avec exceptions)
 api.interceptors.response.use(
   (res) => res,
   (error) => {
+    const status = error?.response?.status;
+    const code = extractErrorCode(error);
+
     // Gestion limites/plan
-    if (error?.response?.status === 403) {
-      const code = error.response?.data?.code;
-      if (code && String(code).startsWith("LIMIT_")) {
+    if (status === 403) {
+      const c = error.response?.data?.code;
+      if (c && String(c).startsWith("LIMIT_")) {
         const detail =
           error.response?.data?.detail ||
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";
         error.friendlyMessage = detail;
-      } else if (code === "FEATURE_NOT_INCLUDED") {
-        const detail =
-          error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
+      } else if (c === "FEATURE_NOT_INCLUDED") {
+        const detail = error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
         error.friendlyMessage = detail;
       }
     }
@@ -156,26 +161,25 @@ api.interceptors.response.use(
       if (msg) error.friendlyMessage = msg;
     }
 
-    // Auth expirée / invalide
-    if (error?.response?.status === 401) {
-      const code = error?.response?.data?.code;
-      const url = error?.config?.url || "";
-
-      // ✅ cas email non vérifié : on NE logout pas, on laisse Login/CheckEmail gérer
+    // ✅ Auth expirée: on logout/redirect, SAUF si email non vérifié
+    if (status === 401) {
+      // cas spécial : email non vérifié -> pas de clearToken / pas de redirect
       if (code === "email_not_verified") {
         return Promise.reject(error);
       }
 
-      // ✅ ne pas clearToken sur les endpoints d'auth (évite effets de bord / UX)
-      if (!isAuthEndpoint(url)) {
-        clearToken();
+      // si c’est une tentative de login/register/etc, on ne force pas un redirect
+      const reqUrl = error?.config?.url || "";
+      if (isAuthEndpoint(reqUrl)) {
+        return Promise.reject(error);
+      }
 
-        const path = window.location.pathname || "";
-        if (!isAuthPagePath(path)) {
-          // Optionnel : tu peux passer un state "reason" si tu rediriges via router,
-          // ici on reste en hard redirect pour simplicité.
-          window.location.href = "/login";
-        }
+      // sinon: token invalide/expiré => on purge et on renvoie vers /login
+      clearToken();
+
+      const path = window.location.pathname || "";
+      if (!isAuthPagePath(path)) {
+        window.location.href = "/login";
       }
     }
 
@@ -227,9 +231,7 @@ export async function downloadInventoryExcel({ month }) {
 
   const res = await api.get(`/api/export-excel/?month=${encodeURIComponent(month)}`, {
     responseType: "blob",
-    headers: {
-      Accept: "*/*",
-    },
+    headers: { Accept: "*/*" },
   });
 
   return res?.data; // blob
