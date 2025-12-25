@@ -4,7 +4,6 @@ Django settings for inventory project.
 import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-
 from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -81,30 +80,81 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "inventory.wsgi.application"
 
+
+# DATABASE
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+
+def _sqlite_name_from_url(parsed):
+    """
+    Support:
+      - sqlite:///db.sqlite3 (relative)
+      - sqlite:////absolute/path/db.sqlite3 (absolute)
+      - sqlite://:memory:
+    """
+    # memory
+    if parsed.netloc == ":memory:" or parsed.path == ":memory:":
+        return ":memory:"
+
+    path = parsed.path or ""
+    if not path:
+        return str(BASE_DIR / "db.sqlite3")
+
+    # sqlite:////abs/path => parsed.path == "/abs/path"
+    # sqlite:///rel/path  => parsed.path == "/rel/path" (we treat as relative -> strip leading /)
+    # Heuristic: if URL starts with sqlite://// it's absolute
+    raw = (DATABASE_URL or "").strip().lower()
+    if raw.startswith("sqlite:////"):
+        return path  # already absolute with leading "/"
+    return str(BASE_DIR / path.lstrip("/"))
+
 
 if DATABASE_URL:
     parsed = urlparse(DATABASE_URL)
-    query = parse_qs(parsed.query)
-    options = {}
-    sslmode = (query.get("sslmode") or [None])[0]
-    if sslmode:
-        options["sslmode"] = sslmode
-    elif not DEBUG:
-        options["sslmode"] = os.environ.get("DB_SSLMODE", "require")
+    scheme = (parsed.scheme or "").lower()
 
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": parsed.path.lstrip("/"),
-            "USER": parsed.username,
-            "PASSWORD": parsed.password,
-            "HOST": parsed.hostname,
-            "PORT": parsed.port or "",
-            "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
-            **({"OPTIONS": options} if options else {}),
+    # Handle sqlite in CI / local
+    if scheme in ("sqlite", "sqlite3"):
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": _sqlite_name_from_url(parsed),
+            }
         }
-    }
+
+    # Handle postgres in prod
+    elif scheme in ("postgres", "postgresql"):
+        query = parse_qs(parsed.query)
+        options = {}
+
+        sslmode = (query.get("sslmode") or [None])[0]
+        if sslmode:
+            options["sslmode"] = sslmode
+        elif not DEBUG:
+            options["sslmode"] = os.environ.get("DB_SSLMODE", "require")
+
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": (parsed.path or "").lstrip("/") or os.environ.get("DB_NAME", "postgres"),
+                "USER": parsed.username or os.environ.get("DB_USER", ""),
+                "PASSWORD": parsed.password or os.environ.get("DB_PASSWORD", ""),
+                "HOST": parsed.hostname or os.environ.get("DB_HOST", ""),
+                "PORT": parsed.port or os.environ.get("DB_PORT", ""),
+                "CONN_MAX_AGE": int(os.environ.get("DB_CONN_MAX_AGE", "60")),
+                **({"OPTIONS": options} if options else {}),
+            }
+        }
+
+    else:
+        # Unknown scheme => fallback sqlite (safe default for tests/CI)
+        DATABASES = {
+            "default": {
+                "ENGINE": "django.db.backends.sqlite3",
+                "NAME": str(os.environ.get("INVENTORY_DB_PATH", BASE_DIR / "db.sqlite3")),
+            }
+        }
+
 else:
     DATABASES = {
         "default": {
@@ -130,9 +180,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# -----------------------------
 # CORS
-# -----------------------------
 CORS_ALLOW_ALL_ORIGINS = os.environ.get(
     "CORS_ALLOW_ALL_ORIGINS",
     "True" if DEBUG else "False",
@@ -170,16 +218,13 @@ if DEBUG and not os.environ.get("CORS_ALLOWED_ORIGINS"):
         }
     )
 
-
 _cors_origins.update(_origin_variants(FRONTEND_URL))
-
 
 vercel_preview = os.environ.get("VERCEL_PREVIEW_ORIGIN")
 if vercel_preview:
     _cors_origins.update(_origin_variants(vercel_preview) or [vercel_preview])
 
 CORS_ALLOWED_ORIGINS = sorted(_cors_origins)
-
 
 from corsheaders.defaults import default_headers
 
@@ -188,9 +233,8 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-service-mode",
 ]
 
-# -----------------------------
-# DRF / JWT
-# -----------------------------
+
+# DRF JWT
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -215,7 +259,7 @@ AI_ENABLED = os.environ.get("AI_ENABLED", "False").lower() == "true"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 AI_MODEL = os.environ.get("AI_MODEL", "gpt-4o-mini")
 
-# Billing / Stripe
+# Billing Stripe
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 STRIPE_SUCCESS_URL = os.environ.get("STRIPE_SUCCESS_URL", f"{FRONTEND_URL}/billing/success")
@@ -225,7 +269,7 @@ STRIPE_PRICE_BOUTIQUE_YEARLY = os.environ.get("STRIPE_PRICE_BOUTIQUE_YEARLY")
 STRIPE_PRICE_PRO_MONTHLY = os.environ.get("STRIPE_PRICE_PRO_MONTHLY")
 STRIPE_PRICE_PRO_YEARLY = os.environ.get("STRIPE_PRICE_PRO_YEARLY")
 
-# Emails (SendGrid)
+# SendGrid Emails 
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY")
 SENDGRID_FROM_EMAIL = os.environ.get("SENDGRID_FROM_EMAIL", "no-reply@stockscan.app")
 INVITATIONS_SEND_EMAILS = os.environ.get("INVITATIONS_SEND_EMAILS", "true").lower() == "true"
