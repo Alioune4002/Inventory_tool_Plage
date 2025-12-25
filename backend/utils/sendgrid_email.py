@@ -110,7 +110,7 @@ def _stockscan_html_template(
     safe_intro = _escape_html(intro or "")
     safe_footer = _escape_html(footer_note or "")
 
-    # Important : inline CSS only (meilleure compat)
+    # Important : inline CSS only 
     return f"""<!doctype html>
 <html lang="fr">
   <head>
@@ -205,14 +205,22 @@ def send_email_with_sendgrid(
     """
     Envoie un email via SendGrid quand configuré, sinon fallback vers EmailMultiAlternatives.
 
-    - Si html_body est fourni mais n'est pas un document HTML complet, on l'habille dans un template premium StockScan.
-    - text_body reste le fallback lisible (pour clients texte / deliverability).
+     AJOUTS:
+    - Protection si SENDGRID_FROM_EMAIL contient par erreur plusieurs emails (virgule).
+    - Support du Reply-To via settings.REPLY_TO_EMAIL (sinon SUPPORT_EMAIL).
     """
     if not to_email:
         logger.debug("Envoi email annulé : aucun destinataire.")
         return False
 
     from_email = getattr(settings, "SENDGRID_FROM_EMAIL", "no-reply@stockscan.app")
+    support_email = getattr(settings, "SUPPORT_EMAIL", "")
+    reply_to = getattr(settings, "REPLY_TO_EMAIL", "") or support_email
+
+    
+    if isinstance(from_email, str) and "," in from_email:
+        from_email = from_email.split(",")[0].strip()
+
     brand = getattr(settings, "EMAIL_BRAND_NAME", "StockScan")
 
     # --- HTML premium (auto-wrap) ---
@@ -256,6 +264,12 @@ def send_email_with_sendgrid(
                 html_content=final_html,
             )
 
+            if reply_to:
+                try:
+                    sg_mail.reply_to = reply_to
+                except Exception:
+                    pass
+
             attachment = _build_sendgrid_attachment(filename, file_bytes or b"", mimetype)
             if attachment:
                 sg_mail.attachment = attachment
@@ -266,7 +280,7 @@ def send_email_with_sendgrid(
             logger.warning("SendGrid envoi échoué (%s): %s", to_email, exc)
             sent = False
 
-    # --- Django fallback (multipart text + html) ---
+   
     if not sent and fallback_to_django:
         try:
             msg = EmailMultiAlternatives(
@@ -274,6 +288,7 @@ def send_email_with_sendgrid(
                 body=(text_body or ""),
                 from_email=from_email,
                 to=[to_email],
+                reply_to=[reply_to] if reply_to else None,
             )
             msg.attach_alternative(final_html, "text/html")
             if file_bytes:
