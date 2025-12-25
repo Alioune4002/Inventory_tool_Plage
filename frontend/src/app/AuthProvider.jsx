@@ -217,7 +217,8 @@ export function AuthProvider({ children }) {
         const err = new Error(
           friendlyAuthError(e, "Connexion impossible. Vérifie tes identifiants et réessaie.")
         );
-        err.code = e?.response?.data?.code;
+        err.code = e?.response?.data?.code || null;
+        err.isEmailNotVerified = err.code === "email_not_verified";
         throw err;
       }
     },

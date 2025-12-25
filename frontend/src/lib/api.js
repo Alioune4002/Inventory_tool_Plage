@@ -91,7 +91,7 @@ function buildFriendlyMessage(error) {
     return "Impossible de joindre le service. Vérifie ta connexion internet, puis réessaie.";
   }
 
-  // ✅ IMPORTANT: cas email non vérifié (401 mais on ne veut PAS logout)
+ 
   if (code === "email_not_verified") {
     return "Email non vérifié. Vérifie ta boîte mail (et les spams) puis clique sur le lien de confirmation.";
   }
@@ -161,27 +161,22 @@ api.interceptors.response.use(
       if (msg) error.friendlyMessage = msg;
     }
 
-    // ✅ Auth expirée: on logout/redirect, SAUF si email non vérifié
-    if (status === 401) {
-      // cas spécial : email non vérifié -> pas de clearToken / pas de redirect
-      if (code === "email_not_verified") {
-        return Promise.reject(error);
-      }
+    if (error?.response?.status === 401) {
+  const code = error?.response?.data?.code;
 
-      // si c’est une tentative de login/register/etc, on ne force pas un redirect
-      const reqUrl = error?.config?.url || "";
-      if (isAuthEndpoint(reqUrl)) {
-        return Promise.reject(error);
-      }
+  // IMPORTANT : ne pas logout / redirect si email non vérifié
+  if (code === "email_not_verified") {
+    error.friendlyMessage =
+      error.friendlyMessage ||
+      "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.";
+    return Promise.reject(error);
+  }
 
-      // sinon: token invalide/expiré => on purge et on renvoie vers /login
-      clearToken();
-
-      const path = window.location.pathname || "";
-      if (!isAuthPagePath(path)) {
-        window.location.href = "/login";
-      }
-    }
+  clearToken();
+  const path = window.location.pathname || "";
+  const isAuthPage = path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/check-email");
+  if (!isAuthPage) window.location.href = "/login";
+}
 
     return Promise.reject(error);
   }

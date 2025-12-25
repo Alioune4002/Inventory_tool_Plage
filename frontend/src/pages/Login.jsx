@@ -28,21 +28,16 @@ function extractEmailFromUsername(value) {
 }
 
 function isEmailNotVerifiedError(err) {
- 
-  const directCode = (err?.code || "").toLowerCase();
-  if (directCode === "email_not_verified") return true;
+  if (!err) return false;
+
+  if (err.code === "email_not_verified" || err.isEmailNotVerified) return true;
 
   const data = err?.response?.data || {};
-  const code = (data.code || "").toLowerCase();
-  const detail = (data.detail || data.message || "").toLowerCase();
-  const nonField = Array.isArray(data.non_field_errors)
-    ? String(data.non_field_errors[0] || "").toLowerCase()
-    : "";
-
+  const code = String(data.code || "").toLowerCase();
   if (code === "email_not_verified") return true;
 
-  const hay = `${detail} ${nonField}`;
-  return hay.includes("email") && (hay.includes("verify") || hay.includes("vérif") || hay.includes("non vérifié"));
+  const detail = String(data.detail || data.message || err.message || "").toLowerCase();
+  return detail.includes("email") && detail.includes("non vérifi");
 }
 
 export default function Login() {
@@ -84,15 +79,12 @@ export default function Login() {
       nav(from, { replace: true });
     } catch (e2) {
       if (isEmailNotVerifiedError(e2)) {
-        const email = extractEmailFromUsername(form.username);
-        setNeedsVerify(true);
-        setErr(
-          "Ton compte existe, mais il n’est pas encore activé. Vérifie ton email (et les spams) puis clique sur le lien de confirmation."
-        );
-
-        nav("/check-email", { state: { email }, replace: false });
-        return;
-      }
+          const email = extractEmailFromUsername(form.username);
+          setNeedsVerify(true);
+          setErr("Ton compte existe, mais il n’est pas encore activé. Vérifie ton email (et les spams), puis clique sur le lien.");
+          nav("/check-email", { state: { email }, replace: false });
+          return;
+}
 
       setErr(formatApiError(e2, { context: "login" }));
     } finally {
