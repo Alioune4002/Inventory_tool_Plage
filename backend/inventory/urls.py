@@ -47,9 +47,8 @@ urlpatterns = [
     path("api/", include(router.urls)),
     path("api/inventory-stats/", inventory_stats),
 
-    # ✅ export endpoints
     path("api/export-excel/", export_excel),
-    path("api/products/export/excel/", export_excel),  # ✅ alias pour ton front
+    path("api/products/export/excel/", export_excel), 
     path("api/export-advanced/", export_advanced),
     path("api/exports/", export_generic),
 

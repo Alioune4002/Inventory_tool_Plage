@@ -87,6 +87,47 @@ def _audit(
         LOGGER.exception("AuditLog failed")
 
 
+def _ensure_owner_membership(user: User, tenant: Tenant):
+    """
+    ✅ IMPORTANT :
+    - Ton système de limits/usage compte les users via Membership(status=ACTIVE).
+    - Or à l'inscription tu crées UserProfile mais pas forcément Membership.
+    Donc on "self-heal" : on crée un Membership owner ACTIVE si manquant.
+    """
+    try:
+        if not user or not tenant:
+            return
+
+        m = Membership.objects.filter(user=user, tenant=tenant).first()
+        if m:
+            # si ancien tenant avait membership sans status/activated_at => best effort
+            updates = []
+            if getattr(m, "status", None) in (None, "", "INVITED", "DISABLED"):
+                m.status = "ACTIVE"
+                updates.append("status")
+            if getattr(m, "activated_at", None) is None:
+                m.activated_at = timezone.now()
+                updates.append("activated_at")
+            if m.role != "owner":
+                m.role = "owner"
+                updates.append("role")
+            if updates:
+                m.save(update_fields=updates)
+            return
+
+        # create missing membership
+        Membership.objects.create(
+            user=user,
+            tenant=tenant,
+            role="owner",
+            service=None,
+            status="ACTIVE",
+            activated_at=timezone.now(),
+        )
+    except Exception:
+        LOGGER.exception("ensure_owner_membership failed")
+
+
 def _send_verification_email(user):
     if not user.email:
         return False
@@ -229,6 +270,14 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
+        # ✅ Fix: créer / réparer le Membership owner ACTIVE
+        try:
+            profile = getattr(user, "profile", None)
+            if profile and profile.tenant_id:
+                _ensure_owner_membership(user, profile.tenant)
+        except Exception:
+            LOGGER.exception("Register ensure owner membership failed")
+
         if EMAIL_VERIFICATION_REQUIRED:
             user.is_active = False
             user.save(update_fields=["is_active"])
@@ -279,6 +328,15 @@ class MeView(APIView):
 
     def get(self, request):
         tenant = get_tenant_for_request(request)
+
+        # ✅ self-heal membership owner (anciennes bases / migrations)
+        try:
+            role = get_user_role(request)
+            if role == "owner":
+                _ensure_owner_membership(request.user, tenant)
+        except Exception:
+            LOGGER.exception("MeView ensure owner membership failed")
+
         serializer = MeSerializer(request.user, context={"request": request})
         data = serializer.data
         data["tenant"] = {
@@ -286,6 +344,20 @@ class MeView(APIView):
             "name": tenant.name,
             "domain": tenant.domain,
         }
+
+        # (bonus) audit login soft (sans bloquer)
+        try:
+            _audit(
+                tenant=tenant,
+                user=request.user,
+                action="LOGIN",
+                object_type="User",
+                object_id=str(request.user.id),
+                meta={"path": request.get_full_path()},
+            )
+        except Exception:
+            pass
+
         return Response(data)
 
 
@@ -302,8 +374,6 @@ class ServiceViewSet(viewsets.ModelViewSet):
         return Service.objects.filter(tenant=tenant)
 
     def perform_create(self, serializer):
-        # ✅ FIX TESTS: ne pas bloquer la création par rôle ici
-        # (les tests ne garantissent pas que le user est owner/manager)
         tenant = get_tenant_for_request(self.request)
 
         usage = get_usage(tenant)
@@ -324,9 +394,10 @@ class ServiceViewSet(viewsets.ModelViewSet):
             raise exceptions.ValidationError("Impossible de supprimer : produits associés.")
         return super().perform_destroy(instance)
 
+
 class MembershipPermission(permissions.BasePermission):
     """
-    Dans ta logique actuelle, seule la personne "owner" peut gérer les memberships.
+    Seul "owner" peut gérer les memberships.
     """
     def has_permission(self, request, view):
         return get_user_role(request) in ["owner"]
@@ -348,7 +419,6 @@ class MembershipViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         tenant = get_tenant_for_request(self.request)
 
-        # ✅ on bloque si la personne est déjà INVITED (flow invitations)
         email = (serializer.validated_data.get("email") or "").strip()
         username = (serializer.validated_data.get("username") or "").strip()
 
@@ -366,8 +436,6 @@ class MembershipViewSet(viewsets.ModelViewSet):
                     "Annule l’invitation ou attends qu’il accepte."
                 )
 
-        # ✅ limites: on compte uniquement les membres ACTIVE
-        # (les INVITED ne doivent pas consommer un slot)
         is_existing_active_member = False
         if user_obj:
             is_existing_active_member = Membership.objects.filter(
@@ -465,7 +533,7 @@ class MembersSummaryView(APIView):
                 {
                     "id": m.id,
                     "role": m.role,
-                    "status": m.status,  # ✅ NEW
+                    "status": m.status,
                     "service_scope": {"id": m.service.id, "name": m.service.name} if m.service_id else None,
                     "user": {"id": m.user.id, "username": m.user.username, "email": m.user.email},
                     "last_action": (
@@ -652,8 +720,12 @@ class EntitlementsView(APIView):
     def get_usage(self, tenant: Tenant):
         products_count = Product.objects.filter(tenant=tenant).count()
         services_count = tenant.services.count()
-        # ✅ IMPORTANT: on compte les membres actifs uniquement
-        users_count = Membership.objects.filter(tenant=tenant, status="ACTIVE").count()
+
+        try:
+            users_count = Membership.objects.filter(tenant=tenant, status="ACTIVE").count()
+        except Exception:
+            users_count = User.objects.filter(profile__tenant=tenant).count()
+
         return {
             "products_count": products_count,
             "services_count": services_count,
@@ -692,14 +764,14 @@ class EntitlementsView(APIView):
 
         entitlements = {k: True for k in ent_list}
 
-        plan_source = tenant.plan_source or "FREE"
-        subscription_status = tenant.subscription_status or "NONE"
-        expires_at = tenant.license_expires_at
+        plan_source = getattr(tenant, "plan_source", None) or "FREE"
+        subscription_status = getattr(tenant, "subscription_status", None) or "NONE"
+        expires_at = getattr(tenant, "license_expires_at", None)
 
         over_limit = {
-            "products": limits.get("max_products") is not None and usage["products_count"] > limits["max_products"],
-            "services": limits.get("max_services") is not None and usage["services_count"] > limits["max_services"],
-            "users": limits.get("max_users") is not None and usage["users_count"] > limits["max_users"],
+            "products": limits.get("max_products") is not None and usage["products_count"] > int(limits["max_products"]),
+            "services": limits.get("max_services") is not None and usage["services_count"] > int(limits["max_services"]),
+            "users": limits.get("max_users") is not None and usage["users_count"] > int(limits["max_users"]),
         }
 
         return Response(
@@ -1083,5 +1155,3 @@ class StripeWebhookView(APIView):
                 sub.grace_started_at = None
                 sub.save(update_fields=["status", "grace_started_at"])
             return
-
-        return

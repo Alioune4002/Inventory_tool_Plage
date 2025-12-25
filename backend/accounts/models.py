@@ -3,7 +3,6 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-# Billing / entitlements choices
 PLAN_SOURCES = (
     ("FREE", "Free"),
     ("TRIAL", "Trial"),
@@ -54,7 +53,6 @@ class Tenant(models.Model):
     business_type = models.CharField(max_length=30, choices=BUSINESS_CHOICES, default="other")
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # Billing & plan
     plan = models.ForeignKey(Plan, on_delete=models.SET_NULL, null=True, blank=True)
     plan_source = models.CharField(max_length=20, choices=PLAN_SOURCES, default="FREE")
     license_expires_at = models.DateTimeField(null=True, blank=True)
@@ -146,11 +144,17 @@ class Membership(models.Model):
         ("manager", "Manager"),
         ("operator", "Operator"),
     )
+    STATUS_CHOICES = (
+        ("ACTIVE", "Active"),
+        ("INVITED", "Invited"),
+        ("DISABLED", "Disabled"),
+    )
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="memberships")
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="operator")
 
-    # ✅ Scope service (null = accès multi-services pour ce tenant)
+    # ✅ Scope service (null = accès multi-services)
     service = models.ForeignKey(
         Service,
         on_delete=models.SET_NULL,
@@ -159,6 +163,10 @@ class Membership(models.Model):
         related_name="memberships",
     )
 
+    # ✅ NOUVEAU (aligné avec serializers/views/services/access.py)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="ACTIVE", db_index=True)
+    activated_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -166,7 +174,7 @@ class Membership(models.Model):
 
     def __str__(self):
         scope = self.service.name if self.service_id else "ALL"
-        return f"{self.user.username} - {self.tenant.name} ({self.role}) [{scope}]"
+        return f"{self.user.username} - {self.tenant.name} ({self.role}) [{scope}] ({self.status})"
 
 
 class OrganizationOverrides(models.Model):
@@ -261,7 +269,6 @@ class Invitation(models.Model):
         return f"Invitation {self.email} ({self.tenant.name})"
 
 
-# ✅ Audit minimal (traçabilité actions)
 class AuditLog(models.Model):
     ACTION_CHOICES = (
         ("MEMBER_ADDED", "Member added"),
