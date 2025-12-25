@@ -1,4 +1,4 @@
-// frontend/src/pages/Login.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -29,17 +29,16 @@ function extractEmailFromUsername(value) {
 
 function isEmailNotVerifiedError(err) {
   const data = err?.response?.data || {};
-  const code = (data.code || "").toLowerCase();
-  const detail = (data.detail || data.message || "").toLowerCase();
+  const code = String(data.code || "").toLowerCase();
+  const detail = String(data.detail || data.message || "").toLowerCase();
   const nonField = Array.isArray(data.non_field_errors) ? String(data.non_field_errors[0] || "").toLowerCase() : "";
 
-  // ✅ idéal: le backend renvoie code="email_not_verified"
   if (code === "email_not_verified") return true;
 
-  // ✅ fallback si le backend renvoie juste du texte
   const hay = `${detail} ${nonField}`;
   return (
-    hay.includes("email") && (hay.includes("verify") || hay.includes("vérif") || hay.includes("verification") || hay.includes("non vérifié"))
+    hay.includes("email") &&
+    (hay.includes("verify") || hay.includes("vérif") || hay.includes("verification") || hay.includes("non vérifié"))
   );
 }
 
@@ -65,6 +64,12 @@ export default function Login() {
     if (invitedEmail) setForm((p) => ({ ...p, username: invitedEmail }));
   }, [invitedEmail]);
 
+  useEffect(() => {
+    if (loc.state?.reason === "auth_required") {
+      setErr("Connexion requise. Merci de te reconnecter.");
+    }
+  }, [loc.state]);
+
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
@@ -75,7 +80,6 @@ export default function Login() {
       await login(form);
       nav(from, { replace: true });
     } catch (e2) {
-      // ✅ cas email non vérifié -> message clair + CTA
       if (isEmailNotVerifiedError(e2)) {
         const email = extractEmailFromUsername(form.username);
         setNeedsVerify(true);
@@ -83,7 +87,6 @@ export default function Login() {
           "Ton compte existe, mais il n’est pas encore activé. Vérifie ton email (et les spams) puis clique sur le lien de confirmation."
         );
 
-        // ✅ redirection directe vers la page de vérification (comme tu le veux)
         nav("/check-email", { state: { email }, replace: false });
         return;
       }
@@ -105,6 +108,7 @@ export default function Login() {
       await resendVerificationEmail({ email });
       pushToast?.({ type: "success", message: "Email de vérification renvoyé." });
       setNeedsVerify(true);
+      nav("/check-email", { state: { email }, replace: false });
     } catch {
       pushToast?.({ type: "error", message: "Impossible pour le moment. Réessaie plus tard." });
     } finally {
@@ -145,11 +149,7 @@ export default function Login() {
           ) : null}
 
           {err ? (
-            <div
-              className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100"
-              role="alert"
-              aria-live="polite"
-            >
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100" role="alert">
               {err}
 
               {needsVerify ? (
@@ -160,9 +160,7 @@ export default function Login() {
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={() =>
-                      nav("/check-email", { state: { email: extractEmailFromUsername(form.username) } })
-                    }
+                    onClick={() => nav("/check-email", { state: { email: extractEmailFromUsername(form.username) } })}
                   >
                     Aller à la vérification
                   </Button>
@@ -205,23 +203,14 @@ export default function Login() {
               }
             />
 
-            <Button
-              type="submit"
-              className="w-full justify-center"
-              loading={loading}
-              disabled={!form.username || !form.password || loading}
-            >
+            <Button type="submit" className="w-full justify-center" loading={loading} disabled={!form.username || !form.password || loading}>
               Se connecter
             </Button>
           </form>
 
           <div className="text-sm text-white/70 flex justify-between items-center">
-            <Link to="/" className="underline">
-              Retour landing
-            </Link>
-            <Link to="/register" className="underline">
-              Créer un compte
-            </Link>
+            <Link to="/" className="underline">Retour landing</Link>
+            <Link to="/register" className="underline">Créer un compte</Link>
           </div>
 
           <div className="text-xs text-white/40">

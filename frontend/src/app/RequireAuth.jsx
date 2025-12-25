@@ -1,7 +1,13 @@
-
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "./AuthProvider";
+
+function fullPath(loc) {
+  const p = loc?.pathname || "/";
+  const s = loc?.search || "";
+  const h = loc?.hash || "";
+  return `${p}${s}${h}`;
+}
 
 export default function RequireAuth({ children }) {
   const { isAuthed, loading } = useAuth();
@@ -17,8 +23,24 @@ export default function RequireAuth({ children }) {
     );
   }
 
+  //  éviter les loops inutiles (au cas où)
+  const path = location?.pathname || "";
+  const isAuthPage = path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/check-email");
+
   if (!isAuthed) {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+    
+    if (isAuthPage) return children;
+
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{
+          from: fullPath(location),
+          reason: "auth_required",
+        }}
+      />
+    );
   }
 
   return children;

@@ -1,4 +1,4 @@
-
+// frontend/src/lib/api.js
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
@@ -90,6 +90,14 @@ function buildFriendlyMessage(error) {
     return "Le service est temporairement indisponible. Réessaie dans quelques instants.";
   }
 
+  // ✅ IMPORTANT : ne pas transformer email_not_verified en "Connexion requise"
+  if (code === "email_not_verified") {
+    return (
+      (typeof data?.detail === "string" && data.detail.trim()) ||
+      "Email non vérifié. Vérifie ta boîte mail pour activer ton compte."
+    );
+  }
+
   if (status === 401) {
     return "Connexion requise. Merci de te reconnecter.";
   }
@@ -106,6 +114,22 @@ function buildFriendlyMessage(error) {
   if (data?.error && typeof data.error === "string") return data.error;
 
   return null;
+}
+
+function isAuthEndpoint(url) {
+  const u = String(url || "");
+  return (
+    u.includes("/api/auth/login/") ||
+    u.includes("/api/auth/register/") ||
+    u.includes("/api/auth/verify-email/") ||
+    u.includes("/api/auth/password-reset/") ||
+    u.includes("/api/auth/email-change/")
+  );
+}
+
+function isAuthPagePath(pathname) {
+  const p = String(pathname || "");
+  return p.startsWith("/login") || p.startsWith("/register") || p.startsWith("/check-email");
 }
 
 // Déconnexion silencieuse en cas de 401 (mais avec message propre)
@@ -132,13 +156,26 @@ api.interceptors.response.use(
       if (msg) error.friendlyMessage = msg;
     }
 
-    // Auth expirée
+    // Auth expirée / invalide
     if (error?.response?.status === 401) {
-      clearToken();
-      const path = window.location.pathname || "";
-      const isAuthPage = path.startsWith("/login") || path.startsWith("/register");
-      if (!isAuthPage) {
-        window.location.href = "/login";
+      const code = error?.response?.data?.code;
+      const url = error?.config?.url || "";
+
+      // ✅ cas email non vérifié : on NE logout pas, on laisse Login/CheckEmail gérer
+      if (code === "email_not_verified") {
+        return Promise.reject(error);
+      }
+
+      // ✅ ne pas clearToken sur les endpoints d'auth (évite effets de bord / UX)
+      if (!isAuthEndpoint(url)) {
+        clearToken();
+
+        const path = window.location.pathname || "";
+        if (!isAuthPagePath(path)) {
+          // Optionnel : tu peux passer un state "reason" si tu rediriges via router,
+          // ici on reste en hard redirect pour simplicité.
+          window.location.href = "/login";
+        }
       }
     }
 
