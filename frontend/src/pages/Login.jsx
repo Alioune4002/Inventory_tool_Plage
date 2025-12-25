@@ -7,6 +7,8 @@ import Card from "../ui/Card";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { formatApiError } from "../lib/errorUtils";
+import { resendVerificationEmail } from "../lib/api";
+import { useToast } from "../app/ToastContext";
 
 function safeFromLocation(locState) {
   const raw = locState?.from;
@@ -16,10 +18,36 @@ function safeFromLocation(locState) {
   return "/app/dashboard";
 }
 
+function isEmailLike(value) {
+  return typeof value === "string" && value.includes("@");
+}
+
+function extractEmailFromUsername(value) {
+  const v = String(value || "").trim();
+  return isEmailLike(v) ? v : "";
+}
+
+function isEmailNotVerifiedError(err) {
+  const data = err?.response?.data || {};
+  const code = (data.code || "").toLowerCase();
+  const detail = (data.detail || data.message || "").toLowerCase();
+  const nonField = Array.isArray(data.non_field_errors) ? String(data.non_field_errors[0] || "").toLowerCase() : "";
+
+  // ✅ idéal: le backend renvoie code="email_not_verified"
+  if (code === "email_not_verified") return true;
+
+  // ✅ fallback si le backend renvoie juste du texte
+  const hay = `${detail} ${nonField}`;
+  return (
+    hay.includes("email") && (hay.includes("verify") || hay.includes("vérif") || hay.includes("verification") || hay.includes("non vérifié"))
+  );
+}
+
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
+  const pushToast = useToast();
 
   const invited = loc.state?.invited;
   const invitedEmail = loc.state?.email;
@@ -27,7 +55,9 @@ export default function Login() {
   const [form, setForm] = useState({ username: "", password: "" });
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
+  const [needsVerify, setNeedsVerify] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
 
   const from = useMemo(() => safeFromLocation(loc.state), [loc.state]);
 
@@ -38,20 +68,53 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
+    setNeedsVerify(false);
     setLoading(true);
+
     try {
       await login(form);
       nav(from, { replace: true });
     } catch (e2) {
+      // ✅ cas email non vérifié -> message clair + CTA
+      if (isEmailNotVerifiedError(e2)) {
+        const email = extractEmailFromUsername(form.username);
+        setNeedsVerify(true);
+        setErr(
+          "Ton compte existe, mais il n’est pas encore activé. Vérifie ton email (et les spams) puis clique sur le lien de confirmation."
+        );
+
+        // ✅ redirection directe vers la page de vérification (comme tu le veux)
+        nav("/check-email", { state: { email }, replace: false });
+        return;
+      }
+
       setErr(formatApiError(e2, { context: "login" }));
     } finally {
       setLoading(false);
     }
   };
 
+  const resend = async () => {
+    const email = extractEmailFromUsername(form.username);
+    if (!email) {
+      pushToast?.({ type: "error", message: "Entre ton email dans le champ identifiant, puis réessaie." });
+      return;
+    }
+    setResending(true);
+    try {
+      await resendVerificationEmail({ email });
+      pushToast?.({ type: "success", message: "Email de vérification renvoyé." });
+      setNeedsVerify(true);
+    } catch {
+      pushToast?.({ type: "error", message: "Impossible pour le moment. Réessaie plus tard." });
+    } finally {
+      setResending(false);
+    }
+  };
+
   useEffect(() => {
     if (!err) return undefined;
-    const timer = window.setTimeout(() => setErr(""), 6000);
+    const timer = window.setTimeout(() => setErr(""), 7000);
     return () => window.clearTimeout(timer);
   }, [err]);
 
@@ -88,6 +151,23 @@ export default function Login() {
               aria-live="polite"
             >
               {err}
+
+              {needsVerify ? (
+                <div className="mt-3 flex gap-2 flex-wrap">
+                  <Button onClick={resend} loading={resending} disabled={resending} size="sm">
+                    Renvoyer l’email
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() =>
+                      nav("/check-email", { state: { email: extractEmailFromUsername(form.username) } })
+                    }
+                  >
+                    Aller à la vérification
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -142,6 +222,10 @@ export default function Login() {
             <Link to="/register" className="underline">
               Créer un compte
             </Link>
+          </div>
+
+          <div className="text-xs text-white/40">
+            Tu n’as pas reçu l’email ? Mets ton email en identifiant puis clique sur “Renvoyer l’email”.
           </div>
         </div>
       </Card>

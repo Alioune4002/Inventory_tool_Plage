@@ -25,7 +25,10 @@ class RegisterSerializer(serializers.Serializer):
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
-            raise serializers.ValidationError("Username already exists.")
+            raise serializers.ValidationError(
+                "Un compte existe déjà avec ce nom d’utilisateur. "
+                "Essaie de te connecter ou vérifie ton email."
+            )
         return value
 
     def validate(self, attrs):
