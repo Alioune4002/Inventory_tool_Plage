@@ -1,10 +1,11 @@
-
+// frontend/src/app/routes.jsx
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import Landing from "../pages/Landing.jsx";
 import Login from "../pages/Login.jsx";
 import Register from "../pages/Register.jsx";
+
 import CommentCaMarche from "../pages/public/CommentCaMarche.jsx";
 import Metiers from "../pages/public/Metiers.jsx";
 import PourRestaurantCuisine from "../pages/public/PourRestaurantCuisine.jsx";
@@ -36,7 +37,6 @@ import RequireAuth from "./RequireAuth.jsx";
 
 import ForgotPassword from "../pages/ForgotPassword.jsx";
 import CheckEmail from "../pages/CheckEmail.jsx";
-
 import VerifyEmail from "../pages/VerifyEmail.jsx";
 import ResetPassword from "../pages/ResetPassword.jsx";
 import ConfirmEmail from "../pages/ConfirmEmail.jsx";
@@ -73,7 +73,7 @@ export default function AppRoutes() {
       <Route path="/tarifs" element={<Tarifs />} />
       <Route path="/support" element={<PublicSupport />} />
 
-      {/* SEO: aliases -> canonical routes */}
+      {/* SEO aliases */}
       <Route path="/cgu" element={<Navigate to="/terms" replace />} />
       <Route path="/confidentialite" element={<Navigate to="/privacy" replace />} />
       <Route path="/mentions-legales" element={<Navigate to="/legal" replace />} />

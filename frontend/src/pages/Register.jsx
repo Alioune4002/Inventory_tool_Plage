@@ -11,27 +11,25 @@ import { api } from "../lib/api";
 import { formatApiError } from "../lib/errorUtils";
 
 // ✅ Liste unique, utilisée dans Register + Settings (labels simples)
-// ⚠️ Alignée avec Service.SERVICE_TYPES côté backend : "dining" (pas "restaurant_dining")
 const SERVICE_TYPE_OPTIONS = [
   { value: "grocery_food", label: "Épicerie alimentaire" },
   { value: "bulk_food", label: "Vrac" },
   { value: "bar", label: "Bar" },
   { value: "kitchen", label: "Cuisine / Restaurant" },
   { value: "bakery", label: "Boulangerie / Pâtisserie" },
-  { value: "dining", label: "Salle / Restaurant" }, // ✅ backend = "dining"
+  { value: "restaurant_dining", label: "Salle / Restaurant" },
   { value: "retail_general", label: "Boutique non-alimentaire" },
   { value: "pharmacy_parapharmacy", label: "Pharmacie / Parapharmacie" },
   { value: "other", label: "Autre" },
 ];
 
 // ✅ Petit helper: reconnait le “métier” d’un service_type
-// (utilisé pour appliquer la reco “barcode/sku/modules” par service)
 function resolveFamilyFromServiceType(serviceType, tenantDomain = "food") {
   const st = String(serviceType || "other");
 
   // Food
-  if (["kitchen", "dining", "bar", "grocery_food", "bulk_food", "bakery"].includes(st)) {
-    if (st === "kitchen" || st === "dining") return "restauration";
+  if (["kitchen", "restaurant_dining", "bar", "grocery_food", "bulk_food", "bakery"].includes(st)) {
+    if (st === "kitchen" || st === "restaurant_dining") return "restauration";
     if (st === "bakery") return "boulangerie";
     if (st === "bar") return "bar";
     if (st === "grocery_food" || st === "bulk_food") return "retail";
@@ -55,8 +53,6 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
       restauration: { service_type: "kitchen", service_name: "Restaurant" },
       boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
       pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
-
-      // ✅ Option “structure multi-services”
       camping_multi: { service_type: "grocery_food", service_name: "Épicerie" },
     }[family] || { service_type: "other", service_name: "Service principal" };
 
@@ -67,7 +63,7 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
       return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
     return [
       { id: "svc-1", service_type: "kitchen", service_name: "Cuisine" },
-      { id: "svc-2", service_type: "dining", service_name: "Salle" }, // ✅ backend = dining
+      { id: "svc-2", service_type: "restaurant_dining", service_name: "Salle" },
     ];
   }
 
@@ -92,7 +88,6 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
     ];
   }
 
-  // ✅ camping/hôtel multi-services: preset utile (épicerie + bar + resto)
   if (family === "camping_multi") {
     return [
       { id: "svc-1", service_type: "grocery_food", service_name: "Épicerie" },
@@ -185,7 +180,6 @@ export default function Register() {
     setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_name: value } : svc)));
   };
 
-  // ✅ typer chaque service
   const handleServiceTypeChange = (idx, value) => {
     setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_type: value } : svc)));
   };
@@ -205,7 +199,7 @@ export default function Register() {
     currentStep === "services" ||
     currentStep === "account";
 
-  // ✅ applique modules global, mais recommandation identifiants selon type de chaque service
+  // ✅ Applique les modules “global” mais la reco “identifiants” selon le type de chaque service
   const applyModuleDefaults = async () => {
     if (!modules?.length) return;
 
@@ -305,21 +299,17 @@ export default function Register() {
         tenant_name: form.storeName,
         domain: domainByFamily[familyId] || "food",
         business_type: businessTypeByFamily[familyId] || "other",
-
-        // ✅ service 1 typé
         service_type: primaryService?.service_type || "other",
         service_name: primaryService?.service_name || "Principal",
-
-        // ✅ services 2..N typés aussi
         extra_services: extraServices.map((svc) => ({
           service_type: svc.service_type || "other",
           name: svc.service_name || "Secondaire",
         })),
       });
 
-      // ✅ si backend exige vérification email, on bascule sur l'écran "check-email"
+      // ✅ IMPORTANT: si verification email requise => pas de token => on part sur CheckEmail
       if (data?.requires_verification) {
-        nav("/check-email", { state: { email: form.email, mode: "verify" } });
+        nav("/check-email", { state: { email: form.email } });
         return;
       }
 
@@ -526,11 +516,7 @@ export default function Register() {
                   onClick={() =>
                     setServiceList((prev) => [
                       ...prev,
-                      {
-                        id: `svc-${Date.now()}`,
-                        service_type: "other",
-                        service_name: "Nouveau service",
-                      },
+                      { id: `svc-${Date.now()}`, service_type: "other", service_name: "Nouveau service" },
                     ])
                   }
                 >
@@ -561,12 +547,7 @@ export default function Register() {
                   value={form.email}
                   onChange={updateForm("email")}
                 />
-                <Input
-                  label="Mot de passe"
-                  type="password"
-                  value={form.password}
-                  onChange={updateForm("password")}
-                />
+                <Input label="Mot de passe" type="password" value={form.password} onChange={updateForm("password")} />
                 <Input
                   label="Confirme le mot de passe"
                   type="password"
