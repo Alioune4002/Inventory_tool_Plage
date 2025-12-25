@@ -197,3 +197,39 @@ export async function downloadInventoryExcel({ month }) {
 
   return res?.data; // blob
 }
+
+// -----------------------------
+// Account security helpers
+// -----------------------------
+export async function requestPasswordReset({ email, username } = {}) {
+  const payload = {};
+  if (email) payload.email = email;
+  if (username) payload.username = username;
+  const res = await api.post("/api/auth/password-reset/", payload);
+  return res?.data;
+}
+
+export async function confirmPasswordReset({ uid, token, new_password, new_password_confirm }) {
+  const res = await api.post("/api/auth/password-reset/confirm/", {
+    uid,
+    token,
+    new_password,
+    new_password_confirm,
+  });
+  return res?.data;
+}
+
+export async function requestEmailChange({ email }) {
+  const res = await api.post("/api/auth/email-change/", { email });
+  return res?.data;
+}
+
+export async function resendVerificationEmail({ email }) {
+  const res = await api.post("/api/auth/verify-email/resend/", { email });
+  return res?.data;
+}
+
+export async function deleteMyAccount() {
+  const res = await api.delete("/api/auth/delete-account/");
+  return res?.data;
+}

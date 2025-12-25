@@ -10,29 +10,70 @@ import { FAMILLES, MODULES, DEFAULT_MODULES } from "../lib/famillesConfig";
 import { api } from "../lib/api";
 import { formatApiError } from "../lib/errorUtils";
 
+// ✅ Liste unique, utilisée dans Register + Settings (labels simples)
+// ⚠️ Alignée avec Service.SERVICE_TYPES côté backend : "dining" (pas "restaurant_dining")
+const SERVICE_TYPE_OPTIONS = [
+  { value: "grocery_food", label: "Épicerie alimentaire" },
+  { value: "bulk_food", label: "Vrac" },
+  { value: "bar", label: "Bar" },
+  { value: "kitchen", label: "Cuisine / Restaurant" },
+  { value: "bakery", label: "Boulangerie / Pâtisserie" },
+  { value: "dining", label: "Salle / Restaurant" }, // ✅ backend = "dining"
+  { value: "retail_general", label: "Boutique non-alimentaire" },
+  { value: "pharmacy_parapharmacy", label: "Pharmacie / Parapharmacie" },
+  { value: "other", label: "Autre" },
+];
+
+// ✅ Petit helper: reconnait le “métier” d’un service_type
+// (utilisé pour appliquer la reco “barcode/sku/modules” par service)
+function resolveFamilyFromServiceType(serviceType, tenantDomain = "food") {
+  const st = String(serviceType || "other");
+
+  // Food
+  if (["kitchen", "dining", "bar", "grocery_food", "bulk_food", "bakery"].includes(st)) {
+    if (st === "kitchen" || st === "dining") return "restauration";
+    if (st === "bakery") return "boulangerie";
+    if (st === "bar") return "bar";
+    if (st === "grocery_food" || st === "bulk_food") return "retail";
+    return "restauration";
+  }
+
+  // General
+  if (st === "retail_general") return "mode";
+  if (st === "pharmacy_parapharmacy") return "pharmacie";
+
+  // fallback
+  return tenantDomain === "general" ? "mode" : "retail";
+}
+
 const servicePresets = (family, isMulti, linkedMode = "separate") => {
   const primary =
     {
       retail: { service_type: "grocery_food", service_name: "Épicerie" },
-      mode: { service_type: "retail_general", service_name: "Boutique (mode)" },
+      mode: { service_type: "retail_general", service_name: "Boutique" },
       bar: { service_type: "bar", service_name: "Bar" },
       restauration: { service_type: "kitchen", service_name: "Restaurant" },
       boulangerie: { service_type: "bakery", service_name: "Boulangerie" },
       pharmacie: { service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
+
+      // ✅ Option “structure multi-services”
+      camping_multi: { service_type: "grocery_food", service_name: "Épicerie" },
     }[family] || { service_type: "other", service_name: "Service principal" };
 
   if (!isMulti) return [{ id: "svc-1", ...primary }];
 
   if (family === "restauration") {
-    if (linkedMode === "merge") return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
+    if (linkedMode === "merge")
+      return [{ id: "svc-1", service_type: "kitchen", service_name: "Restaurant & Cuisine" }];
     return [
       { id: "svc-1", service_type: "kitchen", service_name: "Cuisine" },
-      { id: "svc-2", service_type: "restaurant_dining", service_name: "Salle" },
+      { id: "svc-2", service_type: "dining", service_name: "Salle" }, // ✅ backend = dining
     ];
   }
 
   if (family === "boulangerie") {
-    if (linkedMode === "merge") return [{ id: "svc-1", service_type: "bakery", service_name: "Boulangerie & Pâtisserie" }];
+    if (linkedMode === "merge")
+      return [{ id: "svc-1", service_type: "bakery", service_name: "Boulangerie & Pâtisserie" }];
     return [
       { id: "svc-1", service_type: "bakery", service_name: "Boulangerie" },
       { id: "svc-2", service_type: "bakery", service_name: "Pâtisserie" },
@@ -41,11 +82,22 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
 
   if (family === "pharmacie") {
     if (linkedMode === "merge") {
-      return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
+      return [
+        { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" },
+      ];
     }
     return [
       { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
       { id: "svc-2", service_type: "pharmacy_parapharmacy", service_name: "Parapharmacie" },
+    ];
+  }
+
+  // ✅ camping/hôtel multi-services: preset utile (épicerie + bar + resto)
+  if (family === "camping_multi") {
+    return [
+      { id: "svc-1", service_type: "grocery_food", service_name: "Épicerie" },
+      { id: "svc-2", service_type: "bar", service_name: "Bar" },
+      { id: "svc-3", service_type: "kitchen", service_name: "Restauration" },
     ];
   }
 
@@ -59,7 +111,9 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
   <div className="border border-slate-800 rounded-2xl p-3 flex items-start gap-3 bg-slate-900">
     <button
       type="button"
-      className={`w-10 h-10 rounded-full border ${active ? "bg-blue-500 border-blue-400" : "border-white/20"} flex items-center justify-center text-white`}
+      className={`w-10 h-10 rounded-full border ${
+        active ? "bg-blue-500 border-blue-400" : "border-white/20"
+      } flex items-center justify-center text-white`}
       onClick={() => onToggle(moduleId)}
       aria-pressed={active}
     >
@@ -131,6 +185,11 @@ export default function Register() {
     setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_name: value } : svc)));
   };
 
+  // ✅ typer chaque service
+  const handleServiceTypeChange = (idx, value) => {
+    setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_type: value } : svc)));
+  };
+
   const nextStep = () => setStepIndex((prev) => Math.min(prev + 1, flowSteps.length - 1));
   const prevStep = () => setStepIndex((prev) => Math.max(prev - 1, 0));
 
@@ -146,10 +205,10 @@ export default function Register() {
     currentStep === "services" ||
     currentStep === "account";
 
+  // ✅ applique modules global, mais recommandation identifiants selon type de chaque service
   const applyModuleDefaults = async () => {
     if (!modules?.length) return;
 
-    // petit retry: après register(), selon ton AuthProvider, le token peut être posé juste après.
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const res = await api.get("/api/auth/services/");
@@ -157,13 +216,16 @@ export default function Register() {
         if (!services.length) return;
 
         const moduleSet = new Set(modules);
-        const identifiers = familyMeta?.identifiers || {};
         const identifierEnabled = moduleSet.has("identifier");
         const pricingEnabled = moduleSet.has("pricing");
 
         await Promise.all(
           services.map(async (svc) => {
             const nextFeatures = { ...(svc.features || {}) };
+
+            const familyForSvcId = resolveFamilyFromServiceType(svc.service_type, "food");
+            const familyForSvc = FAMILLES.find((f) => f.id === familyForSvcId) ?? familyMeta;
+            const identifiers = familyForSvc?.identifiers || {};
 
             nextFeatures.barcode = {
               ...(nextFeatures.barcode || {}),
@@ -195,7 +257,6 @@ export default function Register() {
 
         return;
       } catch (e) {
-        // on retente brièvement, puis on abandonne sans bloquer l'onboarding
         await sleep(250);
       }
     }
@@ -225,6 +286,7 @@ export default function Register() {
         restauration: "restaurant",
         boulangerie: "grocery",
         pharmacie: "pharmacy",
+        camping_multi: "camping_multi",
       };
 
       const domainByFamily = {
@@ -234,21 +296,32 @@ export default function Register() {
         boulangerie: "food",
         mode: "general",
         pharmacie: "general",
+        camping_multi: "food",
       };
 
-      await register({
+      const data = await register({
         password: form.password,
         email: form.email,
         tenant_name: form.storeName,
         domain: domainByFamily[familyId] || "food",
         business_type: businessTypeByFamily[familyId] || "other",
+
+        // ✅ service 1 typé
         service_type: primaryService?.service_type || "other",
         service_name: primaryService?.service_name || "Principal",
+
+        // ✅ services 2..N typés aussi
         extra_services: extraServices.map((svc) => ({
           service_type: svc.service_type || "other",
           name: svc.service_name || "Secondaire",
         })),
       });
+
+      // ✅ si backend exige vérification email, on bascule sur l'écran "check-email"
+      if (data?.requires_verification) {
+        nav("/check-email", { state: { email: form.email, mode: "verify" } });
+        return;
+      }
 
       await applyModuleDefaults();
       nav("/app/dashboard");
@@ -270,7 +343,10 @@ export default function Register() {
     <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center py-10 px-4">
       <Helmet>
         <title>Créer mon espace | StockScan</title>
-        <meta name="description" content="Créez votre espace StockScan en quelques minutes : famille métier, services, modules et accès." />
+        <meta
+          name="description"
+          content="Créez votre espace StockScan en quelques minutes : famille métier, services, modules et accès."
+        />
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
@@ -329,7 +405,12 @@ export default function Register() {
                   }`}
                 >
                   <div className="font-semibold">Multi-services</div>
-                  <div className="text-sm text-slate-400">Cuisine + Salle, rayons, équipes… tout reste clair.</div>
+                  <div className="text-sm text-slate-400">
+                    Cuisine + Salle, rayons, équipes… tout reste clair.
+                    <span className="block mt-1 text-xs text-slate-500">
+                      Idéal aussi pour camping / hôtel multi-services (épicerie + bar + restauration).
+                    </span>
+                  </div>
                 </button>
               </div>
             </section>
@@ -374,7 +455,9 @@ export default function Register() {
               <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                 <div className="text-sm text-slate-400">Combo conseillé</div>
                 <div className="text-lg font-semibold text-white">{comboSummary}</div>
-                <div className="text-xs text-slate-500 mt-1">Tu pourras choisir regrouper ou séparer à l’étape suivante.</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Tu pourras choisir regrouper ou séparer à l’étape suivante.
+                </div>
               </div>
             </section>
           )}
@@ -383,7 +466,9 @@ export default function Register() {
             <section className="space-y-4">
               <div>
                 <h2 className="text-xl font-semibold">Organisation des services</h2>
-                <p className="text-sm text-slate-400">Ajuste les noms et choisis si tu veux regrouper ou séparer.</p>
+                <p className="text-sm text-slate-400">
+                  Donne un nom à chaque service et choisis son type : ça personnalise l’interface (champs, modules, exports).
+                </p>
               </div>
 
               {linkedFamilies.has(familyId) && isGroundedMulti && (
@@ -405,13 +490,32 @@ export default function Register() {
 
               <div className="space-y-3">
                 {serviceList.map((service, index) => (
-                  <Input
-                    key={service.id}
-                    label={`Service ${index + 1}`}
-                    value={service.service_name}
-                    placeholder={`Service ${index + 1}`}
-                    onChange={(event) => handleServiceNameChange(index, event.target.value)}
-                  />
+                  <div key={service.id} className="grid md:grid-cols-2 gap-3">
+                    <Input
+                      label={`Nom du service ${index + 1}`}
+                      value={service.service_name}
+                      placeholder={`Service ${index + 1}`}
+                      onChange={(event) => handleServiceNameChange(index, event.target.value)}
+                    />
+
+                    <label className="space-y-1.5">
+                      <span className="text-sm font-medium text-slate-200">Type de service</span>
+                      <select
+                        value={service.service_type || "other"}
+                        onChange={(event) => handleServiceTypeChange(index, event.target.value)}
+                        className="w-full rounded-2xl bg-slate-950 border border-white/10 px-3 py-2.5 text-sm text-white"
+                      >
+                        {SERVICE_TYPE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-slate-500">
+                        Ce choix active les bons champs (scan, DLC, TVA, lots, etc.).
+                      </span>
+                    </label>
+                  </div>
                 ))}
               </div>
 
@@ -424,7 +528,7 @@ export default function Register() {
                       ...prev,
                       {
                         id: `svc-${Date.now()}`,
-                        service_type: servicePresets(familyId, false)[0]?.service_type || "other",
+                        service_type: "other",
                         service_name: "Nouveau service",
                       },
                     ])
@@ -457,7 +561,12 @@ export default function Register() {
                   value={form.email}
                   onChange={updateForm("email")}
                 />
-                <Input label="Mot de passe" type="password" value={form.password} onChange={updateForm("password")} />
+                <Input
+                  label="Mot de passe"
+                  type="password"
+                  value={form.password}
+                  onChange={updateForm("password")}
+                />
                 <Input
                   label="Confirme le mot de passe"
                   type="password"

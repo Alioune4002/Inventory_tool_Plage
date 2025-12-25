@@ -1,4 +1,4 @@
-// src/lib/auth.js
+
 import { api, setAuthToken } from "./api";
 
 const ACCESS_KEY = "accessToken";
@@ -38,20 +38,43 @@ export async function apiMe() {
   return res.data;
 }
 
-export async function apiRegister({ email, password, tenant_name, domain, service_type, service_name, business_type, extra_services }) {
-  const username = (email?.split("@")[0] || "user").slice(0, 20);
+// Petit helper: fallback username si jamais l'email est absent (tests, etc.)
+function makeFallbackUsername() {
+  // user-xxxxxxxx (8 chars)
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `user-${rand}`;
+}
+
+export async function apiRegister({
+  email,
+  password,
+  tenant_name,
+  domain,
+  service_type,
+  service_name,
+  business_type,
+  extra_services,
+}) {
+  // IMPORTANT:
+  // - backend REQUIERT "username"
+  // - pour éviter les collisions, on met username = email (unique) si possible
+  // - sinon fallback random
+  const safeEmail = (email || "").trim();
+  const username = safeEmail ? safeEmail.toLowerCase() : makeFallbackUsername();
+
   const payload = {
     username,
-    email,
+    email: safeEmail, // backend accepte email vide, mais toi côté UI tu le demandes
     password,
     password_confirm: password,
     tenant_name: tenant_name || "Mon commerce",
     domain: domain || "food",
     business_type: business_type || "other",
-    service_type,
-    service_name,
-    extra_services: extra_services || [],
+    service_type: service_type || "other",
+    service_name: service_name || "Principal",
+    extra_services: Array.isArray(extra_services) ? extra_services : [],
   };
+
   const res = await api.post("/api/auth/register/", payload);
   return res.data;
 }

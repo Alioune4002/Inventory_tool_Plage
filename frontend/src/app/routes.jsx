@@ -1,3 +1,4 @@
+
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 
@@ -33,6 +34,13 @@ import NotFound from "../pages/NotFound.jsx";
 import InvitationAccept from "../pages/InvitationAccept.jsx";
 import RequireAuth from "./RequireAuth.jsx";
 
+import ForgotPassword from "../pages/ForgotPassword.jsx";
+import CheckEmail from "../pages/CheckEmail.jsx";
+
+import VerifyEmail from "../pages/VerifyEmail.jsx";
+import ResetPassword from "../pages/ResetPassword.jsx";
+import ConfirmEmail from "../pages/ConfirmEmail.jsx";
+
 const Protected = ({ children }) => <RequireAuth>{children}</RequireAuth>;
 
 export default function AppRoutes() {
@@ -44,6 +52,14 @@ export default function AppRoutes() {
       <Route path="/register" element={<Register />} />
 
       <Route path="/invitation/accept" element={<InvitationAccept />} />
+
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/check-email" element={<CheckEmail />} />
+
+      {/* Security callbacks */}
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/confirm-email" element={<ConfirmEmail />} />
 
       <Route path="/comment-ca-marche" element={<CommentCaMarche />} />
       <Route path="/metiers" element={<Metiers />} />
@@ -68,15 +84,70 @@ export default function AppRoutes() {
 
       {/* App (protected) */}
       <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
-
-      <Route path="/app/dashboard" element={<Protected><Dashboard /></Protected>} />
-      <Route path="/app/inventory" element={<Protected><Inventory /></Protected>} />
-      <Route path="/app/products" element={<Protected><Products /></Protected>} />
-      <Route path="/app/categories" element={<Protected><Categories /></Protected>} />
-      <Route path="/app/exports" element={<Protected><Exports /></Protected>} />
-      <Route path="/app/losses" element={<Protected><Losses /></Protected>} />
-      <Route path="/app/settings" element={<Protected><Settings /></Protected>} />
-      <Route path="/app/support" element={<Protected><Support /></Protected>} />
+      <Route
+        path="/app/dashboard"
+        element={
+          <Protected>
+            <Dashboard />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/inventory"
+        element={
+          <Protected>
+            <Inventory />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/products"
+        element={
+          <Protected>
+            <Products />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/categories"
+        element={
+          <Protected>
+            <Categories />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/exports"
+        element={
+          <Protected>
+            <Exports />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/losses"
+        element={
+          <Protected>
+            <Losses />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/settings"
+        element={
+          <Protected>
+            <Settings />
+          </Protected>
+        }
+      />
+      <Route
+        path="/app/support"
+        element={
+          <Protected>
+            <Support />
+          </Protected>
+        }
+      />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />

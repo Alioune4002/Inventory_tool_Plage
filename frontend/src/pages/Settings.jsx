@@ -1,3 +1,4 @@
+// frontend/src/pages/Settings.jsx
 // Deployed backend: https://inventory-tool-plage.onrender.com
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
@@ -7,7 +8,13 @@ import Button from "../ui/Button";
 import PageTransition from "../components/PageTransition";
 import Skeleton from "../ui/Skeleton";
 import { useAuth } from "../app/AuthProvider";
-import { api } from "../lib/api";
+import {
+  api,
+  requestEmailChange,
+  requestPasswordReset,
+  resendVerificationEmail,
+  deleteMyAccount,
+} from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import Divider from "../ui/Divider";
 import useEntitlements from "../app/useEntitlements";
@@ -18,13 +25,40 @@ import { getTourKey, getTourPendingKey } from "../lib/tour";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
+const ROLE_OPTIONS = [
+  {
+    value: "operator",
+    label: "Opérateur",
+    help: "Accès aux inventaires et à la saisie de stock.",
+  },
+  {
+    value: "manager",
+    label: "Gestionnaire",
+    help: "Accès avancé : catégories, exports, réglages selon votre organisation.",
+  },
+];
+
+const ROLE_LABELS = {
+  owner: "Propriétaire",
+  manager: "Gestionnaire",
+  operator: "Opérateur",
+};
+
+const roleLabel = (role) => ROLE_LABELS[String(role || "")] || String(role || "—");
+
 const FeatureToggle = ({ label, description, helper, checked, onChange, disabled }) => (
-  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 dark:border-slate-700 dark:bg-slate-900/50">
-    <input type="checkbox" className="mt-1 accent-blue-600" checked={checked} onChange={onChange} disabled={disabled} />
+  <label className="flex items-start gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3">
+    <input
+      type="checkbox"
+      className="mt-1 accent-blue-600"
+      checked={Boolean(checked)}
+      onChange={onChange}
+      disabled={disabled}
+    />
     <div className="space-y-1">
-      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{label}</div>
-      {description ? <div className="text-xs text-slate-600 dark:text-slate-300">{description}</div> : null}
-      {helper ? <div className="text-xs text-slate-500 dark:text-slate-400">{helper}</div> : null}
+      <div className="text-sm font-semibold text-[var(--text)]">{label}</div>
+      {description ? <div className="text-xs text-[var(--muted)]">{description}</div> : null}
+      {helper ? <div className="text-xs text-[var(--muted)] opacity-90">{helper}</div> : null}
     </div>
   </label>
 );
@@ -39,28 +73,45 @@ const copyToClipboard = async (text) => {
 };
 
 export default function Settings() {
-  const { me, tenant, services, refreshServices, logout, serviceId, selectService, isAllServices } = useAuth();
+  const {
+    me,
+    tenant,
+    services,
+    refreshServices,
+    logout,
+    serviceId,
+    selectService,
+    isAllServices,
+    refreshMe,
+  } = useAuth();
+
   const { data: entitlements, loading: entLoading, refetch: refetchEntitlements } = useEntitlements();
   const pushToast = useToast();
+
   const userId = me?.id || me?.user?.id || me?.user_id || "";
+  const currentEmail = me?.email || "";
 
   const [newService, setNewService] = useState("");
-  const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
   const [confirmA, setConfirmA] = useState(false);
   const [confirmB, setConfirmB] = useState(false);
+  const [deletePhrase, setDeletePhrase] = useState("");
 
   const [scanMode, setScanMode] = useState(() => localStorage.getItem("scanMode") || "scan");
   const [coachEnabled, setCoachEnabled] = useState(() => localStorage.getItem("coach") !== "off");
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
 
-  const [emailForm, setEmailForm] = useState({ email: "" });
-  const [pwdForm, setPwdForm] = useState({ pwd: "", confirm: "" });
-
   const [billingBusy, setBillingBusy] = useState(false);
 
-  // ✅ Members / access (owner only)
+  const [emailForm, setEmailForm] = useState({ email: "" });
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const [securityInfo, setSecurityInfo] = useState({
+    emailChangeRequested: false,
+    resetRequested: false,
+  });
+
   const [membersVisible, setMembersVisible] = useState(false);
   const [membersLoading, setMembersLoading] = useState(false);
   const [members, setMembers] = useState([]);
@@ -69,7 +120,7 @@ export default function Settings() {
   const [inviteForm, setInviteForm] = useState({
     email: "",
     role: "operator",
-    service_id: "", // "" => all services
+    service_id: "", // "" => tous les services
   });
 
   const [lastInviteLink, setLastInviteLink] = useState("");
@@ -116,61 +167,65 @@ export default function Settings() {
 
   useEffect(() => {
     loadMembers();
-   
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  
-const inviteMember = async () => {
-  if (!inviteForm.email.trim()) {
-    pushToast?.({ message: "Email requis.", type: "error" });
-    return;
-  }
-  setMembersLoading(true);
-  setLastInviteLink("");
-  try {
-    const payload = {
-      email: inviteForm.email.trim(),
-      role: inviteForm.role,
-      service_id: inviteForm.service_id ? Number(inviteForm.service_id) : null,
-    };
-
-    const res = await api.post("/api/auth/invitations/", payload);
-
-    const link = res?.data?.invite_link || "";
-    const emailSent = res?.data?.email_sent === true;
-
-    setInviteForm({ email: "", role: "operator", service_id: "" });
-
-    // Fallback: si email non envoyé, on conserve le lien pour partage manuel
-    if (link && (!emailSent || import.meta.env.DEV)) {
-      setLastInviteLink(link);
+  const inviteMember = async () => {
+    if (!inviteForm.email.trim()) {
+      pushToast?.({ message: "Email requis.", type: "error" });
+      return;
     }
 
-    if (emailSent) {
-      pushToast?.({
-        message: "Invitation envoyée par email. L’invité va créer son mot de passe via le lien.",
-        type: "success",
-      });
-    } else {
-      pushToast?.({
-        message:
-          "Invitation créée, mais l’email n’a pas pu être envoyé. Copie le lien d’invitation et partage-le manuellement.",
-        type: "warn",
-      });
-    }
+    setMembersLoading(true);
+    setLastInviteLink("");
 
-    await loadMembers();
-    refetchEntitlements?.();
-  } catch (e) {
-    const msg =
-      e?.response?.data?.detail ||
-      e?.response?.data?.email ||
-      "Impossible d’envoyer l’invitation.";
-    pushToast?.({ message: typeof msg === "string" ? msg : "Invitation impossible.", type: "error" });
-  } finally {
-    setMembersLoading(false);
-  }
-};
+    try {
+      const payload = {
+        email: inviteForm.email.trim(),
+        role: inviteForm.role,
+        service_id: inviteForm.service_id ? Number(inviteForm.service_id) : null,
+      };
+
+      const res = await api.post("/api/auth/invitations/", payload);
+
+      const link = res?.data?.invite_link || "";
+      const emailSent = res?.data?.email_sent === true;
+
+      setInviteForm({ email: "", role: "operator", service_id: "" });
+
+      if (link && (!emailSent || import.meta.env.DEV)) {
+        setLastInviteLink(link);
+      }
+
+      if (emailSent) {
+        pushToast?.({
+          message:
+            "Invitation envoyée par email. La personne crée son mot de passe via le lien reçu.",
+          type: "success",
+        });
+      } else {
+        pushToast?.({
+          message:
+            "Invitation créée, mais l’email n’a pas pu être envoyé. Copie le lien et partage-le manuellement.",
+          type: "warn",
+        });
+      }
+
+      await loadMembers();
+      refetchEntitlements?.();
+    } catch (e) {
+      const msg =
+        e?.response?.data?.detail ||
+        e?.response?.data?.email ||
+        "Impossible d’envoyer l’invitation.";
+      pushToast?.({
+        message: typeof msg === "string" ? msg : "Invitation impossible.",
+        type: "error",
+      });
+    } finally {
+      setMembersLoading(false);
+    }
+  };
 
   const updateMember = async (membershipId, patch) => {
     setMembersLoading(true);
@@ -223,6 +278,7 @@ const inviteMember = async () => {
     setLoading(true);
     try {
       const nextFeatures = { ...(svc.features || {}) };
+
       if (key === "prices_purchase") {
         const prices = { ...(nextFeatures.prices || {}) };
         prices.purchase_enabled = value;
@@ -236,6 +292,7 @@ const inviteMember = async () => {
       } else {
         nextFeatures[key] = { ...(nextFeatures[key] || {}), enabled: value };
       }
+
       await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
       await refreshServices();
       pushToast?.({ message: "Service mis à jour.", type: "success" });
@@ -267,38 +324,121 @@ const inviteMember = async () => {
 
   const addService = async () => {
     if (!newService.trim()) return;
+
     setLoading(true);
-    setToast("");
     try {
       await api.post("/api/auth/services/", { name: newService.trim() });
       await refreshServices();
       setNewService("");
-      setToast("Service ajouté.");
-      pushToast?.({ message: "Service ajouté", type: "success" });
+      pushToast?.({ message: "Service ajouté.", type: "success" });
       refetchEntitlements?.();
-      loadMembers(); // services list change impact scope labels
+      loadMembers();
     } catch (e) {
       const msg =
         e?.friendlyMessage ||
         e?.response?.data?.detail ||
         e?.response?.data?.non_field_errors?.[0] ||
         "Impossible d’ajouter ce service.";
-      setToast(msg);
       pushToast?.({ message: msg, type: "error" });
     } finally {
       setLoading(false);
     }
   };
 
+  // -----------------------------
+  // Sécurité (liens email)
+  // -----------------------------
+  const submitEmailChange = async () => {
+    const email = (emailForm.email || "").trim();
+    if (!email) {
+      pushToast?.({ message: "Nouvel email requis.", type: "error" });
+      return;
+    }
+    if (email.toLowerCase() === (currentEmail || "").toLowerCase()) {
+      pushToast?.({ message: "C’est déjà votre email actuel.", type: "info" });
+      return;
+    }
+
+    setSecurityBusy(true);
+    try {
+      await requestEmailChange({ email });
+      setSecurityInfo((p) => ({ ...p, emailChangeRequested: true }));
+      pushToast?.({
+        message: "Email envoyé. Confirme le changement via le lien reçu (puis reconnecte-toi).",
+        type: "success",
+      });
+      setEmailForm({ email: "" });
+    } catch (e) {
+      const msg =
+        e?.friendlyMessage || e?.response?.data?.detail || "Impossible d’envoyer l’email de confirmation.";
+      pushToast?.({ message: msg, type: "error" });
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const submitPasswordResetEmail = async () => {
+    const email = (currentEmail || "").trim();
+    const username = (me?.username || "").trim();
+
+    if (!email && !username) {
+      pushToast?.({ message: "Impossible : aucun email/identifiant détecté.", type: "error" });
+      return;
+    }
+
+    setSecurityBusy(true);
+    try {
+      await requestPasswordReset({ email: email || undefined, username: email ? undefined : username });
+      setSecurityInfo((p) => ({ ...p, resetRequested: true }));
+      pushToast?.({
+        message: "Email envoyé. Ouvre le lien pour définir un nouveau mot de passe.",
+        type: "success",
+      });
+    } catch (e) {
+      const msg =
+        e?.friendlyMessage ||
+        e?.response?.data?.detail ||
+        "Impossible d’envoyer l’email de réinitialisation.";
+      pushToast?.({ message: msg, type: "error" });
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
+  const submitResendVerification = async () => {
+    const email = (currentEmail || "").trim();
+    if (!email) {
+      pushToast?.({ message: "Aucun email sur le compte. Ajoute un email puis réessaie.", type: "error" });
+      return;
+    }
+    setSecurityBusy(true);
+    try {
+      await resendVerificationEmail({ email });
+      pushToast?.({ message: "Email de vérification renvoyé.", type: "success" });
+    } catch (e) {
+      const msg = e?.friendlyMessage || e?.response?.data?.detail || "Impossible de renvoyer l’email.";
+      pushToast?.({ message: msg, type: "error" });
+    } finally {
+      setSecurityBusy(false);
+    }
+  };
+
   const deleteAccount = async () => {
-    if (!confirmA || !confirmB) return;
+    const phraseOk = String(deletePhrase || "").trim().toUpperCase() === "SUPPRIMER";
+    if (!confirmA || !confirmB || !phraseOk) {
+      pushToast?.({ message: "Confirme les cases + tape SUPPRIMER pour continuer.", type: "error" });
+      return;
+    }
+
     setDeleting(true);
     try {
-      await api.delete("/api/auth/delete-account/");
-      pushToast?.({ message: "Compte supprimé. Vous allez être déconnecté.", type: "warn" });
+      await deleteMyAccount();
+      pushToast?.({ message: "Compte supprimé. Déconnexion…", type: "warn" });
       logout();
     } catch (e) {
-      pushToast?.({ message: "Suppression impossible (réessaie plus tard).", type: "error" });
+      const msg =
+        e?.friendlyMessage || e?.response?.data?.detail || "Suppression impossible (réessaie plus tard).";
+      pushToast?.({ message: msg, type: "error" });
     } finally {
       setDeleting(false);
     }
@@ -306,30 +446,34 @@ const inviteMember = async () => {
 
   const planLabel = formatPlanLabel(entitlements?.plan_effective, "Solo");
   const subStatus = entitlements?.subscription_status || "NONE";
-  const expiresAt = entitlements?.expires_at ? new Date(entitlements.expires_at).toLocaleDateString("fr-FR") : null;
+  const expiresAt = entitlements?.expires_at
+    ? new Date(entitlements.expires_at).toLocaleDateString("fr-FR")
+    : null;
 
   return (
     <PageTransition>
       <Helmet>
-        <title>Settings | StockScan</title>
-        <meta name="description" content="Préférences du compte et services." />
+        <title>Paramètres | StockScan</title>
+        <meta name="description" content="Compte, services, équipe, sécurité et abonnement." />
       </Helmet>
 
       <div className="space-y-4">
         <Card className="p-6 space-y-2">
-          <div className="text-sm text-slate-600 dark:text-slate-400">Paramètres</div>
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white">Compte & Services</h1>
-          <p className="text-slate-700 dark:text-slate-300 text-sm">Gérez votre compte, vos services, votre équipe et votre abonnement.</p>
+          <div className="text-sm text-[var(--muted)]">Paramètres</div>
+          <h1 className="text-2xl font-black text-[var(--text)]">Compte & services</h1>
+          <p className="text-[var(--muted)] text-sm">
+            Gérez votre compte, vos services, votre équipe et votre abonnement.
+          </p>
         </Card>
 
-        {/* ✅ Owner: Team & access */}
+        {/* Équipe & accès (visible owner) */}
         {membersVisible ? (
           <Card className="p-6 space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Équipe & Accès</div>
-                <div className="text-sm text-slate-600 dark:text-slate-300">
-                  Invitez un membre : il reçoit un lien et crée lui-même son mot de passe.
+                <div className="text-sm font-semibold text-[var(--text)]">Équipe & accès</div>
+                <div className="text-sm text-[var(--muted)]">
+                  Invitez quelqu’un : il/elle reçoit un lien et crée son mot de passe.
                 </div>
               </div>
               <div className="flex gap-2 flex-wrap">
@@ -339,9 +483,10 @@ const inviteMember = async () => {
               </div>
             </div>
 
+            {/* Invitation */}
             <div className="grid md:grid-cols-4 gap-3 items-end">
               <Input
-                label="Inviter (email)"
+                label="Email du membre"
                 type="email"
                 placeholder="responsable@societe.com"
                 value={inviteForm.email}
@@ -349,23 +494,27 @@ const inviteMember = async () => {
               />
 
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Rôle</span>
+                <span className="text-sm font-medium text-[var(--text)]">Rôle</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={inviteForm.role}
                   onChange={(e) => setInviteForm((p) => ({ ...p, role: e.target.value }))}
                 >
-                  <option value="operator">Operator (inventaire)</option>
-                  <option value="manager">Manager (catégories/exports)</option>
+                  {ROLE_OPTIONS.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
                 </select>
+                <span className="text-xs text-[var(--muted)]">
+                  {ROLE_OPTIONS.find((r) => r.value === inviteForm.role)?.help || ""}
+                </span>
               </label>
 
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Scope service</span>
+                <span className="text-sm font-medium text-[var(--text)]">Accès limité à un service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={inviteForm.service_id}
                   onChange={(e) => setInviteForm((p) => ({ ...p, service_id: e.target.value }))}
                 >
@@ -376,6 +525,9 @@ const inviteMember = async () => {
                     </option>
                   ))}
                 </select>
+                <span className="text-xs text-[var(--muted)]">
+                  Optionnel : utile si un membre ne doit travailler que sur un seul service.
+                </span>
               </label>
 
               <Button onClick={inviteMember} loading={membersLoading}>
@@ -383,30 +535,37 @@ const inviteMember = async () => {
               </Button>
             </div>
 
-                  {lastInviteLink ? (
-                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-                      <div className="font-semibold">Lien d'invitation</div>
-                      <div className="text-xs opacity-80">
-                        (à utiliser si l'email n'a pas été reçu)
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={async () => {
-                          const ok = await copyToClipboard(lastInviteLink);
-                          pushToast?.({ message: ok ? "Lien copié." : "Copie impossible.", type: ok ? "success" : "error" });
-                        }}
-                      >
-                        Copier
-                      </Button>
-                    </div>
-                  ) : null}
+            {/* Lien d’invitation (fallback) */}
+            {lastInviteLink ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+                <div className="font-semibold">Lien d’invitation</div>
+                <div className="text-xs opacity-80">
+                  À utiliser si l’email n’a pas été reçu (spams, restrictions, etc.).
+                </div>
+                <div className="pt-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      const ok = await copyToClipboard(lastInviteLink);
+                      pushToast?.({
+                        message: ok ? "Lien copié." : "Copie impossible.",
+                        type: ok ? "success" : "error",
+                      });
+                    }}
+                  >
+                    Copier le lien
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <Divider />
 
             <div className="grid lg:grid-cols-2 gap-4">
+              {/* Membres */}
               <Card className="p-4 space-y-3" hover>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Membres</div>
+                <div className="text-sm font-semibold text-[var(--text)]">Membres</div>
 
                 {membersLoading ? (
                   <div className="grid gap-2">
@@ -419,36 +578,41 @@ const inviteMember = async () => {
                     {members.map((m) => {
                       const user = m?.user || {};
                       const scope = m?.service_scope?.id ? String(m.service_scope.id) : "";
+                      const isOwner = String(m.role) === "owner";
+
                       return (
                         <Card key={m.id} className="p-4 space-y-3" hover>
-                          <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          <div className="text-sm font-semibold text-[var(--text)]">
                             {user.username || "Utilisateur"} ·{" "}
-                            <span className="text-slate-600 dark:text-slate-300">{user.email || "—"}</span>
+                            <span className="text-[var(--muted)]">{user.email || "—"}</span>
                           </div>
 
                           <div className="grid sm:grid-cols-3 gap-2 items-end">
                             <label className="space-y-1.5">
-                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Rôle</span>
+                              <span className="text-xs font-semibold text-[var(--muted)]">Rôle</span>
                               <select
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
-                                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                                 value={m.role || "operator"}
                                 onChange={(e) => updateMember(m.id, { role: e.target.value })}
                                 disabled={membersLoading}
                               >
-                                <option value="operator">operator</option>
-                                <option value="manager">manager</option>
-                                <option value="owner">owner</option>
+                                <option value="operator">Opérateur</option>
+                                <option value="manager">Gestionnaire</option>
+                                <option value="owner">Propriétaire</option>
                               </select>
+                              <span className="text-xs text-[var(--muted)]">Affiché : {roleLabel(m.role)}</span>
                             </label>
 
                             <label className="space-y-1.5">
-                              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">Service</span>
+                              <span className="text-xs font-semibold text-[var(--muted)]">Service</span>
                               <select
-                                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900
-                                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                                 value={scope}
-                                onChange={(e) => updateMember(m.id, { service_id: e.target.value ? Number(e.target.value) : null })}
+                                onChange={(e) =>
+                                  updateMember(m.id, {
+                                    service_id: e.target.value ? Number(e.target.value) : null,
+                                  })
+                                }
                                 disabled={membersLoading}
                               >
                                 <option value="">Tous les services</option>
@@ -458,21 +622,34 @@ const inviteMember = async () => {
                                   </option>
                                 ))}
                               </select>
+                              <span className="text-xs text-[var(--muted)]">
+                                {m?.service_scope?.name
+                                  ? `Limité à : ${m.service_scope.name}`
+                                  : "Accès à tous les services"}
+                              </span>
                             </label>
 
-                            <Button variant="danger" onClick={() => removeMember(m.id)} loading={membersLoading} disabled={membersLoading}>
+                            <Button
+                              variant="danger"
+                              onClick={() => removeMember(m.id)}
+                              loading={membersLoading}
+                              disabled={membersLoading || isOwner}
+                              title={isOwner ? "Impossible de retirer le propriétaire depuis l’interface." : undefined}
+                            >
                               Retirer
                             </Button>
                           </div>
 
-                          <div className="text-xs text-slate-600 dark:text-slate-400">
-                            Scope actuel : {m?.service_scope?.name ? <span className="font-semibold">{m.service_scope.name}</span> : "multi-services"}
-                          </div>
-
                           {m?.last_action?.action ? (
-                            <div className="text-xs text-slate-600 dark:text-slate-400">
-                              Dernière action : <span className="font-semibold">{m.last_action.action}</span>
-                              {m.last_action.at ? <span className="opacity-80"> · {new Date(m.last_action.at).toLocaleString("fr-FR")}</span> : null}
+                            <div className="text-xs text-[var(--muted)]">
+                              Dernière action :{" "}
+                              <span className="font-semibold text-[var(--text)]">{m.last_action.action}</span>
+                              {m.last_action.at ? (
+                                <span className="opacity-80">
+                                  {" "}
+                                  · {new Date(m.last_action.at).toLocaleString("fr-FR")}
+                                </span>
+                              ) : null}
                             </div>
                           ) : null}
                         </Card>
@@ -480,12 +657,13 @@ const inviteMember = async () => {
                     })}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Aucun membre.</div>
+                  <div className="text-sm text-[var(--muted)]">Aucun membre pour le moment.</div>
                 )}
               </Card>
 
+              {/* Traçabilité */}
               <Card className="p-4 space-y-3" hover>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Traçabilité (récent)</div>
+                <div className="text-sm font-semibold text-[var(--text)]">Historique récent</div>
 
                 {membersLoading ? (
                   <div className="grid gap-2">
@@ -496,58 +674,68 @@ const inviteMember = async () => {
                 ) : recentActivity.length ? (
                   <div className="space-y-2">
                     {recentActivity.slice(0, 12).map((a, idx) => (
-                      <div key={idx} className="text-sm text-slate-800 dark:text-slate-200">
+                      <div key={idx} className="text-sm text-[var(--text)]">
                         <span className="font-semibold">{a.action}</span>{" "}
-                        <span className="text-slate-600 dark:text-slate-400">
-                          · {a.user?.username || "system"} · {new Date(a.at).toLocaleString("fr-FR")}
+                        <span className="text-[var(--muted)]">
+                          · {a.user?.username || "Système"} · {new Date(a.at).toLocaleString("fr-FR")}
                         </span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-600 dark:text-slate-400">Aucune activité (audit pas encore alimenté).</div>
+                  <div className="text-sm text-[var(--muted)]">Aucune activité récente.</div>
                 )}
               </Card>
             </div>
-
-            <div className="text-xs text-slate-600 dark:text-slate-400">Next V2: afficher aussi les invitations en attente + relance.</div>
           </Card>
         ) : null}
 
+        {/* Compte */}
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Compte</div>
+          <div className="text-sm font-semibold text-[var(--text)]">Compte</div>
           <div className="grid sm:grid-cols-2 gap-3">
             <Input label="Utilisateur" value={me?.username || ""} readOnly />
             <Input label="Commerce" value={tenant?.name || ""} readOnly />
           </div>
-          <div>
+          <div className="flex gap-2 flex-wrap">
             <Button variant="secondary" onClick={logout}>
               Déconnexion
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                refreshMe?.();
+                refetchEntitlements?.();
+                refreshServices?.();
+                pushToast?.({ message: "Synchronisation demandée.", type: "info" });
+              }}
+            >
+              Synchroniser
             </Button>
           </div>
         </Card>
 
-        {/* Billing */}
+        {/* Abonnement */}
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Abonnement & facturation</div>
-              <div className="text-sm text-slate-700 dark:text-slate-300">
-                Plan actuel : <span className="font-semibold">{planLabel}</span>
+              <div className="text-sm font-semibold text-[var(--text)]">Abonnement & facturation</div>
+              <div className="text-sm text-[var(--muted)]">
+                Plan : <span className="font-semibold text-[var(--text)]">{planLabel}</span>
                 {expiresAt ? (
                   <span className="ml-2">
-                    · Fin de période : <span className="font-semibold">{expiresAt}</span>
+                    · Fin de période : <span className="font-semibold text-[var(--text)]">{expiresAt}</span>
                   </span>
                 ) : null}
                 <span className="ml-2">
-                  · Statut : <span className="font-semibold">{subStatus}</span>
+                  · Statut : <span className="font-semibold text-[var(--text)]">{subStatus}</span>
                 </span>
               </div>
             </div>
 
             <div className="flex gap-2 flex-wrap">
               <Button onClick={openBillingPortal} loading={billingBusy} disabled={billingBusy}>
-                Gérer mon abonnement (Stripe)
+                Gérer mon abonnement
               </Button>
               <Button variant="secondary" onClick={() => (window.location.href = "/tarifs")}>
                 Comparer les plans
@@ -555,61 +743,89 @@ const inviteMember = async () => {
             </div>
           </div>
 
-          <div className="text-xs text-slate-600 dark:text-slate-400">
-            En cas d’impayé, vous pouvez mettre à jour votre carte depuis Stripe. Aucun effacement de données : lecture et export restent possibles.
+          <div className="text-xs text-[var(--muted)]">
+            En cas d’impayé, vous pouvez mettre à jour votre carte depuis la page de facturation.
+            Aucun effacement de données : lecture et export restent possibles.
           </div>
 
-          {entLoading ? <div className="text-sm text-slate-600 dark:text-slate-400">Chargement…</div> : null}
+          {entLoading ? <div className="text-sm text-[var(--muted)]">Chargement…</div> : null}
         </Card>
 
+        {/* Sécurité */}
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Sécurité / Identifiants</div>
+          <div>
+            <div className="text-sm font-semibold text-[var(--text)]">Sécurité</div>
+            <div className="text-sm text-[var(--muted)]">
+              Pour éviter les erreurs, StockScan envoie des liens sécurisés par email.
+            </div>
+          </div>
+
           <div className="grid sm:grid-cols-2 gap-3">
             <Input
-              label="Changer d’email"
-              placeholder="nouvel email"
+              label="Email actuel"
+              value={currentEmail || "—"}
+              readOnly
+              helper="Cet email reçoit les liens de vérification, de changement d’email et de mot de passe."
+            />
+
+            <div className="flex items-end gap-2 flex-wrap">
+              <Button
+                variant="secondary"
+                onClick={submitResendVerification}
+                loading={securityBusy}
+                disabled={securityBusy || !currentEmail}
+              >
+                Renvoyer l’email de vérification
+              </Button>
+            </div>
+
+            <Input
+              label="Nouvel email"
+              placeholder="nouveau@email.com"
               value={emailForm.email}
               onChange={(e) => setEmailForm({ email: e.target.value })}
-              helper="Front uniquement pour l’instant"
+              helper="Vous recevrez un email de confirmation. Une reconnexion peut être nécessaire."
             />
+
             <div className="flex items-end">
-              <Button variant="secondary" onClick={() => pushToast?.({ message: "Changement d’email côté backend à implémenter.", type: "info" })}>
-                Mettre à jour
+              <Button variant="secondary" onClick={submitEmailChange} loading={securityBusy} disabled={securityBusy}>
+                Envoyer le lien de confirmation
               </Button>
             </div>
 
-            <Input
-              label="Nouveau mot de passe"
-              type="password"
-              value={pwdForm.pwd}
-              onChange={(e) => setPwdForm((p) => ({ ...p, pwd: e.target.value }))}
-              helper="Front uniquement pour l’instant"
-            />
-            <Input label="Confirmer mot de passe" type="password" value={pwdForm.confirm} onChange={(e) => setPwdForm((p) => ({ ...p, confirm: e.target.value }))} />
+            <div className="sm:col-span-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Mot de passe</div>
+              <div className="text-sm text-[var(--muted)]">
+                Pour changer votre mot de passe, on vous envoie un lien sécurisé.
+              </div>
+              <div className="flex gap-2 flex-wrap pt-1">
+                <Button onClick={submitPasswordResetEmail} loading={securityBusy} disabled={securityBusy}>
+                  Recevoir le lien de changement de mot de passe
+                </Button>
+                <Button variant="ghost" onClick={() => (window.location.href = "/login")}>
+                  Je suis bloqué
+                </Button>
+              </div>
 
-            <div className="sm:col-span-2 flex gap-2">
-              <Button
-                onClick={() => {
-                  if (!pwdForm.pwd || pwdForm.pwd !== pwdForm.confirm) {
-                    pushToast?.({ message: "Les mots de passe ne correspondent pas.", type: "error" });
-                    return;
-                  }
-                  pushToast?.({ message: "Changement de mot de passe à brancher backend.", type: "info" });
-                }}
-              >
-                Mettre à jour le mot de passe
-              </Button>
+              {securityInfo.emailChangeRequested ? (
+                <div className="text-xs text-[var(--muted)]">✅ Lien de changement d’email envoyé (pense à vérifier tes spams).</div>
+              ) : null}
+              {securityInfo.resetRequested ? (
+                <div className="text-xs text-[var(--muted)]">✅ Lien de changement de mot de passe envoyé (pense à vérifier tes spams).</div>
+              ) : null}
             </div>
           </div>
         </Card>
 
+        {/* Préférences */}
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Préférences UI</div>
+          <div className="text-sm font-semibold text-[var(--text)]">Préférences</div>
+
           <div className="grid sm:grid-cols-2 gap-3">
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Mode de saisie</span>
+              <span className="text-sm font-medium text-[var(--text)]">Mode de saisie</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                 value={scanMode}
                 onChange={(e) => {
                   setScanMode(e.target.value);
@@ -619,13 +835,13 @@ const inviteMember = async () => {
                 <option value="scan">Scan prioritaire</option>
                 <option value="manual">Saisie manuelle</option>
               </select>
-              <span className="text-xs text-slate-600 dark:text-slate-400">Ajuste l’accent sur les flux scan/sans-code-barres.</span>
+              <span className="text-xs text-[var(--muted)]">Ajuste l’accent sur le scan ou la saisie.</span>
             </label>
 
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Coach onboarding</span>
+              <span className="text-sm font-medium text-[var(--text)]">Aides au démarrage</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                 value={coachEnabled ? "on" : "off"}
                 onChange={(e) => {
                   const on = e.target.value === "on";
@@ -633,16 +849,16 @@ const inviteMember = async () => {
                   localStorage.setItem("coach", on ? "on" : "off");
                 }}
               >
-                <option value="on">Activé</option>
-                <option value="off">Désactivé</option>
+                <option value="on">Activées</option>
+                <option value="off">Désactivées</option>
               </select>
-              <span className="text-xs text-slate-600 dark:text-slate-400">Affiche/masque les aides rapides.</span>
+              <span className="text-xs text-[var(--muted)]">Affiche/masque les aides rapides.</span>
             </label>
 
             <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-800 dark:text-slate-200">Thème</span>
+              <span className="text-sm font-medium text-[var(--text)]">Thème</span>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                 value={theme}
                 onChange={(e) => {
                   const next = e.target.value;
@@ -654,7 +870,7 @@ const inviteMember = async () => {
                 <option value="light">Clair</option>
                 <option value="dark">Sombre</option>
               </select>
-              <span className="text-xs text-slate-600 dark:text-slate-400">Persiste sur cet appareil.</span>
+              <span className="text-xs text-[var(--muted)]">Mémorisé sur cet appareil.</span>
             </label>
           </div>
 
@@ -666,7 +882,10 @@ const inviteMember = async () => {
                 const pendingKey = getTourPendingKey(userId);
                 localStorage.removeItem(tourKey);
                 localStorage.setItem(pendingKey, "1");
-                pushToast?.({ message: "Visite guidée prête. Retournez sur le dashboard pour la relancer.", type: "success" });
+                pushToast?.({
+                  message: "Visite guidée prête. Retourne au tableau de bord pour la relancer.",
+                  type: "success",
+                });
               }}
             >
               Relancer la visite guidée
@@ -674,23 +893,28 @@ const inviteMember = async () => {
           </div>
         </Card>
 
+        {/* Services & modules */}
         <Card className="p-6 space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Services & modules</div>
-              <div className="text-sm text-slate-700 dark:text-slate-300">Activez les modules métier : ils pilotent les champs visibles dans Produits, Inventaire et Exports.</div>
+              <div className="text-sm font-semibold text-[var(--text)]">Services & modules</div>
+              <div className="text-sm text-[var(--muted)]">
+                Activez les modules métier : ils pilotent les champs visibles dans Produits, Inventaire et Exports.
+              </div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3 dark:border-slate-700 dark:bg-slate-900/40">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Regrouper ou séparer vos services</div>
-            <div className="text-xs text-slate-700 dark:text-slate-300">Ce choix organise la navigation et les tableaux de bord (vue globale ou vue par service).</div>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 space-y-3">
+            <div className="text-sm font-semibold text-[var(--text)]">Vue globale ou vue par service</div>
+            <div className="text-xs text-[var(--muted)]">
+              Utile si vous avez plusieurs services (ex : cuisine + salle, bar + épicerie).
+            </div>
 
             {hasMultiServices ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap gap-2">
                   <Button variant={isAllServices ? "primary" : "secondary"} size="sm" onClick={() => selectService("all")}>
-                    Regrouper (vue globale)
+                    Vue globale (tous les services)
                   </Button>
                   <Button
                     variant={!isAllServices ? "primary" : "secondary"}
@@ -699,15 +923,15 @@ const inviteMember = async () => {
                       if (defaultServiceId) selectService(defaultServiceId);
                     }}
                   >
-                    Séparer (par service)
+                    Vue par service
                   </Button>
                 </div>
 
                 {!isAllServices && defaultServiceId ? (
                   <label className="space-y-1.5">
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Service par défaut</span>
+                    <span className="text-xs font-semibold text-[var(--muted)]">Service sélectionné</span>
                     <select
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                       value={defaultServiceId}
                       onChange={(e) => selectService(e.target.value)}
                     >
@@ -720,19 +944,23 @@ const inviteMember = async () => {
                   </label>
                 ) : null}
 
-                <div className="text-xs text-slate-700 dark:text-slate-300">Vous pourrez toujours basculer depuis la barre supérieure.</div>
+                <div className="text-xs text-[var(--muted)]">Vous pouvez basculer à tout moment depuis la barre supérieure.</div>
               </div>
             ) : (
-              <div className="text-xs text-slate-700 dark:text-slate-300">Ajoutez un 2e service pour activer le regroupement multi-services.</div>
+              <div className="text-xs text-[var(--muted)]">Ajoutez un 2e service pour activer cette option.</div>
             )}
           </div>
 
           <div className="grid md:grid-cols-3 gap-3 items-end">
-            <Input label="Nouveau service" placeholder="Ex. Bar" value={newService} onChange={(e) => setNewService(e.target.value)} />
+            <Input
+              label="Nouveau service"
+              placeholder="Ex. Bar"
+              value={newService}
+              onChange={(e) => setNewService(e.target.value)}
+            />
             <Button onClick={addService} loading={loading}>
-              Ajouter
+              Ajouter le service
             </Button>
-            {toast && <div className="text-sm text-slate-700 dark:text-slate-300">{toast}</div>}
           </div>
 
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -748,6 +976,7 @@ const inviteMember = async () => {
 
               const recBarcode = typeof identifiers.barcode === "boolean" ? identifiers.barcode : true;
               const recSku = typeof identifiers.sku === "boolean" ? identifiers.sku : true;
+
               const priceCfg = features.prices || {};
               const purchaseEnabled = priceCfg.purchase_enabled !== false;
               const sellingEnabled = priceCfg.selling_enabled !== false;
@@ -764,9 +993,11 @@ const inviteMember = async () => {
               return (
                 <Card key={s.id} className="p-4 space-y-3" hover>
                   <div className="space-y-1">
-                    <div className="font-semibold text-slate-900 dark:text-slate-100">{s.name}</div>
-                    <div className="text-xs text-slate-700 dark:text-slate-300">Métier : {familyMeta?.name || "—"}</div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Modules recommandés : {moduleNames.length ? moduleNames.join(", ") : "Base"}</div>
+                    <div className="font-semibold text-[var(--text)]">{s.name}</div>
+                    <div className="text-xs text-[var(--muted)]">Métier : {familyMeta?.name || "—"}</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      Modules recommandés : {moduleNames.length ? moduleNames.join(", ") : "Base"}
+                    </div>
                   </div>
 
                   <Divider />
@@ -774,7 +1005,7 @@ const inviteMember = async () => {
                   <div className="space-y-3 text-sm">
                     {hasModule("identifier") && (
                       <div className="space-y-2">
-                        <div className="text-xs uppercase tracking-[0.2em] text-slate-700 dark:text-slate-400">Identifiants</div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Identifiants</div>
 
                         <FeatureToggle
                           label={wording?.barcodeLabel || "Code-barres"}
@@ -786,15 +1017,20 @@ const inviteMember = async () => {
                         />
 
                         <FeatureToggle
-                          label={wording?.skuLabel || "SKU interne"}
-                          description="Référence interne stable pour garder un catalogue propre."
+                          label={wording?.skuLabel || "Référence interne (SKU)"}
+                          description="Référence stable pour garder un catalogue propre."
                           helper={`Recommandé : ${recSku ? "activé" : "désactivé"} pour ${familyMeta?.name || "ce métier"}.`}
                           checked={features.sku?.enabled !== false}
                           onChange={(e) => toggleFeature(s, "sku", e.target.checked)}
                           disabled={loading}
                         />
 
-                        <Button variant="ghost" size="sm" onClick={() => applyIdentifierDefaults(s, identifiers)} disabled={loading}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => applyIdentifierDefaults(s, identifiers)}
+                          disabled={loading}
+                        >
                           Appliquer la recommandation métier
                         </Button>
                       </div>
@@ -802,7 +1038,7 @@ const inviteMember = async () => {
 
                     {hasModule("pricing") && (
                       <div className="space-y-2">
-                        <div className="text-xs uppercase tracking-[0.2em] text-slate-700 dark:text-slate-400">Pricing & TVA</div>
+                        <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Prix & TVA</div>
 
                         <FeatureToggle
                           label="Prix d’achat (HT)"
@@ -828,7 +1064,9 @@ const inviteMember = async () => {
                           disabled={loading}
                         />
 
-                        <div className="text-xs text-slate-700 dark:text-slate-300">Sans prix de vente, la marge estimée reste indicative.</div>
+                        <div className="text-xs text-[var(--muted)]">
+                          Sans prix de vente, la marge estimée reste indicative.
+                        </div>
                       </div>
                     )}
 
@@ -844,7 +1082,7 @@ const inviteMember = async () => {
 
                     {hasModule("lot") && (
                       <FeatureToggle
-                        label="Lot / Batch"
+                        label="Lot"
                         description="Traçabilité renforcée, utile pour la conformité."
                         checked={lotEnabled}
                         onChange={(e) => toggleFeature(s, "lot", e.target.checked)}
@@ -885,7 +1123,7 @@ const inviteMember = async () => {
                     {hasModule("itemType") && (
                       <FeatureToggle
                         label="Matières premières / produits finis"
-                        description="Active un type d’article pour séparer matières et ventes."
+                        description="Permet de distinguer matières et ventes."
                         helper="Les ventes/marges s’appuient sur les produits finis."
                         checked={itemTypeEnabled}
                         onChange={(e) => toggleFeature(s, "item_type", e.target.checked)}
@@ -899,23 +1137,54 @@ const inviteMember = async () => {
           </div>
         </Card>
 
+        {/* Suppression de compte */}
         <Card className="p-6 space-y-3 border-red-200/70 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10">
           <div className="text-sm font-semibold text-red-800 dark:text-red-200">Suppression du compte</div>
           <div className="text-sm text-red-800 dark:text-red-200">
-            Cette action est définitive. Si vous êtes le seul membre du commerce, le tenant et ses données seront supprimés.
+            Cette action est définitive. Si vous êtes le seul membre du commerce, les données du commerce peuvent être supprimées.
           </div>
+
           <div className="space-y-2">
             <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
-              <input type="checkbox" className="mt-1 accent-red-600" checked={confirmA} onChange={(e) => setConfirmA(e.target.checked)} />
+              <input
+                type="checkbox"
+                className="mt-1 accent-red-600"
+                checked={confirmA}
+                onChange={(e) => setConfirmA(e.target.checked)}
+              />
               <span>Je comprends que mes données, services et abonnements associés peuvent être supprimés.</span>
             </label>
+
             <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
-              <input type="checkbox" className="mt-1 accent-red-600" checked={confirmB} onChange={(e) => setConfirmB(e.target.checked)} />
-              <span>Action irréversible : je devrai recréer un compte et me réabonner pour utiliser StockScan.</span>
+              <input
+                type="checkbox"
+                className="mt-1 accent-red-600"
+                checked={confirmB}
+                onChange={(e) => setConfirmB(e.target.checked)}
+              />
+              <span>Action irréversible : je devrai recréer un compte pour utiliser StockScan.</span>
             </label>
           </div>
+
+          <Input
+            label='Tapez "SUPPRIMER" pour confirmer'
+            value={deletePhrase}
+            onChange={(e) => setDeletePhrase(e.target.value)}
+            helper="Protection anti-clic accidentel."
+          />
+
           <div className="flex gap-3">
-            <Button variant="danger" disabled={!confirmA || !confirmB || deleting} loading={deleting} onClick={deleteAccount}>
+            <Button
+              variant="danger"
+              disabled={
+                !confirmA ||
+                !confirmB ||
+                String(deletePhrase || "").trim().toUpperCase() !== "SUPPRIMER" ||
+                deleting
+              }
+              loading={deleting}
+              onClick={deleteAccount}
+            >
               Supprimer mon compte
             </Button>
           </div>

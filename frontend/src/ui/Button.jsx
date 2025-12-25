@@ -2,9 +2,11 @@ import React from "react";
 import { cn } from "../lib/cn";
 
 const variants = {
-  primary: "bg-blue-600 text-white shadow-glow hover:-translate-y-[1px]",
-  secondary: "bg-white/10 text-white border border-white/25 hover:bg-white/15",
-  ghost: "bg-transparent text-white border border-white/25 hover:bg-white/10",
+  primary: "bg-[var(--primary)] text-white shadow-glow hover:-translate-y-[1px] hover:opacity-95",
+  secondary:
+    "bg-[var(--surface)] text-[var(--text)] border border-[var(--border)] hover:opacity-95",
+  ghost:
+    "bg-transparent text-[var(--text)] border border-[var(--border)] hover:bg-black/5 dark:hover:bg-white/10",
   danger: "bg-red-600 text-white hover:bg-red-700 shadow-glow",
 };
 
@@ -50,11 +52,8 @@ export default function Button({
         isDisabled && "opacity-60 cursor-not-allowed pointer-events-none",
         className
       )}
-      // type seulement si c’est un vrai <button>
       type={isButton ? type || "button" : undefined}
-      // disabled seulement si c’est un vrai <button>
       disabled={isButton ? isDisabled : undefined}
-      // accessibilité si c’est un lien/composant
       aria-disabled={!isButton ? isDisabled : undefined}
       role={!isButton && isDisabled ? "link" : undefined}
       tabIndex={!isButton && isDisabled ? -1 : props.tabIndex}
