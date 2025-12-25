@@ -23,14 +23,21 @@ export default function RequireAuth({ children }) {
     );
   }
 
-  //  éviter les loops inutiles (au cas où)
   const path = location?.pathname || "";
-  const isAuthPage = path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/check-email");
+  const isAuthPage =
+    path.startsWith("/login") ||
+    path.startsWith("/register") ||
+    path.startsWith("/check-email") ||
+    path.startsWith("/verify-email") ||
+    path.startsWith("/reset-password");
+
+  // Si jamais RequireAuth est utilisé sur une page publique/auth, router gére
+
+  if (!isAuthed && isAuthPage) {
+    return children;
+  }
 
   if (!isAuthed) {
-    
-    if (isAuthPage) return children;
-
     return (
       <Navigate
         to="/login"
