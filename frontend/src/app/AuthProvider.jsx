@@ -106,7 +106,7 @@ export function AuthProvider({ children }) {
   const [serviceProfile, setServiceProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // ✅ Theme bootstrap (important sur mobile + refresh)
+  // Theme bootstrap (important sur mobile + refresh)
   useEffect(() => {
     try {
       const storedTheme = localStorage.getItem("theme");

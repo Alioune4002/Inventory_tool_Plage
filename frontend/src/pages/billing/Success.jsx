@@ -1,4 +1,4 @@
-// frontend/src/pages/billing/Success.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -36,7 +36,7 @@ export default function BillingSuccess() {
   const [syncedOnce, setSyncedOnce] = useState(false);
   const [redirectCountdown, setRedirectCountdown] = useState(10);
 
-  const sessionId = params.get("session_id"); // Stripe peut renvoyer ça si tu l’ajoutes côté backend
+  const sessionId = params.get("session_id"); 
 
   const headline = useMemo(() => {
     if (!isAuthed) return "Paiement confirmé";
@@ -83,7 +83,7 @@ export default function BillingSuccess() {
         pushToast?.({
           type: "info",
           message:
-            "Paiement confirmé. La synchronisation peut prendre quelques secondes (webhook). Rafraîchissez si besoin.",
+            "Paiement confirmé. La synchronisation peut prendre quelques secondes . Rafraîchissez si besoin.",
         });
       } finally {
         if (alive) setSyncing(false);

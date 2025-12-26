@@ -34,7 +34,7 @@ export function useEntitlements() {
 
     setLoading(true);
     try {
-      // ✅ IMPORTANT: route correcte (prefix /api/auth)
+      
       const res = await api.get("/api/auth/me/org/entitlements");
       if (!mountedRef.current) return;
       setData(res.data || null);

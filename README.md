@@ -5,7 +5,7 @@ SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec 
 - **Backend prod** : https://inventory-tool-plage.onrender.com (Render).  
 - `backend/` : API Django REST (DRF + SimpleJWT). Multi-tenant, multi-services, exports CSV/XLSX.
 - `frontend/` : Vite + React + Tailwind (UI premium, animations Framer Motion).
-- `frontend-cra-old/` : ancien front (CRA) conservé à titre d’archive.
+- `dist/` : build statique généré par `npm run build`.
 
 ## Fonctionnalités clés
 - Auth JWT : register/login/me, refresh, suppression de compte.
@@ -24,6 +24,15 @@ SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec 
 - Node.js 18+ et npm.
 - Python 3.11+ avec `pip`/`pip3`.
 - PostgreSQL recommandé en production (`DATABASE_URL`), SQLite suffisant en dev.
+
+## Variables d'environnement (dev)
+Backend (dans votre shell, voir `.env.example`) :
+- `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=true`.
+- `FRONTEND_URL=http://localhost:5173` pour les liens d’emails.
+- `DATABASE_URL=sqlite:///db.sqlite3` (optionnel, sinon SQLite par défaut).
+
+Frontend (`frontend/.env`) :
+- `VITE_API_BASE_URL=http://localhost:8000` pour pointer sur l’API locale.
 
 ## Setup rapide (dev)
 1. Cloner  
@@ -47,7 +56,7 @@ cd ../frontend
 npm install
 npm run dev
 ```
-Le front pointe par défaut sur `window.location.origin` ou sur `VITE_API_BASE_URL`.
+Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `https://inventory-tool-plage.onrender.com`.
 
 ## Endpoints principaux (extraits)
 - Auth :  

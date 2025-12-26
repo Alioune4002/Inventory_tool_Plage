@@ -1,4 +1,4 @@
-// frontend/src/components/MobileNav.jsx
+
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Moon, Sun } from "lucide-react";

@@ -363,7 +363,7 @@ export default function Dashboard() {
       </Helmet>
 
       <div className="grid gap-4 min-w-0">
-        {/* ✅ Admin principal: équipe + traçabilité */}
+        {/* Admin principal: équipe + traçabilité */}
         {membersVisible ? (
           <Card className="p-6 space-y-4 min-w-0">
             <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
@@ -416,7 +416,7 @@ export default function Dashboard() {
                         <Card key={m.id} className="p-4 min-w-0" hover>
                           <div className="flex items-start justify-between gap-3 min-w-0">
                             <div className="min-w-0">
-                              {/* ✅ plus de truncate ici => wrap + break-anywhere */}
+                              {/*  plus de truncate ici => wrap + break-anywhere */}
                               <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
                                 <span>{user.username || "Utilisateur"}</span>{" "}
                                 <span className="text-[var(--muted)] font-normal">·</span>{" "}
