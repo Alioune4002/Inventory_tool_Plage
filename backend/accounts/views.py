@@ -47,7 +47,9 @@ from utils.sendgrid_email import send_email_with_sendgrid
 LOGGER = logging.getLogger(__name__)
 User = get_user_model()
 EMAIL_VERIFICATION_REQUIRED = getattr(settings, "EMAIL_VERIFICATION_REQUIRED", True)
+EMAIL_HARD_FAIL = getattr(settings, "EMAIL_HARD_FAIL", False)
 EMAIL_CHANGE_SIGNER = TimestampSigner(salt="stockscan.email.change")
+
 
 # Stripe (backend only)
 try:
@@ -291,7 +293,7 @@ class RegisterView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        # ✅ Fix: créer / réparer le Membership owner ACTIVE
+        # Fix: créer / réparer le Membership owner ACTIVE
         try:
             profile = getattr(user, "profile", None)
             if profile and profile.tenant_id:
@@ -303,16 +305,28 @@ class RegisterView(APIView):
             user.is_active = False
             user.save(update_fields=["is_active"])
 
-            ok = _send_verification_email(user)
-            if not ok:
-                # ✅ IMPORTANT : ne pas mentir au front
-                return _email_send_failed_response()
+            sent = False
+            try:
+                sent = bool(_send_verification_email(user))
+            except Exception:
+                LOGGER.exception("Verification email send crashed")
+
+            #  En CI/dev: ne pas casser l'inscription si email infra absente
+            if not sent and EMAIL_HARD_FAIL:
+                return Response(
+                    {
+                        "code": "email_send_failed",
+                        "detail": "Impossible d’envoyer l’email de vérification pour le moment.",
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
 
             return Response(
                 {
-                    "detail": "email_verification_sent",
+                    "detail": "email_verification_sent" if sent else "email_verification_pending",
                     "requires_verification": True,
                     "email": user.email,
+                    "email_sent": sent, 
                 },
                 status=status.HTTP_201_CREATED,
             )
@@ -670,17 +684,32 @@ class ResendVerificationEmailView(APIView):
 
         user = User.objects.filter(email__iexact=email).first()
         if not user:
-            # Ne révèle pas l’existence
             return Response({"detail": "Si le compte existe, un email a été renvoyé."})
 
         if user.is_active:
             return Response({"detail": "Ce compte est déjà vérifié."})
 
-        ok = _send_verification_email(user)
-        if not ok:
-            return _email_send_failed_response()
+        sent = False
+        try:
+            sent = bool(_send_verification_email(user))
+        except Exception:
+            LOGGER.exception("Resend verification email crashed")
 
-        return Response({"detail": "Email de vérification renvoyé."})
+        if not sent and EMAIL_HARD_FAIL:
+            return Response(
+                {
+                    "code": "email_send_failed",
+                    "detail": "Impossible d’envoyer l’email de vérification pour le moment.",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(
+            {
+                "detail": "Email de vérification renvoyé." if sent else "Envoi non confirmé (email infra).",
+                "email_sent": sent,
+            }
+        )
 
 
 class EmailChangeRequestView(APIView):
