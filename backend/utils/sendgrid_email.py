@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
@@ -189,35 +189,16 @@ def _stockscan_html_template(
 """
 
 
-def _summarize_sendgrid_exception(exc: Exception) -> tuple[Optional[int], str]:
-    """
-    Retourne (status_code, body_snippet) si l'exception expose une response (sendgrid-python).
-    Ne log jamais de secrets.
-    """
-    status_code = None
+def _summarize_sendgrid_exception(exc: Exception) -> Tuple[Optional[int], str]:
+    status_code = getattr(exc, "status_code", None)
     body_snippet = ""
+
     try:
-        resp = getattr(exc, "body", None) or getattr(exc, "response", None)
-        # sendgrid-python lève souvent HTTPError (urllib) ou exceptions avec .status_code/.body
-        status_code = getattr(exc, "status_code", None)
-        if status_code is None and hasattr(resp, "status_code"):
-            status_code = getattr(resp, "status_code")
-
         body = getattr(exc, "body", None)
-        if body is None and hasattr(resp, "body"):
-            body = getattr(resp, "body")
-
-        if body is None and hasattr(resp, "read"):
-            try:
-                body = resp.read()
-            except Exception:
-                body = None
-
         if body is not None:
             if isinstance(body, (bytes, bytearray)):
                 body = body.decode(errors="ignore")
-            body = str(body)
-            body_snippet = body[:800]  # limite
+            body_snippet = str(body)[:800]
     except Exception:
         pass
 
@@ -238,10 +219,8 @@ def send_email_with_sendgrid(
     """
     Envoie un email via SendGrid quand configuré, sinon fallback vers EmailMultiAlternatives.
 
-    AJOUTS:
-    - logs plus utiles (status code / body snippet) si SendGrid échoue
-    - diagnostic clair pour 401/403
-    - debug final corrigé
+    - Protection si SENDGRID_FROM_EMAIL contient par erreur plusieurs emails (virgule).
+    - Support du Reply-To via settings.REPLY_TO_EMAIL (sinon SUPPORT_EMAIL).
     """
     if not to_email:
         logger.debug("Envoi email annulé : aucun destinataire.")
@@ -251,7 +230,6 @@ def send_email_with_sendgrid(
     support_email = getattr(settings, "SUPPORT_EMAIL", "")
     reply_to = getattr(settings, "REPLY_TO_EMAIL", "") or support_email
 
-    # Protection si plusieurs emails par erreur
     if isinstance(from_email, str) and "," in from_email:
         from_email = from_email.split(",")[0].strip()
 
@@ -307,15 +285,14 @@ def send_email_with_sendgrid(
                 sg_mail.attachment = attachment
 
             resp = client.send(sg_mail)
-
-            # resp.status_code attendu: 202
             status_code = getattr(resp, "status_code", None)
+
             if status_code and int(status_code) >= 400:
                 logger.warning(
-                    "SendGrid responded error for %s: status=%s body=%s",
+                    "SendGrid responded error: to=%s status=%s body=%s",
                     to_email,
                     status_code,
-                    getattr(resp, "body", "")[:800],
+                    str(getattr(resp, "body", ""))[:800],
                 )
                 sent_via_sendgrid = False
             else:
@@ -324,12 +301,10 @@ def send_email_with_sendgrid(
         except Exception as exc:  # pragma: no cover
             status_code, body_snippet = _summarize_sendgrid_exception(exc)
 
-            # Diagnostic pour le 401/403 (ton cas)
             if status_code in (401, 403):
                 logger.error(
                     "SendGrid AUTH error (%s) for %s. "
-                    "Vérifie SENDGRID_API_KEY sur Render (service + env), permissions de la clé (Mail Send), "
-                    "et que la clé appartient au BON compte SendGrid. Body=%s",
+                    "Vérifie la variable SENDGRID_API_KEY sur Render + permissions de la clé (Mail Send). Body=%s",
                     status_code,
                     to_email,
                     body_snippet or str(exc),
@@ -349,7 +324,7 @@ def send_email_with_sendgrid(
         if not SendGridAPIClient or not Mail:
             logger.warning("SendGrid SDK non disponible (sendgrid-python non installé).")
 
-    # --- Fallback Django (SMTP) ---
+    # --- Django fallback ---
     if not sent_via_sendgrid and fallback_to_django:
         try:
             msg = EmailMultiAlternatives(
@@ -362,8 +337,13 @@ def send_email_with_sendgrid(
             msg.attach_alternative(final_html, "text/html")
             if file_bytes:
                 msg.attach(filename or "attachment", file_bytes, mimetype)
-            msg.send(fail_silently=True)
-            sent_via_django = True
+
+            # ✅ IMPORTANT: send() renvoie un int (nb envoyés)
+            sent_count = msg.send(fail_silently=True) or 0
+            sent_via_django = sent_count > 0
+
+            if not sent_via_django:
+                logger.warning("Django email fallback: 0 email envoyé (fail_silently=True).")
         except Exception as exc:
             logger.warning("Fallback email Django échoué (%s): %s", to_email, exc)
             sent_via_django = False
