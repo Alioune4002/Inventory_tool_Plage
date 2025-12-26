@@ -2,6 +2,16 @@ import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "../lib/cn";
 import { useToastState } from "../app/ToastContext";
 
+const toneClass = (type) => {
+  if (type === "error")
+    return "bg-[var(--danger-bg)] text-[var(--danger-text)] border-[var(--danger-border)]";
+  if (type === "success")
+    return "bg-[var(--success-bg)] text-[var(--success-text)] border-[var(--success-border)]";
+  if (type === "warn" || type === "warning")
+    return "bg-[var(--warn-bg)] text-[var(--warn-text)] border-[var(--warn-border)]";
+  return "bg-[var(--info-bg)] text-[var(--info-text)] border-[var(--info-border)]";
+};
+
 export default function Toasts() {
   const { toast, close } = useToastState() || {};
 
@@ -18,11 +28,7 @@ export default function Toasts() {
           <div
             className={cn(
               "flex items-center gap-3 rounded-2xl px-4 py-3 shadow-soft border max-w-[92vw]",
-              toast.type === "error"
-                ? "bg-red-600 text-white border-red-500"
-                : toast.type === "success"
-                  ? "bg-emerald-600 text-white border-emerald-500"
-                  : "bg-slate-900 text-white border-slate-800"
+              toneClass(toast.type)
             )}
             role="status"
             aria-live="polite"
@@ -31,7 +37,7 @@ export default function Toasts() {
             <button
               type="button"
               onClick={close}
-              className="rounded-xl px-2 py-1 text-sm bg-white/10 hover:bg-white/15"
+              className="rounded-xl px-2 py-1 text-sm bg-black/10 hover:bg-black/15"
               aria-label="Fermer"
             >
               ×

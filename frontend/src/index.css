@@ -29,6 +29,10 @@
   --info-bg: rgba(59, 130, 246, 0.14);
   --info-border: rgba(59, 130, 246, 0.35);
   --info-text: #bfdbfe;
+
+  --success-bg: rgba(16, 185, 129, 0.14);
+  --success-border: rgba(16, 185, 129, 0.35);
+  --success-text: #a7f3d0;
 }
 
 :root[data-theme="light"] {
@@ -55,6 +59,10 @@
   --info-bg: rgba(59, 130, 246, 0.14);
   --info-border: rgba(59, 130, 246, 0.35);
   --info-text: #1d4ed8;
+
+   --success-bg: rgba(16, 185, 129, 0.14);
+  --success-border: rgba(16, 185, 129, 0.35);
+  --success-text: #065f46;
 }
 
 *,
@@ -276,4 +284,17 @@ body {
 
 .animate-skeleton-shimmer {
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@layer components {
+  .alert-warn {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-text);
+    border-radius: 16px;
+  }
+
+  .alert-warn strong {
+    color: var(--warn-text);
+  }
 }

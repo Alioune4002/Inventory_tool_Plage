@@ -12,11 +12,11 @@ import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 const severityClass = (sev) => {
   switch (sev) {
     case "critical":
-      return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-100";
+      return "bg-[var(--danger-bg)] text-[var(--danger-text)] border border-[var(--danger-border)]";
     case "warning":
-      return "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100";
+      return "bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]";
     default:
-      return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-100";
+      return "bg-[var(--info-bg)] text-[var(--info-text)] border border-[var(--info-border)]";
   }
 };
 
@@ -133,14 +133,14 @@ export default function AIAssistantPanel({ month, serviceId }) {
       // Si entitlements chargés et IA interdite => paywall immédiat côté front
       if (!canUseAI) {
         showNotice("Cette fonctionnalité est disponible avec le plan Multi.");
-        // On évite l’état “indisponible” : on affiche un message propre
         setData((prev) => ({
           ...prev,
           message: "Plan Multi requis pour utiliser l’assistant IA.",
           insights: [
             {
               title: "Accès limité",
-              description: "Passez au plan Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
+              description:
+                "Passez au plan Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
               severity: "warning",
             },
           ],
@@ -177,10 +177,8 @@ export default function AIAssistantPanel({ month, serviceId }) {
         setData(payload);
         if (userQuestion) setQuestion("");
       } catch (e) {
-        // ✅ Distinction paywall vs panne
         const apiMsg = e?.friendlyMessage || e?.response?.data?.detail || e?.message;
 
-        // Si jamais ça arrive encore en 403 (au cas où), on le traite proprement
         const code = e?.response?.data?.code;
         if (e?.response?.status === 403 && (code === "FEATURE_NOT_INCLUDED" || code?.startsWith?.("LIMIT_"))) {
           showNotice("Plan Multi requis pour l’assistant IA.");
@@ -244,15 +242,18 @@ export default function AIAssistantPanel({ month, serviceId }) {
     <Card className="p-5 space-y-4" data-tour="tour-ai">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">Assistant IA</div>
-          <div className="text-lg font-bold">Coach d’usage</div>
-          <div className="text-xs text-slate-500">
-            Conseils basés sur vos données (mois/service sélectionné).
-          </div>
+          <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Assistant IA</div>
+          <div className="text-lg font-bold text-[var(--text)]">Coach d’usage</div>
+          <div className="text-xs text-[var(--muted)]">Conseils basés sur vos données (mois/service sélectionné).</div>
         </div>
 
         <div className="flex items-center gap-2">
-          {disabledBecausePaywall && attempted && <Badge className="bg-amber-100 text-amber-700">Plan Multi</Badge>}
+          {disabledBecausePaywall && attempted ? (
+            <Badge className="bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]">
+              Plan Multi
+            </Badge>
+          ) : null}
+
           <Button
             size="sm"
             onClick={handleAnalyze}
@@ -264,18 +265,20 @@ export default function AIAssistantPanel({ month, serviceId }) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200/60 bg-slate-50 px-4 py-3 text-sm leading-relaxed dark:border-slate-700 dark:bg-slate-800/60">
-        <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-100">{data?.message}</div>
+      {/* message principal */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm leading-relaxed">
+        <div className="whitespace-pre-wrap text-[var(--text)]">{data?.message}</div>
       </div>
 
+      {/* question (warning) */}
       {data?.question ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/30 dark:text-amber-100">
+        <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-sm text-[var(--warn-text)]">
           Question : {data.question}
         </div>
       ) : null}
 
       <div className="space-y-2">
-        <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">Questions rapides</div>
+        <div className="text-sm font-semibold text-[var(--text)]">Questions rapides</div>
 
         <div className="flex flex-wrap gap-2">
           {SUGGESTIONS.map((prompt) => (
@@ -294,16 +297,17 @@ export default function AIAssistantPanel({ month, serviceId }) {
           ))}
         </div>
 
-        <div className="rounded-2xl border border-slate-200/70 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900/50">
+        {/* zone saisie */}
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
           <textarea
             rows={2}
-            className="w-full resize-none bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
+            className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)]"
             placeholder="Posez une question précise (ex : quels produits sont à risque ?)"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             disabled={loading || disabledBecausePaywall}
           />
-          <div className="flex items-center justify-between pt-2 text-xs text-slate-500">
+          <div className="flex items-center justify-between pt-2 text-xs text-[var(--muted)]">
             <span>{disabledBecausePaywall ? "Disponible avec le plan Multi." : "Réponses basées sur vos données."}</span>
             <Button
               size="sm"
@@ -316,15 +320,17 @@ export default function AIAssistantPanel({ month, serviceId }) {
           </div>
         </div>
 
+        {/* notice (info) */}
         {notice ? (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800 dark:border-blue-800/60 dark:bg-blue-900/30 dark:text-blue-100">
+          <div className="rounded-2xl border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-sm text-[var(--info-text)]">
             {notice}
           </div>
         ) : null}
 
+        {/* modules conseillés */}
         {!!recommendedModules.length ? (
-          <div className="rounded-2xl border border-slate-200/70 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900/50 space-y-2">
-            <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 space-y-2">
+            <div className="text-sm font-semibold text-[var(--text)]">
               Modules conseillés pour {familyMeta?.name || "votre métier"}
             </div>
 
@@ -334,8 +340,8 @@ export default function AIAssistantPanel({ month, serviceId }) {
                   key={modId}
                   className={
                     inactiveRecommended.includes(modId)
-                      ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100"
-                      : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-100"
+                      ? "bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]"
+                      : "bg-[var(--success-bg)] text-[var(--success-text)] border border-[var(--success-border)]"
                   }
                 >
                   {moduleMap[modId]?.name || modId}
@@ -344,11 +350,9 @@ export default function AIAssistantPanel({ month, serviceId }) {
             </div>
 
             {inactiveRecommended.length ? (
-              <div className="text-xs text-slate-500">
-                Active les modules en attente pour débloquer tous les champs utiles.
-              </div>
+              <div className="text-xs text-[var(--muted)]">Active les modules en attente pour débloquer tous les champs utiles.</div>
             ) : (
-              <div className="text-xs text-slate-500">Tous les modules recommandés sont actifs ✅</div>
+              <div className="text-xs text-[var(--muted)]">Tous les modules recommandés sont actifs ✅</div>
             )}
 
             <Button as={Link} to="/app/settings" size="sm" variant="secondary">
@@ -358,25 +362,27 @@ export default function AIAssistantPanel({ month, serviceId }) {
         ) : null}
       </div>
 
+      {/* insights */}
       <div className="space-y-2">
-        <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">Insights</div>
+        <div className="text-sm font-semibold text-[var(--text)]">Insights</div>
         {data?.insights?.length ? (
           <div className="grid md:grid-cols-2 gap-3">
             {data.insights.map((ins, idx) => (
               <Card key={idx} className="p-4 space-y-1" hover>
                 <Badge className={severityClass(ins.severity || "info")}>{ins.severity || "info"}</Badge>
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{ins.title}</div>
-                <div className="text-sm text-slate-600 dark:text-slate-200">{ins.description}</div>
+                <div className="text-sm font-semibold text-[var(--text)]">{ins.title}</div>
+                <div className="text-sm text-[var(--muted)]">{ins.description}</div>
               </Card>
             ))}
           </div>
         ) : (
-          <div className="text-sm text-slate-500">Aucun insight pour le moment.</div>
+          <div className="text-sm text-[var(--muted)]">Aucun insight pour le moment.</div>
         )}
       </div>
 
+      {/* actions */}
       <div className="space-y-2">
-        <div className="text-sm font-semibold text-slate-700 dark:text-slate-100">Actions suggérées</div>
+        <div className="text-sm font-semibold text-[var(--text)]">Actions suggérées</div>
         {data?.suggested_actions?.length ? (
           <div className="flex flex-wrap gap-2">
             {data.suggested_actions.map((act, idx) => (
@@ -391,7 +397,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
             ))}
           </div>
         ) : (
-          <div className="text-sm text-slate-500">Aucune action proposée.</div>
+          <div className="text-sm text-[var(--muted)]">Aucune action proposée.</div>
         )}
       </div>
     </Card>
