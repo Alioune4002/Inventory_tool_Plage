@@ -1,3 +1,4 @@
+// frontend/src/pages/Login.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -55,6 +56,16 @@ export default function Login() {
 
   const from = useMemo(() => safeFromLocation(loc.state), [loc.state]);
 
+  // ✅ Forcer dark sur Login (volontairement)
+  useEffect(() => {
+    const prevTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
+    return () => {
+      if (prevTheme) document.documentElement.setAttribute("data-theme", prevTheme);
+      else document.documentElement.removeAttribute("data-theme");
+    };
+  }, []);
+
   useEffect(() => {
     if (invitedEmail) setForm((p) => ({ ...p, username: invitedEmail }));
   }, [invitedEmail]);
@@ -76,11 +87,9 @@ export default function Login() {
     } catch (e2) {
       if (isEmailNotVerifiedError(e2)) {
         const email = extractEmailFromUsername(form.username);
-        // On envoie vers la page dédiée (plus claire pour l’utilisateur)
         nav("/check-email", { state: { email }, replace: false });
         return;
       }
-
       setErr(formatApiError(e2, { context: "login" }));
     } finally {
       setLoading(false);
@@ -112,14 +121,14 @@ export default function Login() {
   }, [err]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center px-2 sm:px-4 relative overflow-hidden">
       <Helmet>
         <title>Connexion | StockScan</title>
         <meta name="description" content="Connectez-vous à StockScan pour gérer vos inventaires." />
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
-      {/* background premium (theme-aware via tokens) */}
+      {/* background premium (dark) */}
       <div className="absolute inset-0 pointer-events-none" style={{ background: "var(--bg)" }} />
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full blur-[120px] opacity-25 bg-blue-500 pointer-events-none" />
@@ -186,7 +195,7 @@ export default function Login() {
               rightSlot={
                 <button
                   type="button"
-                  className="text-xs font-semibold px-2 py-1 rounded-full border border-[var(--border)] bg-black/5 hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 transition"
+                  className="text-xs font-semibold px-2 py-1 rounded-full border border-[var(--border)] bg-white/5 hover:bg-white/10 transition"
                   onClick={() => setShow((s) => !s)}
                 >
                   {show ? "Cacher" : "Voir"}

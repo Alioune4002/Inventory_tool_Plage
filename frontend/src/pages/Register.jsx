@@ -70,7 +70,8 @@ const servicePresets = (family, isMulti, linkedMode = "separate") => {
   }
 
   if (family === "pharmacie") {
-    if (linkedMode === "merge") return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
+    if (linkedMode === "merge")
+      return [{ id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie & Parapharmacie" }];
     return [
       { id: "svc-1", service_type: "pharmacy_parapharmacy", service_name: "Pharmacie" },
       { id: "svc-2", service_type: "pharmacy_parapharmacy", service_name: "Parapharmacie" },
@@ -97,9 +98,7 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
       type="button"
       className={[
         "w-10 h-10 rounded-full border flex items-center justify-center font-black transition",
-        active
-          ? "bg-blue-500 border-blue-400 text-white"
-          : "border-[var(--border)] bg-black/5 hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 text-[var(--text)]",
+        active ? "bg-blue-500 border-blue-400 text-white" : "border-[var(--border)] bg-white/5 hover:bg-white/10 text-[var(--text)]",
       ].join(" ")}
       onClick={() => onToggle(moduleId)}
       aria-pressed={active}
@@ -130,6 +129,16 @@ export default function Register() {
   const [serviceList, setServiceList] = useState(() => servicePresets(FAMILLES[0].id, false));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // ✅ Forcer dark sur Register (volontairement)
+  useEffect(() => {
+    const prevTheme = document.documentElement.getAttribute("data-theme");
+    document.documentElement.setAttribute("data-theme", "dark");
+    return () => {
+      if (prevTheme) document.documentElement.setAttribute("data-theme", prevTheme);
+      else document.documentElement.removeAttribute("data-theme");
+    };
+  }, []);
 
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const linkedFamilies = useMemo(() => new Set(["restauration", "boulangerie", "pharmacie"]), []);
@@ -206,15 +215,28 @@ export default function Register() {
             const familyForSvc = FAMILLES.find((f) => f.id === familyForSvcId) ?? familyMeta;
             const identifiers = familyForSvc?.identifiers || {};
 
-            nextFeatures.barcode = { ...(nextFeatures.barcode || {}), enabled: identifierEnabled ? Boolean(identifiers.barcode) : false };
-            nextFeatures.sku = { ...(nextFeatures.sku || {}), enabled: identifierEnabled ? Boolean(identifiers.sku) : false };
+            nextFeatures.barcode = {
+              ...(nextFeatures.barcode || {}),
+              enabled: identifierEnabled ? Boolean(identifiers.barcode) : false,
+            };
+            nextFeatures.sku = {
+              ...(nextFeatures.sku || {}),
+              enabled: identifierEnabled ? Boolean(identifiers.sku) : false,
+            };
             nextFeatures.dlc = { ...(nextFeatures.dlc || {}), enabled: moduleSet.has("expiry") };
             nextFeatures.lot = { ...(nextFeatures.lot || {}), enabled: moduleSet.has("lot") };
             nextFeatures.variants = { ...(nextFeatures.variants || {}), enabled: moduleSet.has("variants") };
             nextFeatures.multi_unit = { ...(nextFeatures.multi_unit || {}), enabled: moduleSet.has("multiUnit") };
-            nextFeatures.open_container_tracking = { ...(nextFeatures.open_container_tracking || {}), enabled: moduleSet.has("opened") };
+            nextFeatures.open_container_tracking = {
+              ...(nextFeatures.open_container_tracking || {}),
+              enabled: moduleSet.has("opened"),
+            };
             nextFeatures.item_type = { ...(nextFeatures.item_type || {}), enabled: moduleSet.has("itemType") };
-            nextFeatures.prices = { ...(nextFeatures.prices || {}), purchase_enabled: pricingEnabled, selling_enabled: pricingEnabled };
+            nextFeatures.prices = {
+              ...(nextFeatures.prices || {}),
+              purchase_enabled: pricingEnabled,
+              selling_enabled: pricingEnabled,
+            };
             nextFeatures.tva = { ...(nextFeatures.tva || {}), enabled: pricingEnabled };
 
             await api.patch(`/api/auth/services/${svc.id}/`, { features: nextFeatures });
@@ -301,13 +323,14 @@ export default function Register() {
     }[familyId] || "";
 
   return (
-    <div className="min-h-screen py-10 px-4 relative overflow-hidden">
+    <div className="min-h-screen py-10 px-2 sm:px-4 relative overflow-hidden">
       <Helmet>
         <title>Créer mon espace | StockScan</title>
         <meta name="description" content="Créez votre espace StockScan en quelques minutes." />
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
+      {/* background premium (dark) */}
       <div className="absolute inset-0 pointer-events-none" style={{ background: "var(--bg)" }} />
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
       <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full blur-[140px] opacity-20 bg-blue-500 pointer-events-none" />
@@ -319,7 +342,8 @@ export default function Register() {
           Choisis ton activité, organise tes services, active les modules utiles — puis commence ton inventaire.
         </p>
 
-        <div className="w-full max-w-4xl mt-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-6">
+        {/* ✅ plus large qu’avant (et meilleur rendu mobile) */}
+        <div className="w-full max-w-6xl mt-8 grid lg:grid-cols-[1.1fr_0.9fr] gap-6">
           <Card className="p-6 space-y-5">
             <div className="flex items-center justify-between">
               <span className="text-sm uppercase tracking-widest text-[var(--muted)]">
@@ -334,7 +358,9 @@ export default function Register() {
               <section className="space-y-4">
                 <div>
                   <h2 className="text-xl font-semibold text-[var(--text)]">Un service ou plusieurs ?</h2>
-                  <p className="text-sm text-[var(--muted)]">Tu peux rester simple… ou séparer tes espaces (cuisine/salle, rayons, etc.).</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    Tu peux rester simple… ou séparer tes espaces (cuisine/salle, rayons, etc.).
+                  </p>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -412,10 +438,12 @@ export default function Register() {
               <section className="space-y-4">
                 <div>
                   <h2 className="text-xl font-semibold text-[var(--text)]">Organisation recommandée</h2>
-                  <p className="text-sm text-[var(--muted)]">On te propose une organisation adaptée à {familyMeta.name.toLowerCase()}.</p>
+                  <p className="text-sm text-[var(--muted)]">
+                    On te propose une organisation adaptée à {familyMeta.name.toLowerCase()}.
+                  </p>
                 </div>
 
-                <div className="rounded-2xl border border-[var(--border)] bg-black/5 dark:bg-white/5 p-4">
+                <div className="rounded-2xl border border-[var(--border)] bg-white/5 p-4">
                   <div className="text-sm text-[var(--muted)]">Suggestion</div>
                   <div className="text-lg font-semibold text-[var(--text)]">{comboSummary}</div>
                   <div className="text-xs text-[var(--muted)] mt-1">Tu pourras regrouper ou séparer à l’étape suivante.</div>
@@ -472,9 +500,7 @@ export default function Register() {
                             </option>
                           ))}
                         </select>
-                        <span className="text-xs text-[var(--muted)]">
-                          Ce choix active les bons champs (scan, DLC, TVA, lots…).
-                        </span>
+                        <span className="text-xs text-[var(--muted)]">Ce choix active les bons champs (scan, DLC, TVA, lots…).</span>
                       </label>
                     </div>
                   ))}
@@ -575,7 +601,7 @@ export default function Register() {
               ))}
             </div>
 
-            <div className="rounded-2xl border border-[var(--border)] bg-black/5 dark:bg-white/5 p-3 text-sm">
+            <div className="rounded-2xl border border-[var(--border)] bg-white/5 p-3 text-sm">
               <div className="font-semibold text-[var(--text)]">Identifiants recommandés</div>
               <div className="text-[var(--muted)]">
                 {familyMeta.identifiers?.barcode ? "Code-barres activé" : "Code-barres désactivé"} ·{" "}
