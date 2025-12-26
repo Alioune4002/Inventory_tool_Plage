@@ -21,22 +21,25 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
 
   return (
     <header className="sticky top-0 z-20 backdrop-blur bg-[var(--surface)]/90 border-b border-[var(--border)]">
-      <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3">
+      <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="hidden lg:block min-w-0">
-            <div className="text-sm font-bold text-[var(--text)] truncate">{tenant?.name || "StockScan"}</div>
+            <div className="text-sm font-bold text-[var(--text)] truncate">
+              {tenant?.name || "StockScan"}
+            </div>
             <div className="text-xs text-[var(--muted)]">
               {isGeneral ? "Commerce non-alimentaire" : "Commerce alimentaire"}
             </div>
           </div>
 
           {showServiceSelect && (
-            <div className="flex items-center gap-2 rounded-2xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 shadow-soft">
-              <div className="text-xs text-[var(--muted)]">Service</div>
+            <div className="flex items-center gap-2 rounded-2xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 shadow-soft min-w-0 max-w-[72vw]">
+              <div className="text-xs text-[var(--muted)] shrink-0">Service</div>
+
               <select
                 value={serviceId || ""}
                 onChange={(e) => selectService(e.target.value)}
-                className="text-sm font-semibold text-[var(--text)] bg-transparent outline-none"
+                className="text-sm font-semibold text-[var(--text)] bg-transparent outline-none min-w-0 truncate max-w-[55vw]"
                 aria-label="Sélectionner un service"
               >
                 {services.map((s) => (
@@ -50,12 +53,12 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           {onOpenMobileNav && (
             <button
               type="button"
               onClick={onOpenMobileNav}
-              className="lg:hidden rounded-full border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--text)] hover:bg-[var(--accent)]/40 transition"
+              className="lg:hidden rounded-full border border-[var(--border)] bg-[var(--surface)]/80 p-2 text-[var(--text)] hover:bg-[var(--accent)]/20 transition"
               aria-label="Ouvrir la navigation"
             >
               <Menu size={18} />
@@ -84,7 +87,12 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
             {loading ? "Chargement…" : me?.username || "Compte"}
           </Badge>
 
-          <Button variant="secondary" size="sm" onClick={onLogout || logout} className="border-slate-300">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onLogout || logout}
+            className="border-[var(--border)]"
+          >
             <LogOut size={16} />
             <span className="hidden sm:inline">Déconnexion</span>
           </Button>

@@ -3,10 +3,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
-import Toast from "../components/Toast";
+import Toasts from "../components/Toast";
 import AppRoutes from "./routes";
 import { useAuth } from "./AuthProvider";
-import { ToastProvider } from "./ToastContext";
+import { ToastProvider, useToast } from "./ToastContext";
 import BillingBanners from "../components/BillingBanners";
 import useEntitlements from "./useEntitlements";
 import MobileNav from "../components/MobileNav";
@@ -24,11 +24,25 @@ function getInitialTheme() {
   return "dark";
 }
 
+function UnhandledRejectionToaster() {
+  const pushToast = useToast();
+
+  useEffect(() => {
+    const onUnhandled = (event) => {
+      const msg = formatApiError(event?.reason, { context: "generic" });
+      pushToast?.({ message: msg, type: "error" });
+    };
+    window.addEventListener("unhandledrejection", onUnhandled);
+    return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, [pushToast]);
+
+  return null;
+}
+
 export default function AppShell() {
   const location = useLocation();
   const { isAuthed, tenant, me, logout } = useAuth();
   const { data: entitlements } = useEntitlements();
-  const [toast, setToast] = useState(null);
   const [theme, setTheme] = useState(getInitialTheme);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -50,7 +64,7 @@ export default function AppShell() {
 
   const onLogout = () => {
     logout();
-    setToast({ message: "Déconnexion effectuée.", type: "info" });
+    
   };
 
   
@@ -63,28 +77,15 @@ export default function AppShell() {
     }
   }, [theme]);
 
- 
   useEffect(() => {
     if (mobileNavOpen) setMobileNavOpen(false);
-   
+    
   }, [location.pathname]);
 
-  
-  useEffect(() => {
-    const onUnhandled = (event) => {
-      try {
-        const msg = formatApiError(event?.reason, { context: "generic" });
-        setToast({ message: msg, type: "error" });
-      } catch {
-        setToast({ message: "Une erreur est survenue. Réessaie.", type: "error" });
-      }
-    };
-    window.addEventListener("unhandledrejection", onUnhandled);
-    return () => window.removeEventListener("unhandledrejection", onUnhandled);
-  }, []);
-
   return (
-    <ToastProvider pushToast={setToast}>
+    <ToastProvider>
+      <UnhandledRejectionToaster />
+
       <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
         {isAppSection && isAuthed && (
           <Topbar
@@ -103,16 +104,15 @@ export default function AppShell() {
             <main className="mx-auto max-w-6xl px-4 py-6">
               {isAppSection && isAuthed && <BillingBanners entitlements={entitlements} />}
 
-              
               <ErrorBoundary>
-                <AppRoutes setToast={setToast} />
+                <AppRoutes />
               </ErrorBoundary>
             </main>
           </div>
         </div>
 
         <GuidedTour onRequestMobileNav={setMobileNavOpen} />
-        <Toast toast={toast} onClose={() => setToast(null)} />
+        <Toasts />
         <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
       </div>
     </ToastProvider>

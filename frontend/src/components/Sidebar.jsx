@@ -1,15 +1,6 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Boxes,
-  Package,
-  Tag,
-  Download,
-  Settings,
-  HelpCircle,
-  MinusCircle,
-} from "lucide-react";
+import { LayoutDashboard, Boxes, Package, Tag, Download, Settings, HelpCircle, MinusCircle } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
@@ -41,25 +32,22 @@ export default function Sidebar() {
   const isGeneral = tenantDomain === "general";
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
-
   const wording = getWording(serviceType, tenantDomain);
   const identifierLabel = wording?.identifierLabel || "code-barres";
 
-  const filtered = items.filter(() => true);
-
   return (
-    <aside className="hidden lg:flex h-full w-72 flex-col p-3 space-y-3 text-[var(--text)]">
-      <Card className="p-4 flex items-center justify-between">
+    <aside className="hidden lg:flex h-full w-72 flex-col p-3 space-y-3 text-[var(--text)] min-w-0-safe">
+      <Card className="p-4 flex items-center justify-between min-w-0-safe">
         <div className="min-w-0">
           <div className="font-black tracking-tight text-lg truncate">StockScan</div>
           <div className="text-xs text-[var(--muted)]">Inventaire premium</div>
         </div>
-        <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 shadow-glow" />
+        <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 shadow-glow shrink-0" />
       </Card>
 
       <Card className="p-2" hover>
         <nav className="space-y-1">
-          {filtered.map((it) => {
+          {items.map((it) => {
             const Icon = it.icon;
             return (
               <NavLink
@@ -68,16 +56,16 @@ export default function Sidebar() {
                 data-tour={tourTargets[it.to]}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition",
-                    "hover:bg-[var(--accent)]/25",
+                    "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition min-w-0-safe",
+                    "hover:bg-[var(--accent)]/20",
                     isActive
-                      ? "bg-[var(--accent)]/45 border border-[var(--border)] shadow-soft"
-                      : "border border-transparent text-[var(--text)]"
+                      ? "bg-[var(--primary)] text-white shadow-glow hover:bg-[var(--primary)]"
+                      : "text-[var(--text)]"
                   )
                 }
               >
-                <Icon size={18} />
-                {it.label}
+                <Icon size={18} className="shrink-0" />
+                <span className="truncate">{it.label}</span>
               </NavLink>
             );
           })}

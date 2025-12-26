@@ -1,4 +1,4 @@
-// frontend/src/lib/api.js
+
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
@@ -9,11 +9,8 @@ export const api = axios.create({
 });
 
 export const setAuthToken = (token) => {
-  if (token) {
-    api.defaults.headers.common.Authorization = `Bearer ${token}`;
-  } else {
-    delete api.defaults.headers.common.Authorization;
-  }
+  if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  else delete api.defaults.headers.common.Authorization;
 };
 
 const bootToken = getStoredToken?.() || "";
@@ -53,15 +50,10 @@ function setLastConcreteServiceId(id) {
 function resolveServiceHeaderValue() {
   const current = String(getStoredServiceIdSafe() || "").trim();
   if (!current) return "";
-  if (current === "all") {
-    // En mode "Tous les services" (lecture), les endpoints write doivent
-    // quand même avoir un contexte => on fallback sur le dernier service concret.
-    return String(getLastConcreteServiceId() || "").trim();
-  }
+  if (current === "all") return String(getLastConcreteServiceId() || "").trim();
   return current;
 }
 
-// Inject header for every request
 api.interceptors.request.use((config) => {
   const svc = resolveServiceHeaderValue();
   if (svc) {
@@ -78,7 +70,6 @@ api.interceptors.request.use((config) => {
 // -----------------------------
 function extractErrorCode(error) {
   const data = error?.response?.data;
-  // DRF AuthenticationFailed peut renvoyer {detail, code} ou parfois detail string
   return (data?.code || data?.detail?.code || "").toString();
 }
 
@@ -91,7 +82,6 @@ function buildFriendlyMessage(error) {
     return "Impossible de joindre le service. Vérifie ta connexion internet, puis réessaie.";
   }
 
- 
   if (code === "email_not_verified") {
     return "Email non vérifié. Vérifie ta boîte mail (et les spams) puis clique sur le lien de confirmation.";
   }
@@ -108,24 +98,27 @@ function buildFriendlyMessage(error) {
     return "Une erreur est survenue côté serveur. Réessaie dans quelques instants.";
   }
 
-  // DRF standard
   if (data?.detail && typeof data.detail === "string") return data.detail;
   if (data?.error && typeof data.error === "string") return data.error;
 
-  // 401 générique (identifiants, token, etc.)
   if (status === 401) return "Connexion requise. Merci de te reconnecter.";
 
   return null;
 }
 
-function isAuthPagePath(pathname) {
+function isAuthPage(pathname) {
   const p = String(pathname || "");
-  return p.startsWith("/login") || p.startsWith("/register") || p.startsWith("/check-email");
+  return (
+    p.startsWith("/login") ||
+    p.startsWith("/register") ||
+    p.startsWith("/check-email") ||
+    p.startsWith("/verify-email") ||
+    p.startsWith("/reset-password")
+  );
 }
 
 function isAuthEndpoint(url) {
   const u = String(url || "");
-  // endpoints d’auth où un 401 ne doit pas provoquer un logout/redirect agressif
   return (
     u.includes("/api/auth/login/") ||
     u.includes("/api/auth/register/") ||
@@ -135,24 +128,23 @@ function isAuthEndpoint(url) {
   );
 }
 
-// Déconnexion silencieuse en cas de 401 (mais avec exceptions)
 api.interceptors.response.use(
   (res) => res,
   (error) => {
     const status = error?.response?.status;
     const code = extractErrorCode(error);
+    const reqUrl = error?.config?.url || "";
 
-    // Gestion limites/plan
+    // Gestion limites / plan
     if (status === 403) {
       const c = error.response?.data?.code;
       if (c && String(c).startsWith("LIMIT_")) {
-        const detail =
+        error.friendlyMessage =
           error.response?.data?.detail ||
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";
-        error.friendlyMessage = detail;
       } else if (c === "FEATURE_NOT_INCLUDED") {
-        const detail = error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
-        error.friendlyMessage = detail;
+        error.friendlyMessage =
+          error.response?.data?.detail || "Cette fonctionnalité nécessite un plan supérieur.";
       }
     }
 
@@ -161,22 +153,27 @@ api.interceptors.response.use(
       if (msg) error.friendlyMessage = msg;
     }
 
-    if (error?.response?.status === 401) {
-  const code = error?.response?.data?.code;
+    // 401 handling
+    if (status === 401) {
+      // ne pas logout/redirect si email non vérifié
+      if (code === "email_not_verified") {
+        error.friendlyMessage =
+          error.friendlyMessage || "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.";
+        return Promise.reject(error);
+      }
 
-  // IMPORTANT : ne pas logout / redirect si email non vérifié
-  if (code === "email_not_verified") {
-    error.friendlyMessage =
-      error.friendlyMessage ||
-      "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.";
-    return Promise.reject(error);
-  }
+      // ne pas être agressif sur les endpoints auth (login/register/etc.)
+      if (isAuthEndpoint(reqUrl)) {
+        return Promise.reject(error);
+      }
 
-  clearToken();
-  const path = window.location.pathname || "";
-  const isAuthPage = path.startsWith("/login") || path.startsWith("/register") || path.startsWith("/check-email");
-  if (!isAuthPage) window.location.href = "/login";
-}
+      clearToken();
+
+      const path = window.location.pathname || "";
+      if (!isAuthPage(path)) {
+        window.location.href = "/login";
+      }
+    }
 
     return Promise.reject(error);
   }
@@ -219,7 +216,7 @@ export async function openBillingPortal() {
 }
 
 // -----------------------------
-// Export helpers (avoid 406)
+// Export helpers
 // -----------------------------
 export async function downloadInventoryExcel({ month }) {
   if (!month) throw new Error("Mois requis.");
@@ -229,7 +226,7 @@ export async function downloadInventoryExcel({ month }) {
     headers: { Accept: "*/*" },
   });
 
-  return res?.data; // blob
+  return res?.data;
 }
 
 // -----------------------------

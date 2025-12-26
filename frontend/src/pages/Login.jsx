@@ -1,4 +1,3 @@
-
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -29,7 +28,6 @@ function extractEmailFromUsername(value) {
 
 function isEmailNotVerifiedError(err) {
   if (!err) return false;
-
   if (err.code === "email_not_verified" || err.isEmailNotVerified) return true;
 
   const data = err?.response?.data || {};
@@ -46,13 +44,12 @@ export default function Login() {
   const loc = useLocation();
   const pushToast = useToast();
 
-  const invited = loc.state?.invited;
+  const invited = Boolean(loc.state?.invited);
   const invitedEmail = loc.state?.email;
 
   const [form, setForm] = useState({ username: "", password: "" });
   const [show, setShow] = useState(false);
   const [err, setErr] = useState("");
-  const [needsVerify, setNeedsVerify] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
 
@@ -64,14 +61,13 @@ export default function Login() {
 
   useEffect(() => {
     if (loc.state?.reason === "auth_required") {
-      setErr("Connexion requise. Merci de te reconnecter.");
+      setErr("Session expirée. Merci de te reconnecter.");
     }
   }, [loc.state]);
 
   const submit = async (e) => {
     e.preventDefault();
     setErr("");
-    setNeedsVerify(false);
     setLoading(true);
 
     try {
@@ -79,12 +75,11 @@ export default function Login() {
       nav(from, { replace: true });
     } catch (e2) {
       if (isEmailNotVerifiedError(e2)) {
-          const email = extractEmailFromUsername(form.username);
-          setNeedsVerify(true);
-          setErr("Ton compte existe, mais il n’est pas encore activé. Vérifie ton email (et les spams), puis clique sur le lien.");
-          nav("/check-email", { state: { email }, replace: false });
-          return;
-}
+        const email = extractEmailFromUsername(form.username);
+        // On envoie vers la page dédiée (plus claire pour l’utilisateur)
+        nav("/check-email", { state: { email }, replace: false });
+        return;
+      }
 
       setErr(formatApiError(e2, { context: "login" }));
     } finally {
@@ -102,10 +97,9 @@ export default function Login() {
     try {
       await resendVerificationEmail({ email });
       pushToast?.({ type: "success", message: "Email de vérification renvoyé." });
-      setNeedsVerify(true);
       nav("/check-email", { state: { email }, replace: false });
-    } catch {
-      pushToast?.({ type: "error", message: "Impossible pour le moment. Réessaie plus tard." });
+    } catch (e) {
+      pushToast?.({ type: "error", message: formatApiError(e, { context: "generic" }) });
     } finally {
       setResending(false);
     }
@@ -118,55 +112,57 @@ export default function Login() {
   }, [err]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center px-4 relative overflow-hidden">
       <Helmet>
         <title>Connexion | StockScan</title>
         <meta name="description" content="Connectez-vous à StockScan pour gérer vos inventaires." />
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
+      {/* background premium (theme-aware via tokens) */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: "var(--bg)" }} />
       <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
-      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full bg-blue-600 blur-[120px] opacity-40" />
-      <div className="absolute -bottom-24 right-0 h-72 w-72 rounded-full bg-cyan-400 blur-[120px] opacity-30" />
+      <div className="absolute -top-20 -left-20 h-80 w-80 rounded-full blur-[120px] opacity-25 bg-blue-500 pointer-events-none" />
+      <div className="absolute -bottom-24 right-0 h-72 w-72 rounded-full blur-[120px] opacity-20 bg-emerald-400 pointer-events-none" />
 
-      <Card className="w-full max-w-md glass border-white/10 bg-white/5 text-white">
+      <Card className="w-full max-w-md p-0" glass>
         <div className="p-6 space-y-5">
           <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-white/60">Bienvenue</div>
-            <h1 className="text-3xl font-black leading-tight">Connexion</h1>
-            <p className="text-white/70 mt-1">Accède à ton espace StockScan.</p>
+            <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Bienvenue</div>
+            <h1 className="text-3xl font-black leading-tight text-[var(--text)]">Connexion</h1>
+            <p className="mt-1 text-sm text-[var(--muted)]">Accède à ton espace StockScan.</p>
           </div>
 
           {invited ? (
-            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-              Invitation acceptée ✅ {invitedEmail ? `Connecte-toi avec ${invitedEmail}.` : "Tu peux te connecter."}
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm">
+              <div className="font-semibold text-[var(--text)]">Invitation acceptée ✅</div>
+              <div className="text-[var(--muted)]">
+                {invitedEmail ? `Connecte-toi avec ${invitedEmail}.` : "Tu peux te connecter."}
+              </div>
             </div>
           ) : null}
 
           {err ? (
-            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100" role="alert">
-              {err}
-
-              {needsVerify ? (
-                <div className="mt-3 flex gap-2 flex-wrap">
-                  <Button onClick={resend} loading={resending} disabled={resending} size="sm">
-                    Renvoyer l’email
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => nav("/check-email", { state: { email: extractEmailFromUsername(form.username) } })}
-                  >
-                    Aller à la vérification
-                  </Button>
-                </div>
-              ) : null}
+            <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm" role="alert">
+              <div className="text-[var(--text)]">{err}</div>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                <Button onClick={resend} loading={resending} disabled={resending} size="sm">
+                  Renvoyer l’email
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => nav("/check-email", { state: { email: extractEmailFromUsername(form.username) } })}
+                >
+                  Vérifier mon email
+                </Button>
+              </div>
             </div>
           ) : null}
 
           <form onSubmit={submit} className="space-y-3">
             <Input
-              label="Nom d’utilisateur ou email"
+              label="Identifiant (email ou nom d’utilisateur)"
               placeholder="vous@commerce.fr"
               value={form.username}
               autoFocus
@@ -190,7 +186,7 @@ export default function Login() {
               rightSlot={
                 <button
                   type="button"
-                  className="text-xs font-semibold text-white/80 px-2 py-1 rounded-full border border-white/20 hover:bg-white/10 transition"
+                  className="text-xs font-semibold px-2 py-1 rounded-full border border-[var(--border)] bg-black/5 hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10 transition"
                   onClick={() => setShow((s) => !s)}
                 >
                   {show ? "Cacher" : "Voir"}
@@ -198,18 +194,27 @@ export default function Login() {
               }
             />
 
-            <Button type="submit" className="w-full justify-center" loading={loading} disabled={!form.username || !form.password || loading}>
+            <Button
+              type="submit"
+              className="w-full justify-center"
+              loading={loading}
+              disabled={!form.username || !form.password || loading}
+            >
               Se connecter
             </Button>
           </form>
 
-          <div className="text-sm text-white/70 flex justify-between items-center">
-            <Link to="/" className="underline">Retour landing</Link>
-            <Link to="/register" className="underline">Créer un compte</Link>
+          <div className="text-sm text-[var(--muted)] flex justify-between items-center">
+            <Link to="/" className="underline">
+              Retour au site
+            </Link>
+            <Link to="/register" className="underline">
+              Créer un compte
+            </Link>
           </div>
 
-          <div className="text-xs text-white/40">
-            Tu n’as pas reçu l’email ? Mets ton email en identifiant puis clique sur “Renvoyer l’email”.
+          <div className="text-xs text-[var(--muted)]">
+            Email d’activation non reçu ? Mets ton email en identifiant puis clique sur “Renvoyer l’email”.
           </div>
         </div>
       </Card>

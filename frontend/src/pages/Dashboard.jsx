@@ -1,3 +1,4 @@
+// frontend/src/pages/Dashboard.jsx
 // Deployed backend: https://inventory-tool-plage.onrender.com
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
@@ -50,10 +51,10 @@ function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wor
   const lossHelper = isPharma
     ? "Pertes : casse / péremption / erreurs (déclaré)"
     : isBakery
-    ? "Pertes : invendus / 24h / casse (déclaré)"
-    : isBar || isDining
-    ? "Pertes : casse / offerts / erreurs (déclaré)"
-    : "Pertes : casse / DLC / vol (déclaré)";
+      ? "Pertes : invendus / 24h / casse (déclaré)"
+      : isBar || isDining
+        ? "Pertes : casse / offerts / erreurs (déclaré)"
+        : "Pertes : casse / DLC / vol (déclaré)";
 
   const productsHelper = isAll
     ? "Total des comptages sur tous les services (mois sélectionné)"
@@ -104,7 +105,7 @@ export default function Dashboard() {
 
   // ✅ Admin panel (owner)
   const [membersLoading, setMembersLoading] = useState(false);
-  const [membersVisible, setMembersVisible] = useState(false); // devient true si endpoint OK
+  const [membersVisible, setMembersVisible] = useState(false);
   const [membersSummary, setMembersSummary] = useState({ members: [], recent_activity: [] });
 
   const tenantDomain = tenant?.domain || "food";
@@ -237,7 +238,8 @@ export default function Dashboard() {
       }
     } catch (e) {
       pushToast?.({
-        message: "Oups… impossible de charger le dashboard. Vérifie le service sélectionné et reconnecte-toi si besoin.",
+        message:
+          "Oups… impossible de charger le dashboard. Vérifie le service sélectionné et reconnecte-toi si besoin.",
         type: "error",
       });
       setStats({
@@ -256,7 +258,6 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ Admin-only panel data
   const loadMembersSummary = async () => {
     setMembersLoading(true);
     try {
@@ -268,14 +269,12 @@ export default function Dashboard() {
       });
       setMembersVisible(true);
     } catch (e) {
-      // 403 => pas owner => on masque sans bruit
       const status = e?.response?.status;
       if (status === 403) {
         setMembersVisible(false);
         setMembersSummary({ members: [], recent_activity: [] });
       } else {
         setMembersVisible(false);
-        // message plus doux
         pushToast?.({
           message: "Impossible de charger la section équipe pour l’instant. Réessaie dans quelques secondes.",
           type: "error",
@@ -291,7 +290,6 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceId, month, isAllServices]);
 
-  // ✅ On tente une fois au chargement : si owner => panel s’affiche
   useEffect(() => {
     loadMembersSummary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -364,22 +362,22 @@ export default function Dashboard() {
         <meta name="description" content={ux.inventoryIntro || "Dashboard inventaire : valeur, catégories, pertes."} />
       </Helmet>
 
-      <div className="grid gap-4">
+      <div className="grid gap-4 min-w-0">
         {/* ✅ Admin principal: équipe + traçabilité */}
         {membersVisible ? (
-          <Card className="p-6 space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-start gap-3">
+          <Card className="p-6 space-y-4 min-w-0">
+            <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
+              <div className="flex items-start gap-3 min-w-0">
                 <img
                   src="/icon.svg"
                   alt="StockScan"
-                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-white p-2"
+                  className="h-10 w-10 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shrink-0"
                   loading="lazy"
                 />
-                <div>
-                  <div className="text-sm text-slate-500">Espace admin</div>
-                  <div className="text-2xl font-black tracking-tight">Équipe & activité</div>
-                  <div className="text-sm text-slate-600">
+                <div className="min-w-0">
+                  <div className="text-sm text-[var(--muted)]">Espace admin</div>
+                  <div className="text-2xl font-black tracking-tight text-[var(--text)]">Équipe & activité</div>
+                  <div className="text-sm text-[var(--muted)]">
                     Visualisez les accès par service et gardez un œil sur ce qui bouge.
                   </div>
                 </div>
@@ -392,10 +390,10 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <div className="grid lg:grid-cols-2 gap-4">
-              <Card className="p-4 space-y-3" hover>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-800">Membres & rôles</div>
+            <div className="grid lg:grid-cols-2 gap-4 min-w-0">
+              <Card className="p-4 space-y-3 min-w-0" hover>
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <div className="text-sm font-semibold text-[var(--text)] min-w-0">Membres & rôles</div>
                   <Badge variant="info">Admin</Badge>
                 </div>
 
@@ -406,7 +404,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : members.length ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2 min-w-0">
                     {members.map((m) => {
                       const scope = m?.service_scope?.name ? `Service : ${m.service_scope.name}` : "Accès : multi-services";
                       const last = m?.last_action?.action
@@ -415,32 +413,37 @@ export default function Dashboard() {
                       const role = (m?.role || "operator").toUpperCase();
                       const user = m?.user || {};
                       return (
-                        <Card key={m.id} className="p-4" hover>
-                          <div className="flex items-center justify-between gap-3">
+                        <Card key={m.id} className="p-4 min-w-0" hover>
+                          <div className="flex items-start justify-between gap-3 min-w-0">
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold text-slate-900 truncate">
-                                {user.username || "Utilisateur"}{" "}
-                                <span className="text-slate-400 font-normal">·</span>{" "}
-                                <span className="text-slate-600 font-semibold">{user.email || "—"}</span>
+                              {/* ✅ plus de truncate ici => wrap + break-anywhere */}
+                              <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
+                                <span>{user.username || "Utilisateur"}</span>{" "}
+                                <span className="text-[var(--muted)] font-normal">·</span>{" "}
+                                <span className="text-[var(--muted)] font-semibold break-anywhere">
+                                  {user.email || "—"}
+                                </span>
                               </div>
-                              <div className="text-xs text-slate-500 mt-1">
+                              <div className="text-xs text-[var(--muted)] mt-1 break-anywhere">
                                 {scope} · Dernière activité : {last}
                               </div>
                             </div>
-                            <Badge variant={role === "OWNER" ? "info" : "neutral"}>{role}</Badge>
+                            <div className="shrink-0">
+                              <Badge variant={role === "OWNER" ? "info" : "neutral"}>{role}</Badge>
+                            </div>
                           </div>
                         </Card>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">Aucun membre à afficher pour l’instant.</div>
+                  <div className="text-sm text-[var(--muted)]">Aucun membre à afficher pour l’instant.</div>
                 )}
               </Card>
 
-              <Card className="p-4 space-y-3" hover>
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold text-slate-800">Activité récente</div>
+              <Card className="p-4 space-y-3 min-w-0" hover>
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  <div className="text-sm font-semibold text-[var(--text)] min-w-0">Activité récente</div>
                   <Badge variant="neutral">{recentActivity.length} évènement(s)</Badge>
                 </div>
 
@@ -451,7 +454,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 ) : recentActivity.length ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2 min-w-0">
                     {recentActivity.slice(0, 12).map((a, idx) => {
                       const who = a?.user?.username || "system";
                       const action = a?.action || "—";
@@ -459,61 +462,63 @@ export default function Dashboard() {
                       const obj = a?.object_type
                         ? `${a.object_type}${a.object_id ? `#${a.object_id}` : ""}`
                         : "";
+
                       return (
-                        <div key={`${action}-${idx}`} className="flex items-start justify-between gap-3">
+                        <div
+                          key={`${action}-${idx}`}
+                          className="flex items-start justify-between gap-3 min-w-0"
+                        >
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-slate-800 truncate">
-                              {action} <span className="text-slate-400 font-normal">·</span>{" "}
-                              <span className="text-slate-600">{who}</span>
-                              {obj ? <span className="text-slate-400 font-normal"> · {obj}</span> : null}
+                            <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
+                              {action} <span className="text-[var(--muted)] font-normal">·</span>{" "}
+                              <span className="text-[var(--muted)]">{who}</span>
+                              {obj ? <span className="text-[var(--muted)] font-normal"> · {obj}</span> : null}
                             </div>
-                            <div className="text-xs text-slate-500">{when}</div>
+                            <div className="text-xs text-[var(--muted)]">{when}</div>
                           </div>
-                          <Badge variant="neutral">{action}</Badge>
+                          <div className="shrink-0">
+                            <Badge variant="neutral">{action}</Badge>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="text-sm text-slate-500">
+                  <div className="text-sm text-[var(--muted)]">
                     Rien à afficher ici pour le moment — dès qu’un membre agit, l’activité apparaîtra.
                   </div>
                 )}
               </Card>
             </div>
 
-            <div className="text-xs text-slate-500">
-              Astuce : gérez les rôles et le scope service depuis <span className="font-semibold">Settings → Équipe</span>.
+            <div className="text-xs text-[var(--muted)]">
+              Astuce : gérez les rôles et le scope service depuis{" "}
+              <span className="font-semibold text-[var(--text)]">Settings → Équipe</span>.
             </div>
           </Card>
         ) : null}
 
         {/* Dashboard header */}
-        <Card className="p-6 space-y-3">
-          <div className="flex flex-wrap gap-3 items-center justify-between">
-            <div className="flex items-start gap-3">
-              <img
-                src="/logo_dark.svg"
-                alt="StockScan"
-                className="h-10 hidden sm:block"
-                loading="lazy"
-              />
-              <div>
-                <div className="text-sm text-slate-500">{copy.subtitle}</div>
-                <div className="text-2xl font-black tracking-tight">{copy.title}</div>
+        <Card className="p-6 space-y-3 min-w-0">
+          <div className="flex flex-wrap gap-3 items-center justify-between min-w-0">
+            <div className="flex items-start gap-3 min-w-0">
+              <img src="/logo_dark.svg" alt="StockScan" className="h-10 hidden sm:block" loading="lazy" />
+              <div className="min-w-0">
+                <div className="text-sm text-[var(--muted)]">{copy.subtitle}</div>
+                <div className="text-2xl font-black tracking-tight text-[var(--text)]">{copy.title}</div>
               </div>
             </div>
             <Badge variant="info">{badgeText}</Badge>
           </div>
 
-          <div className="grid sm:grid-cols-3 gap-3 items-end">
+          <div className="grid sm:grid-cols-3 gap-3 items-end min-w-0">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
             {showServiceSelect && (
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Service</span>
+              <label className="space-y-1.5 min-w-0">
+                <span className="text-sm font-medium text-[var(--text)]">Service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={isAllServices ? "all" : serviceId || ""}
                   onChange={(e) => selectService(e.target.value)}
                   aria-label="Sélection du service"
@@ -528,33 +533,33 @@ export default function Dashboard() {
               </label>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex gap-2 min-w-0">
               <Button onClick={loadData} loading={loading} className="w-full">
                 Rafraîchir
               </Button>
             </div>
           </div>
 
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-[var(--muted)]">
             Conseil : démarrez avec un comptage simple (10–20 lignes). Le dashboard devient très parlant dès les premiers cycles.
           </div>
         </Card>
 
         {/* KPIs */}
-        <div className="grid md:grid-cols-3 xl:grid-cols-5 gap-4">
+        <div className="grid md:grid-cols-3 xl:grid-cols-5 gap-4 min-w-0">
           {kpis.map((k) => (
-            <Card key={k.label} className="p-5" hover>
-              <div className="text-xs text-slate-500">{k.label}</div>
-              <div className="mt-2 text-3xl font-black">{loading ? "…" : k.value ?? "—"}</div>
-              <div className="mt-1 text-sm text-slate-500">{k.helper}</div>
+            <Card key={k.label} className="p-5 min-w-0" hover>
+              <div className="text-xs text-[var(--muted)]">{k.label}</div>
+              <div className="mt-2 text-3xl font-black text-[var(--text)]">{loading ? "…" : k.value ?? "—"}</div>
+              <div className="mt-1 text-sm text-[var(--muted)]">{k.helper}</div>
             </Card>
           ))}
         </div>
 
         {/* Categories */}
-        <Card className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-700">{copy.categoryTitle}</div>
+        <Card className="p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="text-sm font-semibold text-[var(--text)] min-w-0">{copy.categoryTitle}</div>
             <Badge variant="neutral">{loading ? "Chargement" : `${categories.length || 0} catégories`}</Badge>
           </div>
 
@@ -565,44 +570,48 @@ export default function Dashboard() {
               ))}
             </div>
           ) : categories.length ? (
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="grid sm:grid-cols-2 gap-3 min-w-0">
               {categories.map((c) => {
                 const width = Math.max(((c.total_purchase_value || 0) / maxCategoryPurchase) * 100, 6);
 
                 return (
-                  <Card key={c.category || "aucune"} className="p-4 space-y-2" hover>
-                    <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold text-slate-800">{c.category || "Non catégorisé"}</div>
+                  <Card key={c.category || "aucune"} className="p-4 space-y-2 min-w-0" hover>
+                    <div className="flex items-center justify-between gap-3 min-w-0">
+                      <div className="text-sm font-semibold text-[var(--text)] min-w-0 break-anywhere">
+                        {c.category || "Non catégorisé"}
+                      </div>
                       <Badge variant="neutral">{fmtNumber(c.total_quantity || 0)} u.</Badge>
                     </div>
 
-                    <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400"
                         style={{ width: `${width}%` }}
                       />
                     </div>
 
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-[var(--muted)] break-anywhere">
                       Achat : {fmtCurrency(c.total_purchase_value || 0)} · Vente : {fmtCurrency(c.total_selling_value || 0)}
                     </div>
 
-                    <div className="text-xs text-rose-500">Pertes : {fmtNumber(c.losses_qty || 0)} u.</div>
+                    <div className="text-xs text-rose-500 dark:text-rose-300">
+                      Pertes : {fmtNumber(c.losses_qty || 0)} u.
+                    </div>
                   </Card>
                 );
               })}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-[var(--muted)]">
               Pas encore de données sur cette période. Lancez un comptage, ou changez de mois/service ✨
             </div>
           )}
         </Card>
 
         {/* Losses */}
-        <Card className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-700">Pertes par raison</div>
+        <Card className="p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="text-sm font-semibold text-[var(--text)] min-w-0">Pertes par raison</div>
             <Badge variant="neutral">{loading ? "Chargement" : `${lossesByReason.length || 0} raisons`}</Badge>
           </div>
 
@@ -613,18 +622,18 @@ export default function Dashboard() {
               ))}
             </div>
           ) : lossesByReason.length ? (
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               {lossesByReason.map((l) => {
                 const width = Math.max(((l.total_cost || 0) / maxLossCost) * 100, 8);
                 return (
-                  <div key={l.reason} className="space-y-1">
-                    <div className="flex justify-between text-xs font-semibold text-slate-600">
-                      <span>{l.reason}</span>
-                      <span>
+                  <div key={l.reason} className="space-y-1 min-w-0">
+                    <div className="flex justify-between gap-3 text-xs font-semibold text-[var(--muted)] min-w-0">
+                      <span className="min-w-0 break-anywhere">{l.reason}</span>
+                      <span className="shrink-0">
                         {fmtCurrency(l.total_cost || 0)} — {fmtNumber(l.total_qty || 0)} u.
                       </span>
                     </div>
-                    <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-rose-500 to-orange-400"
                         style={{ width: `${width}%` }}
@@ -635,14 +644,16 @@ export default function Dashboard() {
               })}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)</div>
+            <div className="text-sm text-[var(--muted)]">
+              Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)
+            </div>
           )}
         </Card>
 
         {/* Products preview */}
-        <Card className="p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-700">{copy.productsTitle}</div>
+        <Card className="p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="text-sm font-semibold text-[var(--text)] min-w-0">{copy.productsTitle}</div>
             <Badge variant="neutral">{loading ? "Chargement" : `${products.length || 0} lignes`}</Badge>
           </div>
 
@@ -653,30 +664,34 @@ export default function Dashboard() {
               ))}
             </div>
           ) : products.length ? (
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="grid sm:grid-cols-2 gap-3 min-w-0">
               {products.slice(0, 10).map((p, idx) => (
-                <Card key={`${p.name}-${idx}`} className="p-4 space-y-1" hover>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-slate-800">{p.name}</div>
-                    <div className="flex gap-2 items-center">
+                <Card key={`${p.name}-${idx}`} className="p-4 space-y-1 min-w-0" hover>
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="text-sm font-semibold text-[var(--text)] min-w-0 break-anywhere">
+                      {p.name}
+                    </div>
+                    <div className="flex gap-2 items-center flex-wrap justify-end">
                       {isAllServices && <Badge variant="neutral">{p.__service_name || "Service"}</Badge>}
                       <Badge variant="neutral">{p.category || "—"}</Badge>
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-[var(--muted)]">
                     Stock : {fmtNumber(p.stock_final || 0)} {p.unit || ""}
                   </div>
 
-                  <div className="text-xs text-slate-500">Valeur achat : {fmtCurrency(p.purchase_value_current || 0)}</div>
-                  <div className="text-xs text-slate-500">Valeur vente : {fmtCurrency(p.selling_value_current || 0)}</div>
+                  <div className="text-xs text-[var(--muted)]">Valeur achat : {fmtCurrency(p.purchase_value_current || 0)}</div>
+                  <div className="text-xs text-[var(--muted)]">Valeur vente : {fmtCurrency(p.selling_value_current || 0)}</div>
 
-                  <div className="text-xs text-rose-500">Pertes : {fmtNumber(p.losses_qty || 0)} u.</div>
+                  <div className="text-xs text-rose-500 dark:text-rose-300">Pertes : {fmtNumber(p.losses_qty || 0)} u.</div>
 
                   {p.notes?.length ? (
-                    <div className="text-xs text-amber-700">{p.notes.join(" ")}</div>
+                    <div className="text-xs text-amber-700 dark:text-amber-200 break-anywhere">
+                      {p.notes.join(" ")}
+                    </div>
                   ) : (
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-[var(--muted)]">
                       Astuce : ajoutez vos prix d’achat/vente pour des stats ultra précises.
                     </div>
                   )}
@@ -684,7 +699,7 @@ export default function Dashboard() {
               ))}
             </div>
           ) : (
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-[var(--muted)]">
               Ajoutez des comptages pour voir les valeurs et pertes. Le dashboard devient vraiment parlant dès 10–20 lignes.
             </div>
           )}

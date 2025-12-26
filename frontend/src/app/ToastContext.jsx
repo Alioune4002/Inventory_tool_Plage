@@ -1,32 +1,30 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
 const ToastContext = createContext(null);
 
 export function ToastProvider({ children }) {
   const [toast, setToast] = useState(null);
-  const [timerId, setTimerId] = useState(null);
+  const timerRef = useRef(null);
 
   const close = useCallback(() => {
-    if (timerId) window.clearTimeout(timerId);
-    setTimerId(null);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = null;
     setToast(null);
-  }, [timerId]);
+  }, []);
 
-  const pushToast = useCallback(
-    ({ message, type = "info", durationMs = 3500 } = {}) => {
-      if (!message) return;
+  const pushToast = useCallback(({ message, type = "info", durationMs = 3500 } = {}) => {
+    if (!message) return;
 
-      if (timerId) window.clearTimeout(timerId);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
 
-      setToast({ message: String(message), type });
-      const id = window.setTimeout(() => {
-        setToast(null);
-        setTimerId(null);
-      }, Math.max(1200, Number(durationMs) || 3500));
-      setTimerId(id);
-    },
-    [timerId]
-  );
+    setToast({ message: String(message), type });
+
+    const ms = Math.max(1200, Number(durationMs) || 3500);
+    timerRef.current = window.setTimeout(() => {
+      setToast(null);
+      timerRef.current = null;
+    }, ms);
+  }, []);
 
   const value = useMemo(() => ({ toast, pushToast, close }), [toast, pushToast, close]);
 

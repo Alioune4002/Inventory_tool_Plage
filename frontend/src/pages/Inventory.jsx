@@ -1,3 +1,4 @@
+// frontend/src/pages/Inventory.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
@@ -36,16 +37,13 @@ export default function Inventory() {
   const [err, setErr] = useState("");
   const [search, setSearch] = useState("");
 
-  // ✅ scanner modal
   const [scannerOpen, setScannerOpen] = useState(false);
 
-  // ✅ highlight + scroll
   const [highlightCode, setHighlightCode] = useState("");
   const highlightTimeoutRef = useRef(null);
   const rowRefs = useRef(new Map());
   const tableWrapRef = useRef(null);
 
-  // ✅ focus "Nom" after scan if not found
   const nameInputRef = useRef(null);
 
   const [quick, setQuick] = useState({
@@ -72,6 +70,7 @@ export default function Inventory() {
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+
   const familyId = useMemo(() => resolveFamilyId(serviceType, serviceDomain), [serviceType, serviceDomain]);
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const familyIdentifiers = familyMeta?.identifiers ?? {};
@@ -90,10 +89,12 @@ export default function Inventory() {
   const ux = getUxCopy(serviceType, serviceDomain);
   const placeholders = getPlaceholders(serviceType, serviceDomain);
   const helpers = getFieldHelpers(serviceType, serviceDomain);
+
   const lossReasons = useMemo(
     () => getLossReasons(serviceType, serviceDomain, serviceFeatures),
     [serviceType, serviceDomain, serviceFeatures]
   );
+
   const categoryPlaceholder = placeholders.category || `Ex. ${familyMeta.defaults?.categoryLabel || "Catégorie"}`;
   const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
 
@@ -103,7 +104,6 @@ export default function Inventory() {
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
   const lotEnabled = getFeatureFlag("lot", familyModules.includes("lot"));
-
   const dlcEnabled = getFeatureFlag("dlc", familyModules.includes("expiry"));
   const dlcRecommended = !!dlcCfg.recommended;
 
@@ -152,7 +152,7 @@ export default function Inventory() {
       try {
         const res = await api.get(`/api/categories/?service=${serviceId}`);
         setCategories(Array.isArray(res.data) ? res.data : []);
-      } catch (e) {
+      } catch {
         setCategories([]);
       }
     };
@@ -179,7 +179,7 @@ export default function Inventory() {
         const res = await api.get(`/api/products/?month=${month}&service=${serviceId}`);
         setItems(Array.isArray(res.data) ? res.data : []);
       }
-    } catch (e) {
+    } catch {
       setErr("Impossible de charger l’inventaire. Vérifiez votre connexion, votre token et le service sélectionné.");
       pushToast?.({ message: "Chargement inventaire impossible (auth ou service).", type: "error" });
       setItems([]);
@@ -334,7 +334,7 @@ export default function Inventory() {
             occurred_at: occurredAt,
           });
           pushToast?.({ message: "Perte enregistrée.", type: "info" });
-        } catch (lossErr) {
+        } catch {
           pushToast?.({ message: "Comptage OK, mais la perte n’a pas pu être enregistrée.", type: "warn" });
         }
       }
@@ -353,7 +353,6 @@ export default function Inventory() {
     }
   };
 
-  // ✅ returns { kind: "local"|"external"|"none", data }
   const lookupBarcode = async (overrideBarcode) => {
     const code = String(overrideBarcode ?? quick.barcode ?? "").trim();
 
@@ -396,7 +395,7 @@ export default function Inventory() {
       setLastFound(null);
       pushToast?.({ message: "Aucune correspondance trouvée.", type: "info" });
       return { kind: "none" };
-    } catch (e) {
+    } catch {
       setLastFound(null);
       pushToast?.({ message: `Aucun ${itemLabelLower} trouvé pour ce ${barcodeLabel}.`, type: "info" });
       return { kind: "none" };
@@ -451,30 +450,23 @@ export default function Inventory() {
     });
   }, [highlightCode, filtered, paginatedInventory, page]);
 
-  // ✅ ultra flow: if none found => keep barcode + focus Name
   const onScannerDetected = async (code) => {
     const cleaned = String(code || "").trim();
     if (!cleaned) return;
 
     setScannerOpen(false);
-
-    // 1) always set barcode
     setQuick((p) => ({ ...p, barcode: cleaned }));
 
-    // 2) search table + highlight
     setSearch(cleaned);
     setHighlightCode(cleaned);
     armHighlightClear();
 
-    // 3) lookup
     const result = await lookupBarcode(cleaned);
 
-    // 4) if not found locally, force focus on name and encourage filling
     if (result.kind === "none") {
       setQuick((prev) => ({
         ...prev,
         barcode: cleaned,
-        // keep existing category if user had one, but clear name to force intent
         name: "",
       }));
 
@@ -484,14 +476,9 @@ export default function Inventory() {
       });
 
       window.setTimeout(() => {
-        // try focus inside Input (depends on your Input implementation)
         const el = nameInputRef.current;
         if (el?.focus) el.focus();
-        // fallback: query by input[name] if needed
-        else {
-          const input = document.querySelector('input[autocomplete="off"][placeholder]') || document.querySelector("input");
-          input?.focus?.();
-        }
+        else document.querySelector("input")?.focus?.();
       }, 150);
     }
   };
@@ -510,6 +497,8 @@ export default function Inventory() {
     );
   };
 
+  const renderIdentifier = (p) => p.barcode || p.internal_sku || "—";
+
   return (
     <PageTransition>
       <Helmet>
@@ -517,29 +506,25 @@ export default function Inventory() {
         <meta name="description" content={ux.inventoryIntro} />
       </Helmet>
 
-      <BarcodeScannerModal
-        open={scannerOpen}
-        onClose={() => setScannerOpen(false)}
-        onDetected={onScannerDetected}
-      />
+      <BarcodeScannerModal open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={onScannerDetected} />
 
-      <div className="grid gap-4">
-        <Card className="p-6 space-y-4">
-          <div className="text-sm text-slate-500">Inventaire</div>
-          <div className="text-2xl font-black tracking-tight">{ux.inventoryTitle}</div>
-          <p className="text-slate-600 text-sm">{ux.inventoryIntro}</p>
-          <p className="text-xs text-slate-500">
+      <div className="grid gap-4 min-w-0">
+        <Card className="p-6 space-y-4 min-w-0">
+          <div className="text-sm text-[var(--muted)]">Inventaire</div>
+          <div className="text-2xl font-black tracking-tight text-[var(--text)]">{ux.inventoryTitle}</div>
+          <p className="text-[var(--muted)] text-sm">{ux.inventoryIntro}</p>
+          <p className="text-xs text-[var(--muted)]">
             Inventaire = comptage du mois. Le catalogue reste dans l’onglet Produits.
           </p>
 
-          <div className="grid sm:grid-cols-3 gap-3 items-center">
+          <div className="grid sm:grid-cols-3 gap-3 items-center min-w-0">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
             {services?.length > 0 && (
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Service</span>
+              <label className="space-y-1.5 min-w-0">
+                <span className="text-sm font-medium text-[var(--text)]">Service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={serviceId || ""}
                   onChange={(e) => selectService(e.target.value)}
                 >
@@ -564,7 +549,7 @@ export default function Inventory() {
             />
           </div>
 
-          <div className="rounded-2xl border border-[var(--border)] p-4 bg-[var(--surface)] shadow-soft">
+          <div className="rounded-2xl border border-[var(--border)] p-4 bg-[var(--surface)] shadow-soft min-w-0">
             <div className="text-sm font-semibold text-[var(--text)] mb-2">{ux.quickAddTitle}</div>
 
             {isAllServices ? (
@@ -572,9 +557,8 @@ export default function Inventory() {
                 Sélectionnez un service pour ajouter. En mode “Tous les services”, l’ajout est désactivé.
               </div>
             ) : (
-              <form className="grid md:grid-cols-3 gap-3 items-end" onSubmit={addQuick}>
+              <form className="grid md:grid-cols-3 gap-3 items-end min-w-0" onSubmit={addQuick}>
                 <fieldset disabled={loading || authLoading} className="contents">
-                  {/* ✅ ref for focus after scan */}
                   <Input
                     label={wording.itemLabel}
                     placeholder={placeholders.name}
@@ -585,7 +569,7 @@ export default function Inventory() {
                   />
 
                   {categories.length > 0 ? (
-                    <label className="space-y-1.5">
+                    <label className="space-y-1.5 min-w-0">
                       <span className="text-sm font-medium text-[var(--text)]">{wording.categoryLabel}</span>
                       <select
                         value={quick.category}
@@ -612,7 +596,7 @@ export default function Inventory() {
                   )}
 
                   {itemTypeEnabled && (
-                    <label className="space-y-1.5">
+                    <label className="space-y-1.5 min-w-0">
                       <span className="text-sm font-medium text-[var(--text)]">Type d’article</span>
                       <select
                         value={quick.product_role}
@@ -652,7 +636,7 @@ export default function Inventory() {
                   )}
 
                   {barcodeEnabled && (
-                    <div className="flex items-end gap-2">
+                    <div className="flex items-end gap-2 min-w-0">
                       <Button
                         type="button"
                         variant="secondary"
@@ -675,7 +659,7 @@ export default function Inventory() {
                   )}
 
                   {showOpenFields && (
-                    <label className="space-y-1.5">
+                    <label className="space-y-1.5 min-w-0">
                       <span className="text-sm font-medium text-[var(--text)]">Statut</span>
                       <select
                         value={quick.container_status}
@@ -699,7 +683,7 @@ export default function Inventory() {
                   )}
 
                   {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (
-                    <label className="space-y-1.5">
+                    <label className="space-y-1.5 min-w-0">
                       <span className="text-sm font-medium text-[var(--text)]">{unitLabel}</span>
                       <select
                         value={quick.unit}
@@ -746,12 +730,12 @@ export default function Inventory() {
                         onChange={(e) => setQuick((p) => ({ ...p, pack_size: e.target.value }))}
                         helper="Optionnel (bouteilles/paquets)"
                       />
-                      <label className="space-y-1.5">
-                        <span className="text-sm font-medium text-slate-700">Unité pack</span>
+                      <label className="space-y-1.5 min-w-0">
+                        <span className="text-sm font-medium text-[var(--text)]">Unité pack</span>
                         <select
                           value={quick.pack_uom}
                           onChange={(e) => setQuick((p) => ({ ...p, pack_uom: e.target.value }))}
-                          className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
                         >
                           <option value="">—</option>
                           <option value="l">l</option>
@@ -792,7 +776,7 @@ export default function Inventory() {
                     helper="Note interne liée au comptage du mois."
                   />
 
-                  <div className="md:col-span-3 grid md:grid-cols-3 gap-3 items-end">
+                  <div className="md:col-span-3 grid md:grid-cols-3 gap-3 items-end min-w-0">
                     <Input
                       label="Pertes (quantité)"
                       type="number"
@@ -802,7 +786,7 @@ export default function Inventory() {
                       onChange={(e) => setQuick((p) => ({ ...p, loss_quantity: e.target.value }))}
                       helper="Optionnel : pertes ou casse."
                     />
-                    <label className="space-y-1.5">
+                    <label className="space-y-1.5 min-w-0">
                       <span className="text-sm font-medium text-[var(--text)]">Raison</span>
                       <select
                         value={quick.loss_reason}
@@ -825,9 +809,9 @@ export default function Inventory() {
                     />
                   </div>
 
-                  <div className="md:col-span-3 flex flex-wrap gap-3 items-center">
+                  <div className="md:col-span-3 flex flex-wrap gap-3 items-center min-w-0">
                     {showIdentifierWarning && (
-                      <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1">
+                      <div className="text-xs text-amber-700 dark:text-amber-200 bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-400/25 rounded-full px-3 py-1">
                         Conseil : ajoutez un identifiant ({wording.identifierLabel || "code-barres ou SKU"}) pour éviter les doublons.
                       </div>
                     )}
@@ -841,7 +825,7 @@ export default function Inventory() {
 
                   {barcodeEnabled && (
                     <div className="md:col-span-3">
-                      <div className="text-xs text-slate-500">{ux.scanHint}</div>
+                      <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>
                     </div>
                   )}
                 </fieldset>
@@ -851,22 +835,22 @@ export default function Inventory() {
         </Card>
 
         {lastFound && (
-          <Card className="p-4 bg-blue-50 border border-blue-100 space-y-2">
-            <div className="text-sm font-semibold text-blue-700">
+          <Card className="p-4 bg-blue-50/60 dark:bg-blue-500/10 border border-blue-100/70 dark:border-blue-400/20 space-y-2 min-w-0">
+            <div className="text-sm font-semibold text-blue-700 dark:text-blue-200">
               {lastFound.type === "local" ? `Fiche ${itemLabelLower} existante` : "Suggestion"}
             </div>
 
             {lastFound.type === "local" ? (
-              <div className="text-sm text-slate-700">
+              <div className="text-sm text-[var(--text)] break-anywhere">
                 <div>
                   <span className="font-semibold">{lastFound.product?.name}</span> —{" "}
                   {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — dernier comptage (
                   {lastFound.product?.inventory_month || "—"})
-                  <span className="text-xs text-slate-500"> · info non reprise automatiquement</span>
+                  <span className="text-xs text-[var(--muted)]"> · info non reprise automatiquement</span>
                 </div>
               </div>
             ) : (
-              <div className="text-sm text-slate-700">
+              <div className="text-sm text-[var(--text)] break-anywhere">
                 {lastFound.suggestion?.name || "Sans nom"}{" "}
                 {lastFound.suggestion?.brand ? `(${lastFound.suggestion.brand})` : ""}
               </div>
@@ -874,13 +858,13 @@ export default function Inventory() {
           </Card>
         )}
 
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-3">
+        <Card className="p-6 space-y-4 min-w-0">
+          <div className="flex items-center justify-between flex-wrap gap-3 min-w-0">
             <div>
-              <div className="text-sm text-slate-500">Inventaire</div>
-              <div className="text-lg font-semibold">{filtered.length} entrée(s)</div>
+              <div className="text-sm text-[var(--muted)]">Inventaire</div>
+              <div className="text-lg font-semibold text-[var(--text)]">{filtered.length} entrée(s)</div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
               <span>
                 Page {page} / {totalPages}
               </span>
@@ -897,76 +881,158 @@ export default function Inventory() {
               ))}
             </div>
           ) : err ? (
-            <div className="p-6 rounded-xl bg-red-50 text-red-700">{err}</div>
+            <div className="p-6 rounded-xl bg-red-50/70 dark:bg-red-500/10 text-red-700 dark:text-red-200 border border-red-200/60 dark:border-red-400/25">
+              {err}
+            </div>
           ) : (
-            <div className="overflow-x-auto" ref={tableWrapRef}>
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 sticky top-0">
-                  <tr className="text-slate-600">
-                    {isAllServices && <th className="text-left px-4 py-3">Service</th>}
-                    <th className="text-left px-4 py-3">{wording.itemLabel}</th>
-                    <th className="text-left px-4 py-3">{wording.categoryLabel}</th>
-                    <th className="text-left px-4 py-3">Mois</th>
-                    <th className="text-left px-4 py-3">Comptage</th>
-                    <th className="text-left px-4 py-3">
-                      {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
-                    </th>
-                  </tr>
-                </thead>
+            <>
+              {/* ✅ MOBILE: cards (no overflow) */}
+              <div className="sm:hidden space-y-2 min-w-0">
+                {filtered.length === 0 ? (
+                  <div className="px-4 py-8">
+                    <div className="max-w-md mx-auto text-center space-y-3">
+                      <div className="text-lg font-semibold text-[var(--text)]">{ux.emptyInventoryTitle}</div>
+                      <div className="text-sm text-[var(--muted)]">{ux.emptyInventoryText}</div>
+                      <div className="flex justify-center gap-2">
+                        <Button size="sm" onClick={() => setSearch("")}>
+                          Reset recherche
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  paginatedInventory.map((p, idx) => {
+                    const highlighted = isRowHighlighted(p);
+                    const idValue = renderIdentifier(p);
 
-                <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={isAllServices ? 6 : 5} className="px-4 py-10">
-                        <div className="max-w-md mx-auto text-center space-y-3">
-                          <div className="text-lg font-semibold text-slate-800">{ux.emptyInventoryTitle}</div>
-                          <div className="text-sm text-slate-600">{ux.emptyInventoryText}</div>
-                          <div className="flex justify-center gap-2">
-                            <Button size="sm" onClick={() => setSearch("")}>
-                              Reset recherche
-                            </Button>
+                    return (
+                      <Card
+                        key={p.id}
+                        className={[
+                          "p-4 min-w-0",
+                          highlighted ? "ring-2 ring-blue-500/70" : "",
+                        ].join(" ")}
+                        hover
+                      >
+                        <div className="flex items-start justify-between gap-3 min-w-0">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
+                              {p.name}
+                            </div>
+                            <div className="text-xs text-[var(--muted)] break-anywhere">
+                              {p.category || "—"} · {p.inventory_month || "—"}
+                            </div>
+                          </div>
+                          {isAllServices ? (
+                            <div className="shrink-0">
+                              <span className="text-xs rounded-full border border-[var(--border)] px-2 py-1 text-[var(--muted)]">
+                                {p.__service_name || p.service_name || "—"}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs min-w-0">
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                            <div className="text-[var(--muted)]">Comptage</div>
+                            <div className="font-semibold text-[var(--text)]">
+                              {p.quantity} {p.unit || "pcs"}
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 min-w-0">
+                            <div className="text-[var(--muted)]">
+                              {barcodeEnabled ? wording.barcodeLabel : "Identifiant"}
+                              {skuEnabled ? ` / ${wording.skuLabel}` : ""}
+                            </div>
+                            <div className="font-semibold text-[var(--text)] break-anywhere">
+                              {idValue}
+                            </div>
                           </div>
                         </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedInventory.map((p, idx) => {
-                      const highlighted = isRowHighlighted(p);
-                      const rowKey = getRowKey(p);
+                      </Card>
+                    );
+                  })
+                )}
+              </div>
 
-                      return (
-                        <tr
-                          key={p.id}
-                          ref={(el) => {
-                            if (!el) return;
-                            rowRefs.current.set(rowKey, el);
-                          }}
-                          className={[
-                            idx % 2 === 0 ? "bg-white" : "bg-slate-50/60",
-                            highlighted ? "ring-2 ring-blue-500 bg-blue-50" : "",
-                          ].join(" ")}
-                        >
-                          {isAllServices && (
-                            <td className="px-4 py-3 text-slate-700">{p.__service_name || p.service_name || "—"}</td>
-                          )}
-                          <td className="px-4 py-3 font-semibold text-slate-900">{p.name}</td>
-                          <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
-                          <td className="px-4 py-3 text-slate-700">{p.inventory_month}</td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {p.quantity} {p.unit || "pcs"}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">{p.barcode || p.internal_sku || "—"}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+              {/* ✅ DESKTOP/TABLET: table */}
+              <div className="hidden sm:block overflow-x-auto" ref={tableWrapRef}>
+                <table className="w-full text-sm table-fixed">
+                  <thead className="bg-[var(--surface)] sticky top-0">
+                    <tr className="text-[var(--muted)]">
+                      {isAllServices && <th className="text-left px-4 py-3 w-40">Service</th>}
+                      <th className="text-left px-4 py-3 w-[28%]">{wording.itemLabel}</th>
+                      <th className="text-left px-4 py-3 w-[20%]">{wording.categoryLabel}</th>
+                      <th className="text-left px-4 py-3 w-28">Mois</th>
+                      <th className="text-left px-4 py-3 w-32">Comptage</th>
+                      <th className="text-left px-4 py-3 w-[24%]">
+                        {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={isAllServices ? 6 : 5} className="px-4 py-10">
+                          <div className="max-w-md mx-auto text-center space-y-3">
+                            <div className="text-lg font-semibold text-[var(--text)]">{ux.emptyInventoryTitle}</div>
+                            <div className="text-sm text-[var(--muted)]">{ux.emptyInventoryText}</div>
+                            <div className="flex justify-center gap-2">
+                              <Button size="sm" onClick={() => setSearch("")}>
+                                Reset recherche
+                              </Button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      paginatedInventory.map((p, idx) => {
+                        const highlighted = isRowHighlighted(p);
+                        const rowKey = getRowKey(p);
+
+                        return (
+                          <tr
+                            key={p.id}
+                            ref={(el) => {
+                              if (!el) return;
+                              rowRefs.current.set(rowKey, el);
+                            }}
+                            className={[
+                              idx % 2 === 0 ? "bg-[var(--surface)]" : "bg-[var(--accent)]/10",
+                              highlighted ? "ring-2 ring-blue-500/70 bg-blue-500/10" : "",
+                            ].join(" ")}
+                          >
+                            {isAllServices && (
+                              <td className="px-4 py-3 text-[var(--muted)] break-anywhere">
+                                {p.__service_name || p.service_name || "—"}
+                              </td>
+                            )}
+                            <td className="px-4 py-3 font-semibold text-[var(--text)] break-anywhere">
+                              {p.name}
+                            </td>
+                            <td className="px-4 py-3 text-[var(--muted)] break-anywhere">
+                              {p.category || "—"}
+                            </td>
+                            <td className="px-4 py-3 text-[var(--muted)]">{p.inventory_month}</td>
+                            <td className="px-4 py-3 text-[var(--muted)]">
+                              {p.quantity} {p.unit || "pcs"}
+                            </td>
+                            <td className="px-4 py-3 text-[var(--muted)] break-anywhere">
+                              {renderIdentifier(p)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
 
           {filtered.length > PAGE_SIZE && (
-            <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
+            <div className="flex items-center justify-end gap-2 text-sm text-[var(--muted)]">
               <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
                 ← Précédent
               </Button>
@@ -976,7 +1042,7 @@ export default function Inventory() {
             </div>
           )}
 
-          <div className="p-4 flex justify-end gap-3 border-t border-slate-200">
+          <div className="p-4 flex justify-end gap-3 border-t border-[var(--border)]">
             <Button variant="secondary" size="sm" onClick={load} disabled={authLoading || loading}>
               Rafraîchir
             </Button>

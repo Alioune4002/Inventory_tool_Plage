@@ -1,5 +1,5 @@
 // frontend/src/pages/CheckEmail.jsx
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import Card from "../ui/Card";
@@ -13,8 +13,8 @@ export default function CheckEmail() {
   const loc = useLocation();
   const nav = useNavigate();
   const pushToast = useToast();
+  const [sending, setSending] = useState(false);
 
-  // ✅ fallback querystring: /check-email?email=...
   const email = useMemo(() => {
     const stateEmail = (loc.state?.email || "").trim();
     if (stateEmail) return stateEmail;
@@ -31,12 +31,15 @@ export default function CheckEmail() {
       pushToast?.({ type: "error", message: "Email manquant. Retourne à l’inscription." });
       return;
     }
+
+    setSending(true);
     try {
       await resendVerificationEmail({ email });
       pushToast?.({ type: "success", message: "Email de vérification renvoyé." });
     } catch (e) {
-      // ✅ important: remonte le vrai message backend (503 email_send_failed)
       pushToast?.({ type: "error", message: formatApiError(e, { context: "generic" }) });
+    } finally {
+      setSending(false);
     }
   };
 
@@ -47,39 +50,50 @@ export default function CheckEmail() {
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>
 
-      <div className="mx-auto max-w-lg p-4">
-        <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold">Dernière étape : vérifie ton email</div>
+      <div className="min-h-screen relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "var(--bg)" }} />
+        <div className="absolute inset-0 bg-grid opacity-10 pointer-events-none" />
 
-          <div className="text-sm text-[var(--muted)]">
-            On a envoyé un lien de confirmation{email ? ` à ${email}` : ""}. Clique dessus pour activer ton compte.
-          </div>
+        <div className="relative mx-auto max-w-lg p-4 pt-10">
+          <Card className="p-6 space-y-4">
+            <div className="text-lg font-black text-[var(--text)]">Dernière étape : vérifie ton email</div>
 
-          {!email ? (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-              On n’a pas l’email dans cette page. Retourne à la connexion ou à l’inscription.
-              <div className="mt-2 flex gap-2 flex-wrap">
-                <Button variant="secondary" onClick={() => nav("/login")}>
-                  Aller à la connexion
-                </Button>
-                <Button onClick={() => nav("/register")}>Créer un compte</Button>
-              </div>
+            <div className="text-sm text-[var(--muted)]">
+              On t’a envoyé un lien de confirmation{email ? ` à ${email}` : ""}. Clique dessus pour activer ton compte.
             </div>
-          ) : null}
 
-          <div className="flex gap-2 flex-wrap">
-            <Button onClick={resend} disabled={!email}>
-              Renvoyer l’email
-            </Button>
-            <Button variant="secondary" onClick={() => nav("/login", { state: { email } })}>
-              Aller à la connexion
-            </Button>
-          </div>
+            {!email ? (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+                <div className="font-semibold text-[var(--text)]">Email introuvable</div>
+                <div className="text-[var(--muted)]">
+                  On n’a pas l’adresse email sur cette page. Retourne à la connexion ou à l’inscription.
+                </div>
+                <div className="mt-2 flex gap-2 flex-wrap">
+                  <Button variant="secondary" onClick={() => nav("/login")}>
+                    Aller à la connexion
+                  </Button>
+                  <Button onClick={() => nav("/register")}>Créer un compte</Button>
+                </div>
+              </div>
+            ) : null}
 
-          <div className="text-xs text-[var(--muted)]">
-            Astuce : regarde aussi les spams. <Link className="underline" to="/">Retour au site</Link>
-          </div>
-        </Card>
+            <div className="flex gap-2 flex-wrap">
+              <Button onClick={resend} disabled={!email || sending} loading={sending}>
+                Renvoyer l’email
+              </Button>
+              <Button variant="secondary" onClick={() => nav("/login", { state: { email } })}>
+                Se connecter
+              </Button>
+            </div>
+
+            <div className="text-xs text-[var(--muted)]">
+              Astuce : regarde aussi les spams.{" "}
+              <Link className="underline" to="/">
+                Retour au site
+              </Link>
+            </div>
+          </Card>
+        </div>
       </div>
     </PageTransition>
   );

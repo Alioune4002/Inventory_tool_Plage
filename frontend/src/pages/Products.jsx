@@ -899,7 +899,7 @@ export default function Products() {
                         <td className="px-4 py-3 text-slate-700">{p.__service_name || readableServiceName(p.service)}</td>
                       )}
 
-                      <td className="px-4 py-3 text-slate-700">
+                      <td className="px-4 py-3 text-slate-700 break-anywhere">
                         <div className="space-y-1">
                           <div>{p.barcode || "—"}</div>
                           {skuEnabled && <div className="text-xs text-slate-500">{p.internal_sku || "SKU —"}</div>}
