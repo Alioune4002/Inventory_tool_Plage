@@ -1,4 +1,4 @@
-// frontend/src/app/ErrorBoundary.jsx
+
 import React from "react";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
@@ -14,8 +14,7 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-    // Log dev (tu pourras brancher Sentry plus tard)
-    // eslint-disable-next-line no-console
+   
     console.error("UI crash:", error, info);
   }
 

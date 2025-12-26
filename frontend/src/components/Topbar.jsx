@@ -1,4 +1,4 @@
-// frontend/src/components/Topbar.jsx
+
 import React, { useMemo } from "react";
 import { LogOut, Moon, Sun, Menu } from "lucide-react";
 import { useAuth } from "../app/AuthProvider";
@@ -22,9 +22,9 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
   return (
     <header className="sticky top-0 z-20 backdrop-blur bg-[var(--surface)]/90 border-b border-[var(--border)]">
       <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="hidden lg:block">
-            <div className="text-sm font-bold text-[var(--text)]">{tenant?.name || "StockScan"}</div>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="hidden lg:block min-w-0">
+            <div className="text-sm font-bold text-[var(--text)] truncate">{tenant?.name || "StockScan"}</div>
             <div className="text-xs text-[var(--muted)]">
               {isGeneral ? "Commerce non-alimentaire" : "Commerce alimentaire"}
             </div>
@@ -55,7 +55,7 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
             <button
               type="button"
               onClick={onOpenMobileNav}
-              className="lg:hidden rounded-full bg-white/10 p-2 text-white hover:bg-white/20 transition"
+              className="lg:hidden rounded-full border border-[var(--border)] bg-[var(--surface)] p-2 text-[var(--text)] hover:bg-[var(--accent)]/40 transition"
               aria-label="Ouvrir la navigation"
             >
               <Menu size={18} />
@@ -71,10 +71,12 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
               className="inline-flex"
               title={isLight ? "Passer en sombre" : "Passer en clair"}
             >
-              {isLight ? <Moon size={16} className="text-slate-700" /> : <Sun size={16} className="text-slate-500" />}
-              <span className="hidden sm:inline">
-                {isLight ? "Sombre" : "Clair"}
-              </span>
+              {isLight ? (
+                <Moon size={16} className="text-[var(--text)]" />
+              ) : (
+                <Sun size={16} className="text-[var(--muted)]" />
+              )}
+              <span className="hidden sm:inline">{isLight ? "Sombre" : "Clair"}</span>
             </Button>
           )}
 
@@ -82,12 +84,7 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
             {loading ? "Chargement…" : me?.username || "Compte"}
           </Badge>
 
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={onLogout || logout}
-            className="border-slate-300"
-          >
+          <Button variant="secondary" size="sm" onClick={onLogout || logout} className="border-slate-300">
             <LogOut size={16} />
             <span className="hidden sm:inline">Déconnexion</span>
           </Button>

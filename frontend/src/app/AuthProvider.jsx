@@ -1,4 +1,4 @@
-// frontend/src/app/AuthProvider.jsx
+
 import React, {
   createContext,
   useContext,

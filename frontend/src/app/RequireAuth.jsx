@@ -15,9 +15,9 @@ export default function RequireAuth({ children }) {
 
   if (loading) {
     return (
-      <div className="min-h-[60vh] grid place-items-center">
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-white/80">
-          Chargement…
+      <div className="min-h-[60vh] grid place-items-center px-4">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-4 text-sm font-semibold text-[var(--text)] shadow-soft">
+          <span className="text-[var(--muted)]">Chargement…</span>
         </div>
       </div>
     );
@@ -31,8 +31,7 @@ export default function RequireAuth({ children }) {
     path.startsWith("/verify-email") ||
     path.startsWith("/reset-password");
 
-  // Si jamais RequireAuth est utilisé sur une page publique/auth, router gére
-
+  
   if (!isAuthed && isAuthPage) {
     return children;
   }

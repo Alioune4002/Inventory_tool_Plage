@@ -7,7 +7,7 @@ export default function Input({
   error,
   rightSlot,
   className = "",
-  inputRef, // ✅ NEW: permet de focus depuis les pages (scanner, etc.)
+  inputRef, 
   ...props
 }) {
   return (

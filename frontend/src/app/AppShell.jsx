@@ -1,4 +1,4 @@
-// frontend/src/app/AppShell.jsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
@@ -14,12 +14,22 @@ import GuidedTour from "../components/GuidedTour";
 import ErrorBoundary from "./ErrorBoundary";
 import { formatApiError } from "../lib/errorUtils";
 
+function getInitialTheme() {
+  try {
+    const t = localStorage.getItem("theme");
+    if (t === "light" || t === "dark") return t;
+  } catch {
+    // noop
+  }
+  return "dark";
+}
+
 export default function AppShell() {
   const location = useLocation();
   const { isAuthed, tenant, me, logout } = useAuth();
   const { data: entitlements } = useEntitlements();
   const [toast, setToast] = useState(null);
-  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [theme, setTheme] = useState(getInitialTheme);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const navItems = useMemo(
@@ -43,12 +53,23 @@ export default function AppShell() {
     setToast({ message: "Déconnexion effectuée.", type: "info" });
   };
 
+  
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {
+      // noop
+    }
   }, [theme]);
 
+ 
+  useEffect(() => {
+    if (mobileNavOpen) setMobileNavOpen(false);
+   
+  }, [location.pathname]);
 
+  
   useEffect(() => {
     const onUnhandled = (event) => {
       try {
@@ -70,23 +91,26 @@ export default function AppShell() {
             onLogout={onLogout}
             tenant={tenant}
             user={me}
-            onToggleTheme={() => setTheme(theme === "light" ? "dark" : "light")}
+            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
             onOpenMobileNav={() => setMobileNavOpen(true)}
           />
         )}
+
         <div className="h-full flex">
           {isAppSection && isAuthed && <Sidebar />}
+
           <div className="flex-1 min-w-0">
             <main className="mx-auto max-w-6xl px-4 py-6">
               {isAppSection && isAuthed && <BillingBanners entitlements={entitlements} />}
 
-              {/* ✅ Empêche l’app de “disparaître” en cas d’erreur React */}
+              
               <ErrorBoundary>
                 <AppRoutes setToast={setToast} />
               </ErrorBoundary>
             </main>
           </div>
         </div>
+
         <GuidedTour onRequestMobileNav={setMobileNavOpen} />
         <Toast toast={toast} onClose={() => setToast(null)} />
         <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />

@@ -4,6 +4,7 @@
 
 :root {
   color-scheme: dark;
+
   --bg: #0f172a;
   --surface: #0c1426;
   --text: #e5e7eb;
@@ -12,14 +13,32 @@
   --primary: #3b82f6;
   --success: #22c55e;
   --accent: #1e293b;
+
   --radius-card: 24px;
   --radius-pill: 999px;
+
   --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.12), 0 25px 70px rgba(59, 130, 246, 0.35);
+
+ 
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-text: #e5e7eb;
+
+  
+  --badge-default-bg: rgba(148, 163, 184, 0.16);
+  --badge-default-text: #e5e7eb;
+
+  --badge-info-bg: rgba(59, 130, 246, 0.18);
+  --badge-info-text: #bfdbfe;
+
+  --badge-success-bg: rgba(34, 197, 94, 0.18);
+  --badge-success-text: #bbf7d0;
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
+
   --bg: #f8fafc;
   --surface: #ffffff;
   --text: #0f172a;
@@ -28,11 +47,27 @@
   --primary: #2563eb;
   --success: #16a34a;
   --accent: #e0e7ff;
+
   --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
   --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
+
+
+  --glass-bg: rgba(15, 23, 42, 0.04);
+  --glass-border: rgba(15, 23, 42, 0.10);
+  --glass-text: #0f172a;
+
+
+  --badge-default-bg: rgba(148, 163, 184, 0.18);
+  --badge-default-text: #0f172a;
+
+  --badge-info-bg: rgba(37, 99, 235, 0.12);
+  --badge-info-text: #1d4ed8;
+
+  --badge-success-bg: rgba(22, 163, 74, 0.12);
+  --badge-success-text: #15803d;
 }
 
-/* ✅ anti overflow mobile */
+
 *,
 *::before,
 *::after {
@@ -44,10 +79,10 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  overflow-x: hidden; /* ✅ stop débordement à droite */
+  overflow-x: hidden; 
 }
 
-/* Sécurise médias (souvent responsables du overflow) */
+
 img,
 svg,
 video,
@@ -97,7 +132,7 @@ body {
   color: #e2e8f0;
 }
 
-/* scrollbars */
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -122,7 +157,6 @@ body {
       var(--bg);
   }
 
-  /* Harmonise les classes Tailwind les plus courantes en mode sombre */
   [data-theme="dark"] .text-slate-900,
   [data-theme="dark"] .text-slate-800,
   [data-theme="dark"] .text-slate-700 {
@@ -143,7 +177,7 @@ body {
     border-color: var(--border) !important;
   }
 
-  /* Inputs / selects en mode sombre : fond sombre, texte clair, placeholders lisibles */
+  
   [data-theme="dark"] input,
   [data-theme="dark"] select,
   [data-theme="dark"] textarea {
@@ -168,8 +202,9 @@ body {
 
   .glass {
     border-radius: var(--radius-card);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    color: var(--glass-text);
     backdrop-filter: blur(12px);
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.28);
   }
@@ -188,7 +223,6 @@ body {
     background-size: 32px 32px;
   }
 
-  /* ✅ util: évite overflow dans flex/grid (min-width: auto => débordements) */
   .min-w-0-safe {
     min-width: 0;
   }

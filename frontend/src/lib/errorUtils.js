@@ -1,4 +1,4 @@
-// frontend/src/lib/errorUtils.js
+
 export function formatApiError(error, options = {}) {
   const ctx = options?.context || ""; // ex: "login" | "register" | "generic"
   const fallback =
@@ -81,7 +81,7 @@ export function formatApiError(error, options = {}) {
     if (parts.length) return parts.join(" · ");
   }
 
-  // 9) fallback selon status
+  
   if (status === 401) return ctx === "login" ? "Identifiants incorrects." : fallback;
   if (status === 403) return "Accès refusé.";
   if (status >= 500) return "Service indisponible pour le moment. Réessaie dans quelques instants.";
