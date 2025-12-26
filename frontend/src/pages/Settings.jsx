@@ -72,6 +72,19 @@ const copyToClipboard = async (text) => {
   }
 };
 
+// ✅ Types de service (aligné backend Service.SERVICE_TYPES)
+const SERVICE_TYPE_OPTIONS = [
+  { value: "kitchen", label: "Cuisine / Restaurant" },
+  { value: "restaurant_dining", label: "Salle / Restaurant" },
+  { value: "bar", label: "Bar" },
+  { value: "bakery", label: "Boulangerie / Pâtisserie" },
+  { value: "grocery_food", label: "Épicerie alimentaire" },
+  { value: "bulk_food", label: "Vrac" },
+  { value: "pharmacy_parapharmacy", label: "Pharmacie / Parapharmacie" },
+  { value: "retail_general", label: "Boutique non-alimentaire" },
+  { value: "other", label: "Autre" },
+];
+
 export default function Settings() {
   const {
     me,
@@ -92,6 +105,7 @@ export default function Settings() {
   const currentEmail = me?.email || "";
 
   const [newService, setNewService] = useState("");
+  const [newServiceType, setNewServiceType] = useState("other"); // ✅ NEW
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -199,14 +213,12 @@ export default function Settings() {
 
       if (emailSent) {
         pushToast?.({
-          message:
-            "Invitation envoyée par email. La personne crée son mot de passe via le lien reçu.",
+          message: "Invitation envoyée par email. La personne crée son mot de passe via le lien reçu.",
           type: "success",
         });
       } else {
         pushToast?.({
-          message:
-            "Invitation créée, mais l’email n’a pas pu être envoyé. Copie le lien et partage-le manuellement.",
+          message: "Invitation créée, mais l’email n’a pas pu être envoyé. Copie le lien et partage-le manuellement.",
           type: "warn",
         });
       }
@@ -322,14 +334,17 @@ export default function Settings() {
     }
   };
 
+  // ✅ Ajout service avec type -> backend applique le preset
   const addService = async () => {
-    if (!newService.trim()) return;
+    const name = newService.trim();
+    if (!name) return;
 
     setLoading(true);
     try {
-      await api.post("/api/auth/services/", { name: newService.trim() });
+      await api.post("/api/auth/services/", { name, service_type: newServiceType || "other" });
       await refreshServices();
       setNewService("");
+      setNewServiceType("other");
       pushToast?.({ message: "Service ajouté.", type: "success" });
       refetchEntitlements?.();
       loadMembers();
@@ -537,7 +552,14 @@ export default function Settings() {
 
             {/* Lien d’invitation (fallback) */}
             {lastInviteLink ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+              <div
+                className="rounded-2xl border px-4 py-3 text-sm"
+                style={{
+                  borderColor: "var(--warn-border)",
+                  background: "var(--warn-bg)",
+                  color: "var(--warn-text)",
+                }}
+              >
                 <div className="font-semibold">Lien d’invitation</div>
                 <div className="text-xs opacity-80">
                   À utiliser si l’email n’a pas été reçu (spams, restrictions, etc.).
@@ -623,9 +645,7 @@ export default function Settings() {
                                 ))}
                               </select>
                               <span className="text-xs text-[var(--muted)]">
-                                {m?.service_scope?.name
-                                  ? `Limité à : ${m.service_scope.name}`
-                                  : "Accès à tous les services"}
+                                {m?.service_scope?.name ? `Limité à : ${m.service_scope.name}` : "Accès à tous les services"}
                               </span>
                             </label>
 
@@ -808,10 +828,14 @@ export default function Settings() {
               </div>
 
               {securityInfo.emailChangeRequested ? (
-                <div className="text-xs text-[var(--muted)]">✅ Lien de changement d’email envoyé (pense à vérifier tes spams).</div>
+                <div className="text-xs text-[var(--muted)]">
+                  ✅ Lien de changement d’email envoyé (pense à vérifier tes spams).
+                </div>
               ) : null}
               {securityInfo.resetRequested ? (
-                <div className="text-xs text-[var(--muted)]">✅ Lien de changement de mot de passe envoyé (pense à vérifier tes spams).</div>
+                <div className="text-xs text-[var(--muted)]">
+                  ✅ Lien de changement de mot de passe envoyé (pense à vérifier tes spams).
+                </div>
               ) : null}
             </div>
           </div>
@@ -951,6 +975,7 @@ export default function Settings() {
             )}
           </div>
 
+          {/* ✅ Nouveau : nom + type */}
           <div className="grid md:grid-cols-3 gap-3 items-end">
             <Input
               label="Nouveau service"
@@ -958,7 +983,26 @@ export default function Settings() {
               value={newService}
               onChange={(e) => setNewService(e.target.value)}
             />
-            <Button onClick={addService} loading={loading}>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-[var(--text)]">Type de service</span>
+              <select
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
+                value={newServiceType}
+                onChange={(e) => setNewServiceType(e.target.value)}
+              >
+                {SERVICE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-[var(--muted)]">
+                Recommandé : choisis le métier pour activer automatiquement les bons modules.
+              </span>
+            </label>
+
+            <Button onClick={addService} loading={loading} disabled={loading || !newService.trim()}>
               Ajouter le service
             </Button>
           </div>
@@ -1138,14 +1182,22 @@ export default function Settings() {
         </Card>
 
         {/* Suppression de compte */}
-        <Card className="p-6 space-y-3 border-red-200/70 bg-red-50/70 dark:border-red-500/30 dark:bg-red-500/10">
-          <div className="text-sm font-semibold text-red-800 dark:text-red-200">Suppression du compte</div>
-          <div className="text-sm text-red-800 dark:text-red-200">
+        <Card
+          className="p-6 space-y-3"
+          style={{
+            borderColor: "var(--danger-border)",
+            background: "var(--danger-bg)",
+          }}
+        >
+          <div className="text-sm font-semibold" style={{ color: "var(--danger-text)" }}>
+            Suppression du compte
+          </div>
+          <div className="text-sm" style={{ color: "var(--danger-text)" }}>
             Cette action est définitive. Si vous êtes le seul membre du commerce, les données du commerce peuvent être supprimées.
           </div>
 
           <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
+            <label className="flex items-start gap-2 text-sm" style={{ color: "var(--danger-text)" }}>
               <input
                 type="checkbox"
                 className="mt-1 accent-red-600"
@@ -1155,7 +1207,7 @@ export default function Settings() {
               <span>Je comprends que mes données, services et abonnements associés peuvent être supprimés.</span>
             </label>
 
-            <label className="flex items-start gap-2 text-sm text-red-900 dark:text-red-200">
+            <label className="flex items-start gap-2 text-sm" style={{ color: "var(--danger-text)" }}>
               <input
                 type="checkbox"
                 className="mt-1 accent-red-600"
