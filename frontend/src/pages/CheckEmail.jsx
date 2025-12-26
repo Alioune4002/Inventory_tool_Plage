@@ -1,5 +1,5 @@
 // frontend/src/pages/CheckEmail.jsx
-import React from "react";
+import React, { useMemo } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import Card from "../ui/Card";
@@ -7,12 +7,24 @@ import Button from "../ui/Button";
 import PageTransition from "../components/PageTransition";
 import { resendVerificationEmail } from "../lib/api";
 import { useToast } from "../app/ToastContext";
+import { formatApiError } from "../lib/errorUtils";
 
 export default function CheckEmail() {
   const loc = useLocation();
   const nav = useNavigate();
   const pushToast = useToast();
-  const email = loc.state?.email || "";
+
+  // ✅ fallback querystring: /check-email?email=...
+  const email = useMemo(() => {
+    const stateEmail = (loc.state?.email || "").trim();
+    if (stateEmail) return stateEmail;
+    try {
+      const qs = new URLSearchParams(loc.search || "");
+      return (qs.get("email") || "").trim();
+    } catch {
+      return "";
+    }
+  }, [loc.state, loc.search]);
 
   const resend = async () => {
     if (!email) {
@@ -22,8 +34,9 @@ export default function CheckEmail() {
     try {
       await resendVerificationEmail({ email });
       pushToast?.({ type: "success", message: "Email de vérification renvoyé." });
-    } catch {
-      pushToast?.({ type: "error", message: "Impossible pour le moment. Réessaie plus tard." });
+    } catch (e) {
+      // ✅ important: remonte le vrai message backend (503 email_send_failed)
+      pushToast?.({ type: "error", message: formatApiError(e, { context: "generic" }) });
     }
   };
 

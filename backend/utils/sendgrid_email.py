@@ -89,7 +89,6 @@ def _stockscan_html_template(
     support_email = getattr(settings, "SUPPORT_EMAIL", "support@stockscan.app")
     year = getattr(settings, "EMAIL_FOOTER_YEAR", "")
 
-    # CTA optionnel
     cta_block = ""
     if cta_label and cta_url:
         safe_label = _escape_html(cta_label)
@@ -110,7 +109,6 @@ def _stockscan_html_template(
     safe_intro = _escape_html(intro or "")
     safe_footer = _escape_html(footer_note or "")
 
-    # Important : inline CSS only 
     return f"""<!doctype html>
 <html lang="fr">
   <head>
@@ -191,6 +189,41 @@ def _stockscan_html_template(
 """
 
 
+def _summarize_sendgrid_exception(exc: Exception) -> tuple[Optional[int], str]:
+    """
+    Retourne (status_code, body_snippet) si l'exception expose une response (sendgrid-python).
+    Ne log jamais de secrets.
+    """
+    status_code = None
+    body_snippet = ""
+    try:
+        resp = getattr(exc, "body", None) or getattr(exc, "response", None)
+        # sendgrid-python lève souvent HTTPError (urllib) ou exceptions avec .status_code/.body
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None and hasattr(resp, "status_code"):
+            status_code = getattr(resp, "status_code")
+
+        body = getattr(exc, "body", None)
+        if body is None and hasattr(resp, "body"):
+            body = getattr(resp, "body")
+
+        if body is None and hasattr(resp, "read"):
+            try:
+                body = resp.read()
+            except Exception:
+                body = None
+
+        if body is not None:
+            if isinstance(body, (bytes, bytearray)):
+                body = body.decode(errors="ignore")
+            body = str(body)
+            body_snippet = body[:800]  # limite
+    except Exception:
+        pass
+
+    return status_code, body_snippet
+
+
 def send_email_with_sendgrid(
     *,
     to_email: str,
@@ -205,9 +238,10 @@ def send_email_with_sendgrid(
     """
     Envoie un email via SendGrid quand configuré, sinon fallback vers EmailMultiAlternatives.
 
-     AJOUTS:
-    - Protection si SENDGRID_FROM_EMAIL contient par erreur plusieurs emails (virgule).
-    - Support du Reply-To via settings.REPLY_TO_EMAIL (sinon SUPPORT_EMAIL).
+    AJOUTS:
+    - logs plus utiles (status code / body snippet) si SendGrid échoue
+    - diagnostic clair pour 401/403
+    - debug final corrigé
     """
     if not to_email:
         logger.debug("Envoi email annulé : aucun destinataire.")
@@ -217,21 +251,18 @@ def send_email_with_sendgrid(
     support_email = getattr(settings, "SUPPORT_EMAIL", "")
     reply_to = getattr(settings, "REPLY_TO_EMAIL", "") or support_email
 
-    
+    # Protection si plusieurs emails par erreur
     if isinstance(from_email, str) and "," in from_email:
         from_email = from_email.split(",")[0].strip()
 
     brand = getattr(settings, "EMAIL_BRAND_NAME", "StockScan")
 
     # --- HTML premium (auto-wrap) ---
-    final_html = None
     if html_body:
         if _looks_like_full_html(html_body):
             final_html = html_body
         else:
-            # Si l'appelant passe juste un message, on le transforme proprement
             content = html_body.strip()
-            # si ce n'est pas déjà des balises, on le met en <p>
             if "<" not in content:
                 content = f"<p style='margin:0'>{_escape_html(content)}</p>"
             final_html = _stockscan_html_template(
@@ -240,7 +271,6 @@ def send_email_with_sendgrid(
                 content_html=content,
             )
     else:
-        # Pas de html_body => on fabrique un HTML propre à partir du texte
         safe = _escape_html(text_body or "")
         safe = safe.replace("\n\n", "</p><p style='margin:0 0 10px 0;'>").replace("\n", "<br/>")
         final_html = _stockscan_html_template(
@@ -249,13 +279,15 @@ def send_email_with_sendgrid(
             content_html=f"<p style='margin:0 0 10px 0;'>{safe}</p>",
         )
 
-    sent = False
-    client = None
+    sent_via_sendgrid = False
+    sent_via_django = False
+
+    api_key = getattr(settings, "SENDGRID_API_KEY", None)
 
     # --- SendGrid ---
-    if SendGridAPIClient and Mail and getattr(settings, "SENDGRID_API_KEY", None):
+    if SendGridAPIClient and Mail and api_key:
         try:
-            client = SendGridAPIClient(settings.SENDGRID_API_KEY)
+            client = SendGridAPIClient(api_key)
             sg_mail = Mail(
                 from_email=from_email,
                 to_emails=[to_email],
@@ -274,14 +306,51 @@ def send_email_with_sendgrid(
             if attachment:
                 sg_mail.attachment = attachment
 
-            client.send(sg_mail)
-            sent = True
-        except Exception as exc:  # pragma: no cover
-            logger.warning("SendGrid envoi échoué (%s): %s", to_email, exc)
-            sent = False
+            resp = client.send(sg_mail)
 
-   
-    if not sent and fallback_to_django:
+            # resp.status_code attendu: 202
+            status_code = getattr(resp, "status_code", None)
+            if status_code and int(status_code) >= 400:
+                logger.warning(
+                    "SendGrid responded error for %s: status=%s body=%s",
+                    to_email,
+                    status_code,
+                    getattr(resp, "body", "")[:800],
+                )
+                sent_via_sendgrid = False
+            else:
+                sent_via_sendgrid = True
+
+        except Exception as exc:  # pragma: no cover
+            status_code, body_snippet = _summarize_sendgrid_exception(exc)
+
+            # Diagnostic pour le 401/403 (ton cas)
+            if status_code in (401, 403):
+                logger.error(
+                    "SendGrid AUTH error (%s) for %s. "
+                    "Vérifie SENDGRID_API_KEY sur Render (service + env), permissions de la clé (Mail Send), "
+                    "et que la clé appartient au BON compte SendGrid. Body=%s",
+                    status_code,
+                    to_email,
+                    body_snippet or str(exc),
+                )
+            else:
+                logger.warning(
+                    "SendGrid envoi échoué (%s) status=%s body=%s",
+                    to_email,
+                    status_code,
+                    body_snippet or str(exc),
+                )
+
+            sent_via_sendgrid = False
+    else:
+        if not api_key:
+            logger.warning("SendGrid non configuré: SENDGRID_API_KEY manquante.")
+        if not SendGridAPIClient or not Mail:
+            logger.warning("SendGrid SDK non disponible (sendgrid-python non installé).")
+
+    # --- Fallback Django (SMTP) ---
+    if not sent_via_sendgrid and fallback_to_django:
         try:
             msg = EmailMultiAlternatives(
                 subject=subject,
@@ -294,9 +363,20 @@ def send_email_with_sendgrid(
             if file_bytes:
                 msg.attach(filename or "attachment", file_bytes, mimetype)
             msg.send(fail_silently=True)
-            sent = True
+            sent_via_django = True
         except Exception as exc:
             logger.warning("Fallback email Django échoué (%s): %s", to_email, exc)
+            sent_via_django = False
 
-    logger.debug("Email vers %s envoyé via SendGrid=%s fallback=%s", to_email, bool(sent and client), sent)
+    sent = bool(sent_via_sendgrid or sent_via_django)
+
+    logger.info(
+        "Email send result: to=%s sendgrid=%s django_fallback=%s final=%s subject=%s",
+        to_email,
+        sent_via_sendgrid,
+        sent_via_django,
+        sent,
+        subject,
+    )
+
     return sent

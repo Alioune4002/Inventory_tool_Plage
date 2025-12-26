@@ -100,7 +100,6 @@ def _ensure_owner_membership(user: User, tenant: Tenant):
 
         m = Membership.objects.filter(user=user, tenant=tenant).first()
         if m:
-            # si ancien tenant avait membership sans status/activated_at => best effort
             updates = []
             if getattr(m, "status", None) in (None, "", "INVITED", "DISABLED"):
                 m.status = "ACTIVE"
@@ -115,7 +114,6 @@ def _ensure_owner_membership(user: User, tenant: Tenant):
                 m.save(update_fields=updates)
             return
 
-        # create missing membership
         Membership.objects.create(
             user=user,
             tenant=tenant,
@@ -128,7 +126,21 @@ def _ensure_owner_membership(user: User, tenant: Tenant):
         LOGGER.exception("ensure_owner_membership failed")
 
 
-def _send_verification_email(user):
+# --------------------------------
+# Email helpers
+# --------------------------------
+
+def _email_send_failed_response():
+    return Response(
+        {
+            "detail": "Envoi email impossible pour le moment. Réessaie dans quelques minutes.",
+            "code": "email_send_failed",
+        },
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def _send_verification_email(user) -> bool:
     if not user.email:
         return False
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -164,15 +176,18 @@ def _send_verification_email(user):
   </div>
 </div>
 """
-    return send_email_with_sendgrid(
+    ok = send_email_with_sendgrid(
         to_email=user.email,
         subject=subject,
         text_body=text,
         html_body=html,
     )
+    if not ok:
+        LOGGER.warning("Verification email send failed for %s", user.email)
+    return bool(ok)
 
 
-def _send_password_reset_email(user, uid, token):
+def _send_password_reset_email(user, uid, token) -> bool:
     if not user.email:
         return False
     reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}"
@@ -206,15 +221,18 @@ def _send_password_reset_email(user, uid, token):
   </div>
 </div>
 """
-    return send_email_with_sendgrid(
+    ok = send_email_with_sendgrid(
         to_email=user.email,
         subject=subject,
         text_body=text,
         html_body=html,
     )
+    if not ok:
+        LOGGER.warning("Password reset email send failed for %s", user.email)
+    return bool(ok)
 
 
-def _send_email_change_email(user, new_email, uid, token, email_token):
+def _send_email_change_email(user, new_email, uid, token, email_token) -> bool:
     if not new_email:
         return False
     confirm_url = (
@@ -250,12 +268,15 @@ def _send_email_change_email(user, new_email, uid, token, email_token):
   </div>
 </div>
 """
-    return send_email_with_sendgrid(
+    ok = send_email_with_sendgrid(
         to_email=new_email,
         subject=subject,
         text_body=text,
         html_body=html,
     )
+    if not ok:
+        LOGGER.warning("Email change email send failed for %s -> %s", user.email, new_email)
+    return bool(ok)
 
 
 # --------------------------------
@@ -281,7 +302,12 @@ class RegisterView(APIView):
         if EMAIL_VERIFICATION_REQUIRED:
             user.is_active = False
             user.save(update_fields=["is_active"])
-            _send_verification_email(user)
+
+            ok = _send_verification_email(user)
+            if not ok:
+                # ✅ IMPORTANT : ne pas mentir au front
+                return _email_send_failed_response()
+
             return Response(
                 {
                     "detail": "email_verification_sent",
@@ -345,7 +371,6 @@ class MeView(APIView):
             "domain": tenant.domain,
         }
 
-        # (bonus) audit login soft (sans bloquer)
         try:
             _audit(
                 tenant=tenant,
@@ -578,6 +603,7 @@ class PasswordResetRequestView(APIView):
         if not user and data.get("email"):
             user = User.objects.filter(email=data["email"]).first()
 
+        # On ne révèle pas si le compte existe
         if not user:
             return Response({"detail": "Si le compte existe, un jeton a été généré."})
 
@@ -641,12 +667,19 @@ class ResendVerificationEmailView(APIView):
         email = (request.data.get("email") or "").strip()
         if not email:
             return Response({"detail": "Email requis."}, status=400)
+
         user = User.objects.filter(email__iexact=email).first()
         if not user:
+            # Ne révèle pas l’existence
             return Response({"detail": "Si le compte existe, un email a été renvoyé."})
+
         if user.is_active:
             return Response({"detail": "Ce compte est déjà vérifié."})
-        _send_verification_email(user)
+
+        ok = _send_verification_email(user)
+        if not ok:
+            return _email_send_failed_response()
+
         return Response({"detail": "Email de vérification renvoyé."})
 
 
@@ -663,7 +696,11 @@ class EmailChangeRequestView(APIView):
         uid = urlsafe_base64_encode(force_bytes(request.user.pk))
         token = default_token_generator.make_token(request.user)
         email_token = EMAIL_CHANGE_SIGNER.sign(new_email)
-        _send_email_change_email(request.user, new_email, uid, token, email_token)
+
+        ok = _send_email_change_email(request.user, new_email, uid, token, email_token)
+        if not ok:
+            return _email_send_failed_response()
+
         return Response({"detail": "Un email de confirmation a été envoyé."})
 
 
