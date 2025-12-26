@@ -5,11 +5,11 @@ export default function Skeleton({ className }) {
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-2xl",
-        "bg-white/5 border border-white/10",
+        "relative overflow-hidden rounded-2xl border",
+        "bg-[var(--accent)]/25 border-[var(--border)]",
         "before:absolute before:inset-0",
         "before:-translate-x-full before:animate-skeleton-shimmer",
-        "before:bg-gradient-to-r before:from-transparent before:via-white/10 before:to-transparent",
+        "before:bg-gradient-to-r before:from-transparent before:via-[var(--surface)]/60 before:to-transparent",
         className
       )}
     />

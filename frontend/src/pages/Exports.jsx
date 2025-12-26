@@ -13,7 +13,6 @@ import { getWording } from "../lib/labels";
 function parseFilenameFromContentDisposition(contentDisposition, fallback) {
   try {
     if (!contentDisposition) return fallback;
-    // ex: attachment; filename="export_avance.xlsx"
     const match = String(contentDisposition).match(/filename\*=UTF-8''([^;]+)|filename="([^"]+)"|filename=([^;]+)/i);
     const raw = decodeURIComponent(match?.[1] || match?.[2] || match?.[3] || "");
     return raw ? raw.replace(/[/\\]/g, "_") : fallback;
@@ -25,7 +24,6 @@ function parseFilenameFromContentDisposition(contentDisposition, fallback) {
 async function blobToJsonSafe(blob) {
   try {
     const text = await blob.text();
-    // si c'est HTML, JSON.parse va throw
     return JSON.parse(text);
   } catch {
     return null;
@@ -38,7 +36,7 @@ function downloadBlob({ blob, filename }) {
   link.href = url;
   link.download = filename || "export.xlsx";
   link.rel = "noopener";
-  link.target = "_blank"; // iOS/Safari friendly
+  link.target = "_blank";
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -206,10 +204,11 @@ export default function Exports() {
 
       const res = await api.post("/api/export-advanced/", payload, {
         responseType: "blob",
-        headers: { Accept: format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        headers: {
+          Accept: format === "csv" ? "text/csv" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        },
       });
 
-      // ✅ si backend renvoie JSON d'erreur en blob, on l'affiche au lieu de télécharger
       const contentType = res?.headers?.["content-type"] || "";
       const maybeJson = contentType.includes("application/json") || contentType.includes("text/json");
 
@@ -224,10 +223,7 @@ export default function Exports() {
       const filename = parseFilenameFromContentDisposition(res?.headers?.["content-disposition"], fallbackName);
 
       const blob = new Blob([res.data], {
-        type:
-          format === "csv"
-            ? "text/csv;charset=utf-8"
-            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type: format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
 
       downloadBlob({ blob, filename });
@@ -260,6 +256,14 @@ export default function Exports() {
     setSelectedCategories((prev) => (prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]));
   };
 
+  // ✅ styles helpers
+  const chipBase =
+    "rounded-full border px-3 py-1 text-xs font-semibold transition";
+  const chipOff =
+    "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] hover:opacity-95";
+  const chipOn =
+    "border-[var(--primary)] bg-[var(--primary)]/15 text-[var(--text)]";
+
   return (
     <PageTransition>
       <Helmet>
@@ -269,9 +273,9 @@ export default function Exports() {
 
       <div className="space-y-4">
         <Card className="p-6 space-y-3">
-          <div className="text-sm text-slate-500">Exports</div>
-          <div className="text-2xl font-black tracking-tight">Exports CSV / Excel</div>
-          <div className="text-sm text-slate-600">Choisissez les filtres, puis lancez un export.</div>
+          <div className="text-sm text-[var(--muted)]">Exports</div>
+          <div className="text-2xl font-black tracking-tight text-[var(--text)]">Exports CSV / Excel</div>
+          <div className="text-sm text-[var(--muted)]">Choisissez les filtres, puis lancez un export.</div>
         </Card>
 
         <Card className="p-6 space-y-4">
@@ -281,9 +285,9 @@ export default function Exports() {
 
             {services?.length > 0 && (
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Service</span>
+                <span className="text-sm font-medium text-[var(--text)]">Service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={serviceId || ""}
                   onChange={() => setToast("Change le service dans la topbar.")}
                   disabled
@@ -293,15 +297,15 @@ export default function Exports() {
                   ))}
                   <option value="all">Tous les services</option>
                 </select>
-                <span className="text-xs text-slate-500">Service sélectionné dans la topbar.</span>
+                <span className="text-xs text-[var(--muted)]">Service sélectionné dans la topbar.</span>
               </label>
             )}
 
             {showOpenFilter && (
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Mode</span>
+                <span className="text-sm font-medium text-[var(--text)]">Mode</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={mode}
                   onChange={(e) => setMode(e.target.value)}
                 >
@@ -309,7 +313,7 @@ export default function Exports() {
                   <option value="SEALED">Non entamé</option>
                   <option value="OPENED">Entamé</option>
                 </select>
-                <span className="text-xs text-slate-500">Sélectionne entamé/non entamé si besoin.</span>
+                <span className="text-xs text-[var(--muted)]">Sélectionne entamé/non entamé si besoin.</span>
               </label>
             )}
 
@@ -330,24 +334,21 @@ export default function Exports() {
             />
 
             <div className="space-y-2">
-              <span className="text-sm font-medium text-slate-700">{wording.categoryLabel}</span>
+              <span className="text-sm font-medium text-[var(--text)]">{wording.categoryLabel}</span>
               <div className="flex flex-wrap gap-2">
                 {availableCategories.length === 0 ? (
-                  <span className="text-xs text-slate-400">Chargement des catégories…</span>
+                  <span className="text-xs text-[var(--muted)]">Chargement des catégories…</span>
                 ) : (
                   availableCategories.map((category) => {
                     const value = category.name || category.title || category.slug || category.id;
                     const label = category.name || category.title || value;
+                    const active = selectedCategories.includes(value);
                     return (
                       <button
                         type="button"
                         key={value}
                         onClick={() => toggleCategory(value)}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                          selectedCategories.includes(value)
-                            ? "border-blue-500 bg-blue-500/20 text-blue-200"
-                            : "border-white/20 bg-white/5 text-white/80"
-                        }`}
+                        className={`${chipBase} ${active ? chipOn : chipOff}`}
                       >
                         {label}
                       </button>
@@ -355,38 +356,28 @@ export default function Exports() {
                   })
                 )}
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-[var(--muted)]">
                 Sélectionne les {categoryLabelLower} à intégrer. Sans sélection, l’export prend tout.
               </p>
               {selectedCategories.length > 0 && (
-                <p className="text-xs text-emerald-300">Catégories choisies : {selectedCategories.join(", ")}</p>
+                <p className="text-xs" style={{ color: "var(--success)" }}>
+                  Catégories choisies : {selectedCategories.join(", ")}
+                </p>
               )}
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <span className="text-sm font-medium text-slate-700">Champs exportés</span>
+              <span className="text-sm font-medium text-[var(--text)]">Champs exportés</span>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                  onClick={() => setSelectedFields(essentialFields)}
-                >
+                <button type="button" className={`${chipBase} ${chipOff}`} onClick={() => setSelectedFields(essentialFields)}>
                   Base
                 </button>
-                <button
-                  type="button"
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                  onClick={() => setSelectedFields(allFieldKeys)}
-                >
+                <button type="button" className={`${chipBase} ${chipOff}`} onClick={() => setSelectedFields(allFieldKeys)}>
                   Complet
                 </button>
-                <button
-                  type="button"
-                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70"
-                  onClick={() => setSelectedFields(defaultFields)}
-                >
+                <button type="button" className={`${chipBase} ${chipOff}`} onClick={() => setSelectedFields(defaultFields)}>
                   Réinitialiser
                 </button>
               </div>
@@ -400,9 +391,7 @@ export default function Exports() {
                     key={field.key}
                     type="button"
                     onClick={() => toggleField(field.key)}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                      active ? "border-blue-500 bg-blue-500/20 text-blue-100" : "border-white/10 bg-white/5 text-white/70"
-                    }`}
+                    className={`${chipBase} ${active ? chipOn : chipOff}`}
                   >
                     {field.label}
                   </button>
@@ -410,34 +399,42 @@ export default function Exports() {
               })}
             </div>
 
-            <p className="text-xs text-slate-500">Sélectionne exactement ce que tu veux récupérer dans le fichier.</p>
+            <p className="text-xs text-[var(--muted)]">Sélectionne exactement ce que tu veux récupérer dans le fichier.</p>
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-700">Extras graphiques</span>
+              <span className="text-sm font-medium text-[var(--text)]">Extras graphiques</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
-                    includeCharts ? "bg-green-500/20 text-green-200" : "bg-white/5 text-white/60"
-                  }`}
+                  className={cn(
+                    "rounded-2xl px-3 py-1 text-xs font-semibold border",
+                    includeCharts
+                      ? "border-[var(--success)] bg-[var(--success)]/15 text-[var(--text)]"
+                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+                  )}
                   onClick={() => setIncludeCharts((prev) => !prev)}
                 >
                   {includeCharts ? "Graphiques ON" : "Graphiques OFF"}
                 </button>
+
                 <button
                   type="button"
-                  className={`rounded-2xl px-3 py-1 text-xs font-semibold ${
-                    includeSummary ? "bg-purple-500/20 text-purple-200" : "bg-white/5 text-white/60"
-                  }`}
+                  className={cn(
+                    "rounded-2xl px-3 py-1 text-xs font-semibold border",
+                    includeSummary
+                      ? "border-[var(--primary)] bg-[var(--primary)]/15 text-[var(--text)]"
+                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+                  )}
                   onClick={() => setIncludeSummary((prev) => !prev)}
                 >
                   {includeSummary ? "Synthèse ON" : "Synthèse OFF"}
                 </button>
               </div>
             </div>
-            <p className="text-xs text-slate-500">
+
+            <p className="text-xs text-[var(--muted)]">
               Les graphiques & la synthèse sont inclus dans un onglet Excel dédié (non disponibles en CSV).
             </p>
           </div>
@@ -448,7 +445,7 @@ export default function Exports() {
           </div>
 
           {toast && (
-            <div className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-2xl px-3 py-2">
+            <div className="text-sm text-[var(--text)] bg-[var(--surface)] border border-[var(--border)] rounded-2xl px-3 py-2">
               {toast}
             </div>
           )}
@@ -456,4 +453,9 @@ export default function Exports() {
       </div>
     </PageTransition>
   );
+}
+
+
+function cn(...a) {
+  return a.filter(Boolean).join(" ");
 }

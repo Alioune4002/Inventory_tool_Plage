@@ -16,6 +16,19 @@
   --radius-pill: 999px;
   --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.12), 0 25px 70px rgba(59, 130, 246, 0.35);
+
+  /* ✅ optionnel mais très utile pour badges / banners */
+  --warn-bg: rgba(245, 158, 11, 0.14);
+  --warn-border: rgba(245, 158, 11, 0.35);
+  --warn-text: #fde68a;
+
+  --danger-bg: rgba(244, 63, 94, 0.14);
+  --danger-border: rgba(244, 63, 94, 0.35);
+  --danger-text: #fecdd3;
+
+  --info-bg: rgba(59, 130, 246, 0.14);
+  --info-border: rgba(59, 130, 246, 0.35);
+  --info-text: #bfdbfe;
 }
 
 :root[data-theme="light"] {
@@ -30,8 +43,19 @@
   --accent: #e0e7ff;
   --shadow-soft: 0 20px 60px rgba(15, 23, 42, 0.08);
   --shadow-glow: 0 0 0 1px rgba(37, 99, 235, 0.08), 0 25px 70px rgba(37, 99, 235, 0.18);
-}
 
+  --warn-bg: rgba(245, 158, 11, 0.14);
+  --warn-border: rgba(245, 158, 11, 0.35);
+  --warn-text: #92400e;
+
+  --danger-bg: rgba(244, 63, 94, 0.14);
+  --danger-border: rgba(244, 63, 94, 0.35);
+  --danger-text: #9f1239;
+
+  --info-bg: rgba(59, 130, 246, 0.14);
+  --info-border: rgba(59, 130, 246, 0.35);
+  --info-text: #1d4ed8;
+}
 
 *,
 *::before,
@@ -44,7 +68,7 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  overflow-x: hidden; 
+  overflow-x: hidden;
 }
 
 /* Sécurise médias (souvent responsables du overflow) */
@@ -143,7 +167,14 @@ body {
     border-color: var(--border) !important;
   }
 
-  /* Inputs / selects en mode sombre : fond sombre, texte clair, placeholders lisibles */
+  /* ✅ Inputs/selects/textarea : garder cohérent avec var() et assurer lisibilité iOS */
+  input,
+  select,
+  textarea {
+    color: var(--text);
+  }
+
+  /* Mode sombre - on garde un fallback mais pas destructif */
   [data-theme="dark"] input,
   [data-theme="dark"] select,
   [data-theme="dark"] textarea {
@@ -155,6 +186,32 @@ body {
   [data-theme="dark"] textarea::placeholder {
     color: #cbd5e1 !important;
     opacity: 0.9;
+  }
+
+  /* ✅ Fix iOS Safari: icône calendrier + texte month/date */
+  input[type="date"],
+  input[type="month"] {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  /* icône calendrier */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator {
+    opacity: 0.85;
+    cursor: pointer;
+  }
+
+  /* en dark : icône claire */
+  [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+  [data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.1);
+  }
+
+  /* en light : icône sombre (parfois iOS la met trop claire) */
+  [data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+  [data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator {
+    filter: invert(0) brightness(0.85);
   }
 }
 
@@ -188,12 +245,10 @@ body {
     background-size: 32px 32px;
   }
 
-  
   .min-w-0-safe {
     min-width: 0;
   }
 
-  
   .break-anywhere {
     overflow-wrap: anywhere;
     word-break: break-word;

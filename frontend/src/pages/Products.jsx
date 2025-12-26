@@ -1,3 +1,4 @@
+// frontend/src/pages/Products.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
@@ -18,7 +19,6 @@ function isBarcodeDetectorSupported() {
 
 function normalizeScannedCode(raw) {
   const v = String(raw || "").trim();
-  // garde uniquement chiffres si EAN/UPC classique, sinon renvoie brut
   const digits = v.replace(/[^\d]/g, "");
   if (digits.length >= 8) return digits;
   return v;
@@ -76,6 +76,7 @@ export default function Products() {
 
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
+
   const familyId = useMemo(() => resolveFamilyId(serviceType, serviceDomain), [serviceType, serviceDomain]);
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const familyIdentifiers = familyMeta?.identifiers ?? {};
@@ -373,23 +374,19 @@ export default function Products() {
     const code = normalizeScannedCode(raw);
     if (!code) return;
 
-    // 1) recherche
     setSearch(code);
-    // 2) remplit formulaire code-barres (si activé)
+
     if (barcodeEnabled) {
       setForm((p) => ({ ...p, barcode: code }));
-      // focus dans le champ code-barres si visible
       window.setTimeout(() => {
         try {
           barcodeInputRef.current?.focus?.();
         } catch (_) {}
       }, 50);
     } else {
-      // sinon on met dans SKU (si dispo)
       if (skuEnabled) setForm((p) => ({ ...p, internal_sku: code }));
     }
 
-    // 3) toast + scroll résultats
     pushToast?.({ message: `Scan détecté : ${code}`, type: "success" });
 
     window.setTimeout(() => {
@@ -398,7 +395,6 @@ export default function Products() {
       } catch (_) {}
     }, 50);
 
-    // 4) ferme modal
     setScanOpen(false);
   };
 
@@ -408,7 +404,6 @@ export default function Products() {
     if (!video || !detector) return;
 
     try {
-      // detect() peut throw selon implémentation
       const codes = await detector.detect(video);
       if (Array.isArray(codes) && codes.length) {
         const val = codes[0]?.rawValue || "";
@@ -419,7 +414,7 @@ export default function Products() {
         }
       }
     } catch (e) {
-      // ignore: on continue
+      // ignore
     }
 
     rafRef.current = requestAnimationFrame(tickScan);
@@ -499,19 +494,19 @@ export default function Products() {
       {/* Modal scanner */}
       {scanOpen && (
         <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-              <div className="font-semibold text-slate-900 flex items-center gap-2">
+          <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-xl overflow-hidden border border-[var(--border)]">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+              <div className="font-semibold text-[var(--text)] flex items-center gap-2">
                 <ScanLine className="w-5 h-5" />
                 Scanner un code-barres
               </div>
               <button
                 type="button"
-                className="p-2 rounded-xl hover:bg-slate-100"
+                className="p-2 rounded-xl hover:bg-[var(--accent)]/10"
                 onClick={() => setScanOpen(false)}
                 aria-label="Fermer"
               >
-                <X className="w-5 h-5 text-slate-700" />
+                <X className="w-5 h-5 text-[var(--muted)]" />
               </button>
             </div>
 
@@ -530,11 +525,11 @@ export default function Products() {
               </div>
 
               {scanErr ? (
-                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                <div className="text-sm text-red-700 dark:text-red-200 bg-red-50/70 dark:bg-red-500/10 border border-red-200/70 dark:border-red-400/25 rounded-xl px-3 py-2">
                   {scanErr}
                 </div>
               ) : (
-                <div className="text-xs text-slate-600">
+                <div className="text-xs text-[var(--muted)]">
                   Astuce : place le code-barres dans le cadre, bien éclairé. Le scan se fait automatiquement.
                 </div>
               )}
@@ -567,7 +562,7 @@ export default function Products() {
               </div>
 
               {!isBarcodeDetectorSupported() && (
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-[var(--muted)]">
                   Note : sur iPhone Safari, le scan caméra peut ne pas être supporté. (Android Chrome = OK)
                 </div>
               )}
@@ -578,19 +573,19 @@ export default function Products() {
 
       <div className="space-y-4">
         <Card className="p-6 space-y-2">
-          <div className="text-sm text-slate-500">{wording.itemPlural}</div>
-          <h1 className="text-2xl font-black">{ux.productsTitle}</h1>
-          <p className="text-slate-600 text-sm">{ux.productsIntro}</p>
-          <div className="text-xs text-slate-500">{catalogueNote}</div>
+          <div className="text-sm text-[var(--muted)]">{wording.itemPlural}</div>
+          <h1 className="text-2xl font-black text-[var(--text)]">{ux.productsTitle}</h1>
+          <p className="text-[var(--muted)] text-sm">{ux.productsIntro}</p>
+          <div className="text-xs text-[var(--muted)]">{catalogueNote}</div>
         </Card>
 
         <Card className="p-6 space-y-4">
           <div className="grid md:grid-cols-3 gap-3 items-end">
             {services?.length > 0 && (
               <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Service</span>
+                <span className="text-sm font-medium text-[var(--text)]">Service</span>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   value={serviceId || ""}
                   onChange={(e) => selectService(e.target.value)}
                 >
@@ -617,7 +612,7 @@ export default function Products() {
                 barcodeEnabled ? (
                   <button
                     type="button"
-                    className="text-xs font-semibold text-slate-700 px-2 py-1 rounded-full border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"
+                    className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
                     onClick={() => setScanOpen(true)}
                     title="Scanner un code-barres"
                   >
@@ -648,7 +643,7 @@ export default function Products() {
           </div>
 
           {isAllServices && (
-            <div className="text-sm text-slate-600">
+            <div className="text-sm text-[var(--muted)]">
               Mode lecture multi-services : sélectionnez un service précis pour ajouter ou modifier.
             </div>
           )}
@@ -665,11 +660,11 @@ export default function Products() {
 
               {categories.length > 0 ? (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">{wording.categoryLabel}</span>
+                  <span className="text-sm font-medium text-[var(--text)]">{wording.categoryLabel}</span>
                   <select
                     value={form.category}
                     onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                    className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   >
                     <option value="">Aucune</option>
                     {categories.map((c) => (
@@ -678,7 +673,7 @@ export default function Products() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500">Catégories du service sélectionné.</p>
+                  <p className="text-xs text-[var(--muted)]">Catégories du service sélectionné.</p>
                 </label>
               ) : (
                 <Input
@@ -692,11 +687,11 @@ export default function Products() {
 
               {showUnit && (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">{unitLabel}</span>
+                  <span className="text-sm font-medium text-[var(--text)]">{unitLabel}</span>
                   <select
                     value={form.unit}
                     onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                    className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   >
                     {unitOptions.map((u) => (
                       <option key={u} value={u}>
@@ -709,11 +704,11 @@ export default function Products() {
 
               {itemTypeEnabled && (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">Type d’article</span>
+                  <span className="text-sm font-medium text-[var(--text)]">Type d’article</span>
                   <select
                     value={form.product_role}
                     onChange={(e) => setForm((p) => ({ ...p, product_role: e.target.value }))}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                    className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   >
                     {productRoleOptions.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -721,7 +716,7 @@ export default function Products() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[var(--muted)]">
                     {helpers.productRole ||
                       "Matière première = coût, produit fini = vente. Utile pour la marge estimée."}
                   </p>
@@ -739,7 +734,7 @@ export default function Products() {
                   rightSlot={
                     <button
                       type="button"
-                      className="text-xs font-semibold text-slate-700 px-2 py-1 rounded-full border border-slate-200 hover:bg-slate-50 inline-flex items-center gap-1"
+                      className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
                       onClick={() => setScanOpen(true)}
                       title="Scanner un code-barres"
                     >
@@ -800,11 +795,11 @@ export default function Products() {
 
               {(purchaseEnabled || sellingEnabled) && tvaEnabled && (
                 <label className="space-y-1.5">
-                  <span className="text-sm font-medium text-slate-700">TVA</span>
+                  <span className="text-sm font-medium text-[var(--text)]">TVA</span>
                   <select
                     value={form.tva}
                     onChange={(e) => setForm((p) => ({ ...p, tva: e.target.value }))}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
+                    className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
                   >
                     {vatOptions.map((rate) => (
                       <option key={rate} value={rate}>
@@ -812,7 +807,7 @@ export default function Products() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-slate-500">Prix saisis en HT. La TVA sert aux exports et estimations.</p>
+                  <p className="text-xs text-[var(--muted)]">Prix saisis en HT. La TVA sert aux exports et estimations.</p>
                 </label>
               )}
 
@@ -834,16 +829,16 @@ export default function Products() {
             </fieldset>
           </form>
 
-          {err && <div className="text-sm text-red-600">{err}</div>}
+          {err && <div className="text-sm text-red-700 dark:text-red-200">{err}</div>}
         </Card>
 
         <Card className="p-6 space-y-4" ref={resultsRef}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
-              <div className="text-sm text-slate-500">Résultats</div>
-              <div className="text-lg font-semibold">{filteredItems.length} élément(s)</div>
+              <div className="text-sm text-[var(--muted)]">Résultats</div>
+              <div className="text-lg font-semibold text-[var(--text)]">{filteredItems.length} élément(s)</div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-500">
+            <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
               <span>
                 Page {page} / {totalPages}
               </span>
@@ -860,12 +855,12 @@ export default function Products() {
               ))}
             </div>
           ) : filteredItems.length === 0 ? (
-            <div className="text-slate-500">{ux.emptyProducts}</div>
+            <div className="text-[var(--muted)]">{ux.emptyProducts}</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50">
-                  <tr className="text-slate-600">
+                <thead className="bg-[var(--surface)] sticky top-0">
+                  <tr className="text-[var(--muted)]">
                     <th className="text-left px-4 py-3">{wording.itemLabel}</th>
                     <th className="text-left px-4 py-3">{wording.categoryLabel}</th>
                     {isAllServices && <th className="text-left px-4 py-3">Service</th>}
@@ -882,36 +877,45 @@ export default function Products() {
 
                 <tbody>
                   {paginatedItems.map((p, idx) => (
-                    <tr key={p.id} className={idx % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
+                    <tr
+                      key={p.id}
+                      className={idx % 2 === 0 ? "bg-[var(--surface)]" : "bg-[var(--accent)]/10"}
+                    >
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-slate-900">{p.name}</div>
+                        <div className="font-semibold text-[var(--text)]">{p.name}</div>
                         {p.product_role && (
-                          <div className="text-xs text-slate-500">Type : {productRoleLabels[p.product_role] || p.product_role}</div>
+                          <div className="text-xs text-[var(--muted)]">
+                            Type : {productRoleLabels[p.product_role] || p.product_role}
+                          </div>
                         )}
                         {(p.brand || p.supplier) && (
-                          <div className="text-xs text-slate-500">{[p.brand, p.supplier].filter(Boolean).join(" · ")}</div>
+                          <div className="text-xs text-[var(--muted)]">
+                            {[p.brand, p.supplier].filter(Boolean).join(" · ")}
+                          </div>
                         )}
                       </td>
 
-                      <td className="px-4 py-3 text-slate-700">{p.category || "—"}</td>
+                      <td className="px-4 py-3 text-[var(--muted)]">{p.category || "—"}</td>
 
                       {isAllServices && (
-                        <td className="px-4 py-3 text-slate-700">{p.__service_name || readableServiceName(p.service)}</td>
+                        <td className="px-4 py-3 text-[var(--muted)]">
+                          {p.__service_name || readableServiceName(p.service)}
+                        </td>
                       )}
 
-                      <td className="px-4 py-3 text-slate-700 break-anywhere">
+                      <td className="px-4 py-3 text-[var(--muted)]">
                         <div className="space-y-1">
                           <div>{p.barcode || "—"}</div>
-                          {skuEnabled && <div className="text-xs text-slate-500">{p.internal_sku || "SKU —"}</div>}
+                          {skuEnabled && <div className="text-xs text-[var(--muted)]">{p.internal_sku || "SKU —"}</div>}
                         </div>
                       </td>
 
                       {(purchaseEnabled || sellingEnabled) && (
-                        <td className="px-4 py-3 text-slate-700">
+                        <td className="px-4 py-3 text-[var(--muted)]">
                           <div className="space-y-1">
                             {purchaseEnabled && <div>Achat: {p.purchase_price ? `${p.purchase_price} €` : "—"}</div>}
                             {sellingEnabled && (
-                              <div className="text-xs text-slate-500">
+                              <div className="text-xs text-[var(--muted)]">
                                 Vente: {p.selling_price ? `${p.selling_price} €` : "—"}
                                 {tvaEnabled ? ` · TVA ${p.tva ?? "—"}%` : ""}
                               </div>
@@ -920,10 +924,10 @@ export default function Products() {
                         </td>
                       )}
 
-                      {showUnit && <td className="px-4 py-3 text-slate-700">{p.unit || "—"}</td>}
+                      {showUnit && <td className="px-4 py-3 text-[var(--muted)]">{p.unit || "—"}</td>}
 
                       {!isAllServices && (
-                        <td className="px-4 py-3 text-slate-700">
+                        <td className="px-4 py-3 text-[var(--muted)]">
                           <Button
                             size="sm"
                             variant="secondary"
@@ -963,11 +967,21 @@ export default function Products() {
           )}
 
           {filteredItems.length > PAGE_SIZE && (
-            <div className="flex items-center justify-end gap-2 text-sm text-slate-600">
-              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
+            <div className="flex items-center justify-end gap-2 text-sm text-[var(--muted)]">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={page === 1}
+              >
                 ← Précédent
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={page === totalPages}
+              >
                 Suivant →
               </Button>
             </div>
