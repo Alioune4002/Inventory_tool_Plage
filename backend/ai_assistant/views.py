@@ -1,15 +1,14 @@
 import json
 import time
+from datetime import timedelta
 from uuid import uuid4
 
-from django.conf import settings
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework import status
-from accounts.services.paywall import paywall_response
 
 from .services.assistant import build_context, call_llm, validate_llm_json, SYSTEM_PROMPT
 from accounts.services.access import check_entitlement, get_limits, get_plan_code, LimitExceeded
@@ -33,18 +32,6 @@ class AiAssistantView(APIView):
 
     def post(self, request, *args, **kwargs):
       
-        if not getattr(settings, "AI_ENABLED", True):
-            return Response(
-                {
-                    "enabled": False,
-                    "message": "Assistant IA désactivé.",
-                    "insights": [],
-                    "suggested_actions": [],
-                    "question": None,
-                },
-                status=status.HTTP_200_OK,
-            )
-
         started = time.time()
         request_id = str(uuid4())
 
@@ -61,7 +48,7 @@ class AiAssistantView(APIView):
             check_entitlement(tenant, "ai_assistant_basic")
         except Exception as exc:
             code = getattr(exc, "code", None) or "FEATURE_NOT_INCLUDED"
-            detail = getattr(exc, "detail", None) or "Cette fonctionnalité nécessite le plan Multi."
+            detail = getattr(exc, "detail", None) or "Cette fonctionnalité nécessite le plan Duo ou Multi."
 
             return Response(
                 {
@@ -71,7 +58,7 @@ class AiAssistantView(APIView):
                     "insights": [
                         {
                             "title": "Plan requis",
-                            "description": "Activez un plan supérieur pour accéder à l’assistant IA.",
+                            "description": "Activez un plan Duo ou Multi pour accéder à l’assistant IA.",
                             "severity": "warning",
                         }
                     ],
@@ -86,15 +73,33 @@ class AiAssistantView(APIView):
             )
 
         limits = get_limits(tenant)
-        ai_limit = limits.get("ai_requests_monthly_limit")
-        if ai_limit is not None:
-            start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            used = AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start).count()
-            if used >= int(ai_limit):
-                raise LimitExceeded(
-                    code="LIMIT_AI_REQUESTS_MONTH",
-                    detail="Quota IA mensuel atteint. Passez à un plan supérieur pour continuer.",
+        if scope == "support":
+            ai_limit = limits.get("ai_support_weekly_limit")
+            if ai_limit is not None:
+                now = timezone.now()
+                start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+                used = AIRequestEvent.objects.filter(
+                    tenant=tenant, scope="support", created_at__gte=start
+                ).count()
+                if used >= int(ai_limit):
+                    raise LimitExceeded(
+                        code="LIMIT_AI_REQUESTS_WEEK",
+                        detail="Quota IA hebdomadaire atteint. Passez à un plan supérieur pour continuer.",
+                    )
+        else:
+            ai_limit = limits.get("ai_requests_monthly_limit")
+            if ai_limit is not None:
+                start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                used = (
+                    AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start)
+                    .exclude(scope="support")
+                    .count()
                 )
+                if used >= int(ai_limit):
+                    raise LimitExceeded(
+                        code="LIMIT_AI_REQUESTS_MONTH",
+                        detail="Quota IA mensuel atteint. Passez à un plan supérieur pour continuer.",
+                    )
 
         plan_code = get_plan_code(tenant)
         ai_mode = "light" if plan_code == "BOUTIQUE" else "full"
@@ -111,7 +116,7 @@ class AiAssistantView(APIView):
 
         context_json = json.dumps(context, ensure_ascii=False)
         raw = call_llm(SYSTEM_PROMPT, context_json, context)
-        data, invalid_json = validate_llm_json(raw)
+        data, invalid_json = validate_llm_json(raw, context)
 
         duration_ms = int((time.time() - started) * 1000)
         data.update(

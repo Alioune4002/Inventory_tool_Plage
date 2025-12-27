@@ -27,6 +27,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "csv_monthly_limit": 1,
             "xlsx_monthly_limit": 1,
             "ai_requests_monthly_limit": 0,
+            "ai_support_weekly_limit": 0,
             "history_days": 14,
         },
     },
@@ -52,6 +53,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "csv_monthly_limit": None,
             "xlsx_monthly_limit": 30,
             "ai_requests_monthly_limit": 15,
+            "ai_support_weekly_limit": 4,
         },
     },
     "PRO": {
@@ -83,6 +85,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "csv_monthly_limit": None,
             "xlsx_monthly_limit": None,
             "ai_requests_monthly_limit": 200,
+            "ai_support_weekly_limit": 50,
         },
     },
     # ENTERPRISE: via overrides

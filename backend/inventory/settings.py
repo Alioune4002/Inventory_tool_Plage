@@ -258,6 +258,8 @@ SIMPLE_JWT = {
 AI_ENABLED = os.environ.get("AI_ENABLED", "False").lower() == "true"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 AI_MODEL = os.environ.get("AI_MODEL", "gpt-4o-mini")
+AI_MODEL_LIGHT = os.environ.get("AI_MODEL_LIGHT", AI_MODEL)
+AI_MODEL_FULL = os.environ.get("AI_MODEL_FULL", "gpt-4o")
 
 # Billing Stripe
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")

@@ -5,8 +5,6 @@ from django.conf import settings
 from django.db.models import Sum, Count, Q, Value, DecimalField
 from django.db.models.functions import Coalesce
 from django.utils import timezone
-import time
-import uuid
 
 import jsonschema
 
@@ -44,6 +42,7 @@ Rules:
 - Use French for message/insights/question.
 - `payload` must stay small.
 - If CONTEXT.ai_mode is "light", keep answers short, limit insights to essentials, and avoid destructive or irreversible suggested actions.
+- If CONTEXT.scope is "support", answer with clear step-by-step help for StockScan usage/troubleshooting. Use SUPPORT_GUIDE if present.
 """
 
 ACTION_TEMPLATES = {
@@ -51,6 +50,51 @@ ACTION_TEMPLATES = {
     "suggest_export": ("GET", "/api/exports/"),
     "prefill_categories": ("POST", "/api/categories/"),
     "add_loss_placeholder": ("POST", "/api/losses/"),
+}
+
+SUPPORT_GUIDE = {
+    "app": {
+        "name": "StockScan",
+        "purpose": "Inventaire multi-services (cuisine, bar, boutique) avec exports CSV/Excel.",
+    },
+    "routes": {
+        "dashboard": "/app",
+        "products": "/app/products",
+        "inventory": "/app/inventory",
+        "exports": "/app/exports",
+        "settings": "/app/settings",
+        "support": "/app/support",
+    },
+    "exports": {
+        "csv": "Export CSV depuis la page Exports. Respecte les quotas du plan.",
+        "xlsx": "Export Excel disponible selon le plan (Duo/Multi).",
+        "email": "Partage email possible sur Multi.",
+        "errors": "Si erreur 403, verifiez le quota ou le plan.",
+    },
+    "services": {
+        "switch": "Utiliser le selecteur de service en haut de l'app.",
+        "limits": "Nombre de services limite selon le plan.",
+    },
+    "ai": {
+        "duo": "Duo: IA light, quota hebdomadaire limite.",
+        "multi": "Multi: IA complet, quota hebdomadaire plus eleve.",
+    },
+    "alerts": {
+        "stock": "Alertes stock basees sur min_qty.",
+        "expiry": "Alertes dates disponibles en Multi.",
+    },
+    "scan": {
+        "barcode": "Le scan depend du navigateur. iOS Safari peut etre limite.",
+        "off": "Pre-remplissage OpenFoodFacts: aliments uniquement.",
+    },
+    "billing": {
+        "manage": "Parametres > Abonnement & facturation pour gerer Stripe.",
+        "sync": "En cas de plan non active apres paiement, relancer /billing/success?session_id=...",
+    },
+    "support": {
+        "email": "support@stockscan.app",
+        "tip": "Envoyer page + capture + message d'erreur.",
+    },
 }
 
 
@@ -118,6 +162,20 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
 
     missing_id_count = products_qs.filter(barcode__isnull=True, internal_sku__isnull=True).count()
     question = (user_question or "").strip()[:500]
+    plan_code = None
+    plan_entitlements = []
+    plan_limits = {}
+    try:
+        from accounts.services.access import get_plan_code, get_entitlements, get_limits
+
+        plan_code = get_plan_code(tenant)
+        plan_entitlements = get_entitlements(tenant)
+        plan_limits = get_limits(tenant)
+    except Exception:
+        plan_code = None
+        plan_entitlements = []
+        plan_limits = {}
+
     context = {
         "ai_mode": mode,
         "tenant": {"id": tenant.id, "name": tenant.name, "business_type": tenant.business_type, "domain": tenant.domain},
@@ -156,6 +214,12 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
             "categories_count": tenant.categories.count(),
             "sku_missing_count": missing_id_count,
         },
+        "plan": {
+            "code": plan_code,
+            "entitlements": plan_entitlements,
+            "limits": plan_limits,
+        },
+        "support_guide": SUPPORT_GUIDE,
         "data_quality": {
             "categories_count": tenant.categories.count(),
             "products_without_identifier_count": missing_id_count,
@@ -208,7 +272,7 @@ def _local_assistant_summary(context):
         message = (
             f"Question reçue : {user_question}. "
             f"{message} "
-            "L’IA est temporairement indisponible, mais ces repères peuvent déjà aider."
+            "Voici un point rapide basé sur vos données actuelles."
         )
 
     insights = []
@@ -256,6 +320,81 @@ def _local_assistant_summary(context):
     }
 
 
+def _local_support_response(context):
+    ctx = context or {}
+    q = (ctx.get("user_question") or "").lower()
+    plan = ctx.get("plan") or {}
+    limits = plan.get("limits") or {}
+    ai_limit = limits.get("ai_support_weekly_limit")
+    support_email = (ctx.get("support_guide") or {}).get("support", {}).get("email") or "support@stockscan.app"
+
+    def _msg(text, question=None):
+        return {
+            "message": text,
+            "insights": [],
+            "suggested_actions": [],
+            "question": question,
+        }
+
+    if any(k in q for k in ["export", "csv", "excel"]):
+        return _msg(
+            "Exports: allez dans Exports, choisissez la periode et le format (CSV/Excel), puis lancez le telechargement. "
+            "Si vous voyez une erreur 403, le quota de votre plan est atteint.",
+            "Le probleme arrive-t-il sur CSV, Excel, ou les deux ?",
+        )
+
+    if any(k in q for k in ["403", "limite", "quota"]):
+        return _msg(
+            "Une erreur 403 indique souvent un quota de plan atteint (exports ou IA). "
+            "Verifiez votre plan dans Parametres > Abonnement & facturation.",
+            "Quelle action precise declenche l'erreur (export, IA, creation service) ?",
+        )
+
+    if any(k in q for k in ["assistant", "ia", "ai"]):
+        quota_msg = ""
+        if ai_limit is not None:
+            quota_msg = f" Votre quota hebdomadaire est de {ai_limit} requete(s)."
+        return _msg(
+            "L'assistant IA est disponible sur Duo (mode light) et Multi (mode complet)."
+            f"{quota_msg} Si l'IA repond peu, reessayez ou verifiez votre quota.",
+            "Quel type d'aide attendez-vous (analyse stock, exports, configuration) ?",
+        )
+
+    if any(k in q for k in ["scan", "code-barres", "barcode", "openfoodfacts", "off"]):
+        return _msg(
+            "Scan: sur iOS Safari, la camera peut etre limitee. Utilisez la saisie manuelle si besoin. "
+            "Le pre-remplissage OpenFoodFacts concerne surtout les produits alimentaires.",
+            "Quel navigateur utilisez-vous et quel message d'erreur voyez-vous ?",
+        )
+
+    if any(k in q for k in ["service", "services"]):
+        return _msg(
+            "Pour changer de service, utilisez le selecteur en haut de l'app. "
+            "Le nombre de services autorises depend du plan.",
+            "Souhaitez-vous ajouter un service ou simplement en changer ?",
+        )
+
+    if any(k in q for k in ["paiement", "abonnement", "stripe", "facturation"]):
+        return _msg(
+            "Facturation: allez dans Parametres > Abonnement & facturation pour gerer votre abonnement. "
+            "Si le plan n'est pas active apres paiement, rechargez la page de succes avec session_id.",
+            "Pouvez-vous confirmer le plan achete et la date du paiement ?",
+        )
+
+    if any(k in q for k in ["connexion", "login", "mot de passe", "reset"]):
+        return _msg(
+            "Connexion: verifiez vos identifiants. Pour reinitialiser, utilisez 'Mot de passe oublie'. "
+            "Si plusieurs comptes partagent un email, connectez-vous avec le nom d'utilisateur.",
+            "Avez-vous un message d'erreur precis a l'ecran ?",
+        )
+
+    return _msg(
+        "Je peux aider sur les exports, les services, la facturation, l'IA, le scan, ou les modules. "
+        f"Si besoin, contactez {support_email}.",
+        "Quel est votre besoin principal ?",
+    )
+
+
 def _fallback():
     return {
         "message": "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes.",
@@ -269,13 +408,21 @@ def _fallback():
 def call_llm(system_prompt, context_json, context=None):
     request_id = str(uuid4())
     if not getattr(settings, "AI_ENABLED", False):
-        return {**_local_assistant_summary(context), "request_id": request_id, "mode": "fallback"}
+        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
+        return {**response, "request_id": request_id, "mode": "fallback"}
 
     if OpenAI is None or not getattr(settings, "OPENAI_API_KEY", None):
         LOGGER.warning("AI disabled: missing OpenAI client or API key.")
-        return {**_local_assistant_summary(context), "request_id": request_id, "mode": "fallback"}
+        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
+        return {**response, "request_id": request_id, "mode": "fallback"}
 
     try:
+        ai_mode = (context or {}).get("ai_mode") or "full"
+        model_default = getattr(settings, "AI_MODEL", "gpt-4o-mini")
+        model_light = getattr(settings, "AI_MODEL_LIGHT", model_default)
+        model_full = getattr(settings, "AI_MODEL_FULL", model_default)
+        model = model_full if ai_mode == "full" else model_light
+
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
         messages = [
             {"role": "system", "content": system_prompt},
@@ -284,7 +431,7 @@ def call_llm(system_prompt, context_json, context=None):
         if context and context.get("user_question"):
             messages.append({"role": "user", "content": f"USER_QUESTION:\n{context['user_question']}"})
         response = client.chat.completions.create(
-            model=getattr(settings, "AI_MODEL", "gpt-4o-mini"),
+            model=model,
             messages=messages,
             temperature=0.2,
         )
@@ -295,10 +442,11 @@ def call_llm(system_prompt, context_json, context=None):
         return data
     except Exception as exc:  # pragma: no cover
         LOGGER.exception("AI call failed: %s", exc)
-        return {**_fallback(), "request_id": request_id, "mode": "fallback"}
+        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
+        return {**response, "request_id": request_id, "mode": "fallback"}
 
 
-def validate_llm_json(data):
+def validate_llm_json(data, context=None):
     from jsonschema import validate, ValidationError
 
     schema = {
@@ -338,6 +486,9 @@ def validate_llm_json(data):
     try:
         validate(data, schema)
     except (ValidationError, Exception):
+        if context:
+            response = _local_support_response(context) if context.get("scope") == "support" else _local_assistant_summary(context)
+            return response, True
         return _fallback(), True
 
     message = (data.get("message") or "")[:1200]

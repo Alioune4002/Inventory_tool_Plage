@@ -24,6 +24,7 @@ npm run dev
 - STRIPE_API_KEY, STRIPE_WEBHOOK_SECRET (if billing).
 - SENDGRID_API_KEY, SENDGRID_FROM_EMAIL (if emails enabled).
 - OPENAI_API_KEY, AI_ENABLED=true (if AI assistant enabled).
+- AI_MODEL_LIGHT (optionnel), AI_MODEL_FULL (optionnel) pour ajuster les modeles IA.
 - VITE_API_BASE_URL on the frontend.
 
 ## Smoke tests (examples)

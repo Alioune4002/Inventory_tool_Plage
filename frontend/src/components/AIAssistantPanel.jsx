@@ -27,7 +27,14 @@ const SUGGESTIONS = [
   "Peux-tu résumer mon stock du mois ?",
 ];
 
-export default function AIAssistantPanel({ month, serviceId }) {
+const SUPPORT_SUGGESTIONS = [
+  "Pourquoi j'ai une erreur 403 sur un export ?",
+  "Comment exporter en Excel ?",
+  "Comment activer l'IA (Duo/Multi) ?",
+  "Le scan code-barres ne marche pas, que faire ?",
+];
+
+export default function AIAssistantPanel({ month, serviceId, scope = "inventory", allowNoService = false }) {
   const pushToast = useToast();
   const { data: entitlements } = useEntitlements();
   const { serviceProfile, services, tenant } = useAuth();
@@ -37,8 +44,12 @@ export default function AIAssistantPanel({ month, serviceId }) {
   const [notice, setNotice] = useState("");
   const [attempted, setAttempted] = useState(false);
 
+  const initialMessage =
+    scope === "support"
+      ? "Posez une question sur l'application pour obtenir de l'aide."
+      : "Posez une question ou lancez une analyse pour obtenir des conseils.";
   const [data, setData] = useState({
-    message: "Posez une question ou lancez une analyse pour obtenir des conseils.",
+    message: initialMessage,
     insights: [],
     suggested_actions: [],
     question: null,
@@ -113,19 +124,22 @@ export default function AIAssistantPanel({ month, serviceId }) {
     timerRef.current = window.setTimeout(() => setNotice(""), 9000);
   }, []);
 
-  const basePayload = useMemo(
-    () => ({
-      scope: "inventory",
+  const basePayload = useMemo(() => {
+    const payload = {
+      scope,
       period_start: month,
       period_end: month,
       filters: { service: serviceId, month },
-    }),
-    [month, serviceId]
-  );
+    };
+    if (allowNoService && !serviceId) {
+      payload.filters = { service: "all", month };
+    }
+    return payload;
+  }, [allowNoService, month, scope, serviceId]);
 
   const runAssistant = useCallback(
     async (userQuestion) => {
-      if (!serviceId) {
+      if (!serviceId && !allowNoService) {
         showNotice("Sélectionnez un service avant d’utiliser l’assistant.");
         return;
       }
@@ -134,15 +148,15 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
       // Si entitlements chargés et IA interdite => paywall immédiat côté front
       if (!canUseAI) {
-        showNotice("Cette fonctionnalité est disponible avec le plan Multi.");
+        showNotice("Cette fonctionnalité est disponible avec les plans Duo ou Multi.");
         setData((prev) => ({
           ...prev,
-          message: "Plan Multi requis pour utiliser l’assistant IA.",
+          message: "Plan Duo ou Multi requis pour utiliser l’assistant IA.",
           insights: [
             {
               title: "Accès limité",
               description:
-                "Passez au plan Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
+                "Passez au plan Duo ou Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
               severity: "warning",
             },
           ],
@@ -165,9 +179,9 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
         // ✅ Backend “soft paywall” / IA désactivée => pas d’erreur, mais enabled=false
         if (payload?.enabled === false) {
-          showNotice(payload?.message || "Cette fonctionnalité nécessite le plan Multi.");
+          showNotice(payload?.message || "Cette fonctionnalité nécessite le plan Duo ou Multi.");
           setData({
-            message: payload?.message || "Plan Multi requis pour utiliser l’assistant IA.",
+            message: payload?.message || "Plan Duo ou Multi requis pour utiliser l’assistant IA.",
             insights: payload?.insights || [],
             suggested_actions: payload?.suggested_actions || [],
             question: payload?.question ?? null,
@@ -183,10 +197,14 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
         const code = e?.response?.data?.code;
         if (e?.response?.status === 403 && (code === "FEATURE_NOT_INCLUDED" || code?.startsWith?.("LIMIT_"))) {
-          const isLimit = code === "LIMIT_AI_REQUESTS_MONTH";
-          const message = isLimit
-            ? "Quota IA mensuel atteint. Passez au plan Multi pour continuer."
-            : "Plan Multi requis pour utiliser l’assistant IA.";
+          const isWeekLimit = code === "LIMIT_AI_REQUESTS_WEEK";
+          const isMonthLimit = code === "LIMIT_AI_REQUESTS_MONTH";
+          const message =
+            isWeekLimit
+              ? "Quota IA hebdomadaire atteint. Passez au plan Multi pour continuer."
+              : isMonthLimit
+              ? "Quota IA mensuel atteint. Passez au plan Multi pour continuer."
+              : "Plan Duo ou Multi requis pour utiliser l’assistant IA.";
           showNotice(message);
           setData((prev) => ({
             ...prev,
@@ -194,9 +212,11 @@ export default function AIAssistantPanel({ month, serviceId }) {
             insights: [
               {
                 title: isLimit ? "Quota atteint" : "Plan requis",
-                description: isLimit
+                description: isWeekLimit
+                  ? "Votre quota IA hebdomadaire est atteint. Passez au plan Multi pour plus de requêtes."
+                  : isMonthLimit
                   ? "Votre quota IA mensuel est atteint. Passez au plan Multi pour plus de requêtes."
-                  : "Passez au plan Multi pour activer l’assistant IA.",
+                  : "Passez au plan Duo ou Multi pour activer l’assistant IA.",
                 severity: "warning",
               },
             ],
@@ -211,7 +231,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
         setLoading(false);
       }
     },
-    [basePayload, canUseAI, pushToast, serviceId, showNotice]
+    [allowNoService, basePayload, canUseAI, pushToast, serviceId, showNotice]
   );
 
   const handleAsk = () => {
@@ -243,8 +263,13 @@ export default function AIAssistantPanel({ month, serviceId }) {
     }
   };
 
-  const disabledBecauseNoService = !serviceId;
+  const disabledBecauseNoService = !serviceId && !allowNoService;
   const disabledBecausePaywall = entLoaded && !aiAllowed;
+  const suggestions = scope === "support" ? SUPPORT_SUGGESTIONS : SUGGESTIONS;
+  const inputPlaceholder =
+    scope === "support"
+      ? "Posez une question sur l'app (exports, scan, facturation)"
+      : "Posez une question précise (ex : quels produits sont à risque ?)";
 
   return (
     <Card className="p-5 space-y-4" data-tour="tour-ai">
@@ -252,13 +277,17 @@ export default function AIAssistantPanel({ month, serviceId }) {
         <div>
           <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Assistant IA</div>
           <div className="text-lg font-bold text-[var(--text)]">Coach d’usage</div>
-          <div className="text-xs text-[var(--muted)]">Conseils basés sur vos données (mois/service sélectionné).</div>
+          <div className="text-xs text-[var(--muted)]">
+            {scope === "support"
+              ? "Conseils sur l'app, les exports, le scan et la facturation."
+              : "Conseils basés sur vos données (mois/service sélectionné)."}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           {disabledBecausePaywall && attempted ? (
             <Badge className="bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]">
-              Plan Multi
+              Plan Duo / Multi
             </Badge>
           ) : null}
           {aiModeLabel && !disabledBecausePaywall ? (
@@ -294,7 +323,7 @@ export default function AIAssistantPanel({ month, serviceId }) {
         <div className="text-sm font-semibold text-[var(--text)]">Questions rapides</div>
 
         <div className="flex flex-wrap gap-2">
-          {SUGGESTIONS.map((prompt) => (
+          {suggestions.map((prompt) => (
             <Button
               key={prompt}
               size="sm"
@@ -315,13 +344,19 @@ export default function AIAssistantPanel({ month, serviceId }) {
           <textarea
             rows={2}
             className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)]"
-            placeholder="Posez une question précise (ex : quels produits sont à risque ?)"
+            placeholder={inputPlaceholder}
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             disabled={loading || disabledBecausePaywall}
           />
           <div className="flex items-center justify-between pt-2 text-xs text-[var(--muted)]">
-            <span>{disabledBecausePaywall ? "Disponible avec le plan Multi." : "Réponses basées sur vos données."}</span>
+            <span>
+              {disabledBecausePaywall
+                ? "Disponible avec les plans Duo ou Multi."
+                : scope === "support"
+                ? "Réponses basées sur votre contexte StockScan."
+                : "Réponses basées sur vos données."}
+            </span>
             <Button
               size="sm"
               onClick={handleAsk}

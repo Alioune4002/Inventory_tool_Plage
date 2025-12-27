@@ -4,11 +4,17 @@ import Divider from "../ui/Divider";
 import Button from "../ui/Button";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
+import useEntitlements from "../app/useEntitlements";
 import { getWording } from "../lib/labels";
 import { Link } from "react-router-dom";
+import AIAssistantPanel from "../components/AIAssistantPanel";
 
 export default function Support() {
   const { tenant, currentService, serviceProfile } = useAuth();
+  const { data: entitlements } = useEntitlements();
+  const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
+  const nowMonth = new Date().toISOString().slice(0, 7);
+  const supportServiceId = currentService?.id || "all";
 
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const serviceDomain = serviceType === "retail_general" ? "general" : tenant?.domain;
@@ -126,6 +132,10 @@ export default function Support() {
             </div>
           </div>
         </Card>
+
+        {aiAllowed ? (
+          <AIAssistantPanel month={nowMonth} serviceId={supportServiceId} scope="support" allowNoService />
+        ) : null}
       </div>
     </PageTransition>
   );
