@@ -46,6 +46,7 @@ curl -sS -X GET "https://<api-host>/api/exports/?from=2025-01&to=2025-01&service
 - Endpoint Prometheus : `GET /metrics/`
 - Retourne 503 si `prometheus-client` n'est pas installe.
 - Compteurs principaux: `stockscan_off_lookup_failures_total`, `stockscan_export_events_total`, `stockscan_ai_requests_total`.
+- `stockscan_ai_requests_total` expose les labels `mode` (light/full) et `template_used` (true/false).
 
 Exemple:
 ```bash

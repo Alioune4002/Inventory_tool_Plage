@@ -24,7 +24,7 @@ if PROMETHEUS_AVAILABLE:
     AI_REQUESTS = Counter(
         "stockscan_ai_requests_total",
         "AI assistant requests",
-        ["mode"],
+        ["mode", "template_used"],
     )
 
 
@@ -45,6 +45,9 @@ def track_export_event(export_format, emailed):
         EXPORT_EVENTS.labels(format=export_format or "unknown", emailed=str(bool(emailed)).lower()).inc()
 
 
-def track_ai_request(mode):
+def track_ai_request(mode, template_used=False):
     if PROMETHEUS_AVAILABLE:
-        AI_REQUESTS.labels(mode=mode or "unknown").inc()
+        AI_REQUESTS.labels(
+            mode=mode or "unknown",
+            template_used=str(bool(template_used)).lower(),
+        ).inc()

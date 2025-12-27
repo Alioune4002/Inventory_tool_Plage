@@ -146,7 +146,8 @@ class AiAssistantView(APIView):
         except Exception:
             pass
         try:
-            track_ai_request(ai_mode)
+            template_used = raw.get("mode") == "template" if isinstance(raw, dict) else False
+            track_ai_request(ai_mode, template_used=template_used)
         except Exception:
             pass
 
