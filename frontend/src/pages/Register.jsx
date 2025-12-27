@@ -130,6 +130,8 @@ export default function Register() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  const multiServicesLocked = true;
+
   // ✅ Forcer dark sur Register (volontairement)
   useEffect(() => {
     const prevTheme = document.documentElement.getAttribute("data-theme");
@@ -149,7 +151,6 @@ export default function Register() {
 
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const linkedFamilies = useMemo(() => new Set(["restauration", "boulangerie", "pharmacie"]), []);
-  const multiServicesLocked = true;
 
   const moduleListForFamily = useMemo(
     () => MODULES.filter((module) => module.families.includes(familyId)),
