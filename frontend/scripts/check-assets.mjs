@@ -14,7 +14,7 @@ const assetExts = new Set([".png", ".ico", ".svg", ".webmanifest"]);
 function collectIndexAssets() {
   const assets = new Set();
   const raw = fs.readFileSync(indexPath, "utf8");
-  const regex = /<(?:link|meta)\b[^>]*(?:href|content)=\"\\/([^\">]+)\"/gi;
+  const regex = /<(?:link|meta)\b[^>]*(?:href|content)=["']\/([^"']+)["']/gi;
   let match = null;
   while ((match = regex.exec(raw))) {
     const rel = match[1].split("?")[0];
