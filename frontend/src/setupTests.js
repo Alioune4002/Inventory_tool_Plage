@@ -1,4 +1,6 @@
 import '@testing-library/jest-dom/vitest';
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 class IntersectionObserverMock {
   constructor() {
@@ -21,3 +23,7 @@ class IntersectionObserverMock {
 if (typeof window.IntersectionObserver === 'undefined') {
   window.IntersectionObserver = IntersectionObserverMock
 }
+
+afterEach(() => {
+  cleanup();
+});

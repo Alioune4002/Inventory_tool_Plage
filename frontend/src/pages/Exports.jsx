@@ -22,13 +22,25 @@ function parseFilenameFromContentDisposition(contentDisposition, fallback) {
   }
 }
 
-async function blobToJsonSafe(blob) {
+async function blobToJsonSafe(payload) {
   try {
-    const text = await blob.text();
-    return JSON.parse(text);
+    if (!payload) return null;
+    if (typeof payload === "string") {
+      return JSON.parse(payload);
+    }
+    if (typeof payload === "object") {
+      if (typeof payload.text === "function") {
+        const text = await payload.text();
+        return JSON.parse(text);
+      }
+      if ("code" in payload || "detail" in payload || "message" in payload) {
+        return payload;
+      }
+    }
   } catch {
     return null;
   }
+  return null;
 }
 
 function downloadBlob({ blob, filename, keepUrl = false }) {
@@ -238,12 +250,14 @@ export default function Exports() {
   const includeDLC = selectedFields.includes("dlc");
   const includeIdentifier = selectedFields.includes("identifier");
 
-  const resolveExportError = async (error) => {
+  const resolveExportError = async (error, format) => {
     const response = error?.response;
     const status = response?.status;
     let payload = response?.data;
 
-    if (payload instanceof Blob) {
+    if (payload && typeof payload === "object" && typeof payload.text === "function") {
+      payload = await blobToJsonSafe(payload);
+    } else if (typeof payload === "string" || (payload && typeof payload === "object")) {
       payload = await blobToJsonSafe(payload);
     }
 
@@ -259,7 +273,20 @@ export default function Exports() {
     if (code === "FEATURE_NOT_INCLUDED") {
       return "Synthèse & graphiques disponibles en plan Multi. Désactivez-les ou passez au plan supérieur.";
     }
-    if (status === 403 && detail) return String(detail);
+    if (status === 403 && detail) {
+      const lower = String(detail).toLowerCase();
+      if (lower.includes("limite d'export mensuelle") || lower.includes("limite d’export mensuelle")) {
+        return format === "csv"
+          ? "Limite mensuelle CSV atteinte. Passez au plan Duo ou Multi pour exporter sans limite."
+          : "Limite mensuelle Excel atteinte. Passez au plan Duo ou Multi pour exporter davantage.";
+      }
+      return String(detail);
+    }
+    if (status === 403 && format) {
+      return format === "csv"
+        ? "Limite mensuelle CSV atteinte. Passez au plan Duo ou Multi pour exporter sans limite."
+        : "Limite mensuelle Excel atteinte. Passez au plan Duo ou Multi pour exporter davantage.";
+    }
     if (detail) return String(detail);
     return error?.message || "Échec de l’export. Vérifie les filtres / droits / plan.";
   };
@@ -345,7 +372,7 @@ export default function Exports() {
       setToast(`Export prêt${emailMsg}.`);
       pushToast?.({ message: `Export prêt${emailMsg}`, type: "success" });
     } catch (e) {
-      const msg = await resolveExportError(e);
+      const msg = await resolveExportError(e, format);
       setToast(msg);
       pushToast?.({ message: msg, type: "error" });
     } finally {

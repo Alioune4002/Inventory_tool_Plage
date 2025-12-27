@@ -73,7 +73,8 @@ describe("Exports page", () => {
       screen.getByText(/export global \(tous services\)\. les catégories sont désactivées\./i)
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /export csv/i }));
+    const buttons = screen.getAllByRole("button", { name: /export csv/i });
+    await user.click(buttons[0]);
 
     await waitFor(() => {
       expect(apiPost).toHaveBeenCalled();
@@ -102,7 +103,8 @@ describe("Exports page", () => {
       </HelmetProvider>
     );
 
-    await user.click(screen.getByRole("button", { name: /export csv/i }));
+    const buttons = screen.getAllByRole("button", { name: /export csv/i });
+    await user.click(buttons[0]);
 
     expect(
       await screen.findByText(/limite mensuelle csv atteinte/i)
