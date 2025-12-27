@@ -19,6 +19,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "reports_basic",
             "exports_basic",
             "exports_xlsx",
+            "pdf_catalog",
         ],
         "limits": {
             "max_products": 100,
@@ -26,6 +27,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "max_users": 1,
             "csv_monthly_limit": 1,
             "xlsx_monthly_limit": 1,
+            "pdf_catalog_monthly_limit": 1,
             "ai_requests_monthly_limit": 0,
             "ai_support_weekly_limit": 0,
             "history_days": 14,
@@ -45,6 +47,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "roles_per_service",
             "ai_assistant_basic",
             "alerts_stock",
+            "pdf_catalog",
         ],
         "limits": {
             "max_products": 1000,
@@ -52,6 +55,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "max_users": 3,
             "csv_monthly_limit": None,
             "xlsx_monthly_limit": 30,
+            "pdf_catalog_monthly_limit": 5,
             "ai_requests_monthly_limit": 15,
             "ai_support_weekly_limit": 4,
         },
@@ -77,6 +81,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "advanced_roles",
             "alerts_stock",
             "alerts_expiry",
+            "pdf_catalog",
         ],
         "limits": {
             "max_products": None,  # illimité
@@ -84,6 +89,7 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "max_users": 10,
             "csv_monthly_limit": None,
             "xlsx_monthly_limit": None,
+            "pdf_catalog_monthly_limit": None,
             "ai_requests_monthly_limit": 200,
             "ai_support_weekly_limit": 50,
         },

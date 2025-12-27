@@ -8,11 +8,14 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Card from "../ui/Card";
 import Skeleton from "../ui/Skeleton";
+import Select from "../ui/Select";
+import Drawer from "../ui/Drawer";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { useEntitlements } from "../app/useEntitlements";
 
 export default function Inventory() {
   const {
@@ -27,6 +30,7 @@ export default function Inventory() {
   } = useAuth();
 
   const pushToast = useToast();
+  const { data: entitlements } = useEntitlements();
 
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [items, setItems] = useState([]);
@@ -45,6 +49,12 @@ export default function Inventory() {
   const tableWrapRef = useRef(null);
 
   const nameInputRef = useRef(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [qtyEdits, setQtyEdits] = useState({});
+  const [suggestions, setSuggestions] = useState([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const suggestionsRef = useRef(null);
 
   const [quick, setQuick] = useState({
     name: "",
@@ -58,6 +68,9 @@ export default function Inventory() {
     conversion_unit: "",
     conversion_factor: "",
     product_role: "",
+    purchase_price: "",
+    selling_price: "",
+    tva: "20",
     dlc: "",
     unit: "pcs",
     container_status: "SEALED",
@@ -71,6 +84,7 @@ export default function Inventory() {
     loss_reason: "breakage",
     loss_note: "",
   });
+  const isEditing = Boolean(editItem);
 
   const currentService = services?.find((s) => String(s.id) === String(serviceId));
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
@@ -104,8 +118,23 @@ export default function Inventory() {
   const unitLabel = familyMeta.defaults?.unitLabel ? `Unité (${familyMeta.defaults.unitLabel})` : "Unité";
 
   const isAllServices = services.length > 1 && String(serviceId) === "all";
+  const serviceOptions = useMemo(() => {
+    const base = services.map((s) => ({ value: s.id, label: s.name }));
+    if (services.length > 1) {
+      return [...base, { value: "all", label: "Tous les services (lecture)" }];
+    }
+    return base;
+  }, [services]);
+  const categoryOptions = useMemo(() => {
+    if (!categories.length) return [];
+    return [{ value: "", label: "Aucune" }, ...categories.map((c) => ({ value: c.name, label: c.name }))];
+  }, [categories]);
 
   const dlcCfg = serviceFeatures?.dlc || {};
+  const priceCfg = serviceFeatures?.prices || {};
+  const purchaseEnabled = priceCfg.purchase_enabled !== false;
+  const sellingEnabled = priceCfg.selling_enabled !== false;
+  const tvaEnabled = serviceFeatures?.tva?.enabled !== false;
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
   const lotEnabled = getFeatureFlag("lot", familyModules.includes("lot"));
@@ -117,6 +146,7 @@ export default function Inventory() {
   const openEnabled = getFeatureFlag("open_container_tracking", familyModules.includes("opened"));
   const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
   const showOpenFields = openEnabled;
+  const canStockAlerts = Boolean(entitlements?.entitlements?.alerts_stock);
 
   const productRoleOptions = [
     { value: "", label: "Non précisé" },
@@ -124,6 +154,7 @@ export default function Inventory() {
     { value: "finished_product", label: "Produit fini" },
     { value: "homemade_prep", label: "Préparation maison" },
   ];
+  const vatOptions = ["0", "5.5", "10", "20"];
 
   const unitOptions = useMemo(() => {
     if (countingMode === "weight") return ["kg", "g"];
@@ -132,6 +163,31 @@ export default function Inventory() {
     return ["pcs"];
   }, [countingMode]);
   const conversionUnitOptions = ["pcs", "kg", "g", "l", "ml"];
+  const quantityStep = countingMode === "unit" ? 1 : 0.01;
+  const unitSelectOptions = useMemo(
+    () => unitOptions.map((u) => ({ value: u, label: u })),
+    [unitOptions]
+  );
+  const conversionSelectOptions = useMemo(
+    () => [{ value: "", label: "—" }, ...conversionUnitOptions.map((u) => ({ value: u, label: u }))],
+    [conversionUnitOptions]
+  );
+  const lossReasonOptions = useMemo(
+    () => lossReasons.map((r) => ({ value: r.value, label: r.label })),
+    [lossReasons]
+  );
+  const productRoleSelectOptions = useMemo(
+    () => productRoleOptions.map((r) => ({ value: r.value, label: r.label })),
+    [productRoleOptions]
+  );
+  const tvaOptions = useMemo(
+    () => vatOptions.map((rate) => ({ value: rate, label: `${rate}%` })),
+    [vatOptions]
+  );
+  const containerStatusOptions = [
+    { value: "SEALED", label: "Non entamé" },
+    { value: "OPENED", label: "Entamé" },
+  ];
 
   useEffect(() => {
     setQuick((prev) => {
@@ -166,6 +222,39 @@ export default function Inventory() {
     };
     loadCategories();
   }, [serviceId, isAllServices]);
+
+  useEffect(() => {
+    const handleClick = (event) => {
+      if (!suggestionsRef.current?.contains(event.target)) {
+        setSuggestionsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  useEffect(() => {
+    if (!serviceId || isAllServices) {
+      setSuggestions([]);
+      return;
+    }
+    const query = (quick.name || "").trim();
+    if (query.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await api.get(`/api/products/search/?q=${encodeURIComponent(query)}&service=${serviceId}`);
+        const list = Array.isArray(res.data) ? res.data : [];
+        setSuggestions(list);
+        setSuggestionsOpen(Boolean(list.length));
+      } catch {
+        setSuggestions([]);
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [quick.name, serviceId, isAllServices]);
 
   const load = async () => {
     if (!serviceId && !isAllServices) return;
@@ -251,6 +340,9 @@ export default function Inventory() {
       conversion_unit: "",
       conversion_factor: "",
       product_role: "",
+      purchase_price: "",
+      selling_price: "",
+      tva: "20",
       dlc: "",
       unit: unitOptions[0],
       container_status: "SEALED",
@@ -265,6 +357,66 @@ export default function Inventory() {
       loss_note: "",
     });
     setLastFound(null);
+    setEditItem(null);
+    setDrawerOpen(false);
+    setSuggestions([]);
+    setSuggestionsOpen(false);
+  };
+
+  const bumpQuantity = (delta) => {
+    setQuick((prev) => {
+      const current = Number(prev.quantity || 0);
+      const next = Math.max(0, current + delta);
+      const rounded = Number.isFinite(next) ? Number(next.toFixed(3)) : 0;
+      return { ...prev, quantity: String(rounded) };
+    });
+  };
+
+  const fillQuickFromProduct = (product, { includeQuantity = false } = {}) => {
+    if (!product) return;
+    setQuick((prev) => ({
+      ...prev,
+      name: product.name ?? prev.name,
+      category: product.category ?? prev.category,
+      quantity: includeQuantity ? String(product.quantity ?? "") : prev.quantity,
+      barcode: product.barcode ?? prev.barcode,
+      internal_sku: product.internal_sku ?? prev.internal_sku,
+      variant_name: product.variant_name ?? prev.variant_name,
+      variant_value: product.variant_value ?? prev.variant_value,
+      min_qty: product.min_qty ?? prev.min_qty,
+      conversion_unit: product.conversion_unit ?? prev.conversion_unit,
+      conversion_factor: product.conversion_factor ?? prev.conversion_factor,
+      product_role: product.product_role ?? prev.product_role,
+      purchase_price: product.purchase_price ?? prev.purchase_price,
+      selling_price: product.selling_price ?? prev.selling_price,
+      tva: product.tva === null || product.tva === undefined ? prev.tva : String(product.tva),
+      dlc: product.dlc ?? prev.dlc,
+      unit: product.unit || prev.unit,
+      container_status: product.container_status || prev.container_status,
+      pack_size: product.pack_size ?? prev.pack_size,
+      pack_uom: product.pack_uom ?? prev.pack_uom,
+      remaining_qty: product.remaining_qty ?? prev.remaining_qty,
+      remaining_fraction: product.remaining_fraction ?? prev.remaining_fraction,
+      lotNumber: product.lot_number ?? prev.lotNumber,
+      comment: product.notes ?? prev.comment,
+      loss_quantity: "",
+      loss_note: "",
+    }));
+  };
+
+  const startEdit = (product) => {
+    if (isAllServices) {
+      pushToast?.({ message: "Sélectionnez un service pour modifier.", type: "warn" });
+      return;
+    }
+    setEditItem(product);
+    fillQuickFromProduct(product, { includeQuantity: true });
+    setDrawerOpen(true);
+  };
+
+  const handleSuggestionSelect = (product) => {
+    fillQuickFromProduct(product);
+    setSuggestionsOpen(false);
   };
 
   const addQuick = async (e) => {
@@ -288,13 +440,15 @@ export default function Inventory() {
     const lossQuantity = Number(quick.loss_quantity);
     const shouldCreateLoss = Number.isFinite(lossQuantity) && lossQuantity > 0;
     const occurredAt = month ? `${month}-01T12:00:00Z` : undefined;
+    const targetMonth = editItem?.inventory_month || month;
+    const targetServiceId = editItem?.service || serviceId;
 
     const payload = {
       name: quick.name.trim(),
       category: quick.category || "",
       quantity: Number(quick.quantity),
-      inventory_month: month,
-      service: serviceId,
+      inventory_month: targetMonth,
+      service: targetServiceId,
       unit: quick.unit || "pcs",
       notes: quick.comment || "",
     };
@@ -333,9 +487,17 @@ export default function Inventory() {
       payload.remaining_fraction = null;
     }
 
+    if (purchaseEnabled) payload.purchase_price = quick.purchase_price || null;
+    if (sellingEnabled) payload.selling_price = quick.selling_price || null;
+    if (tvaEnabled && (purchaseEnabled || sellingEnabled)) {
+      payload.tva = quick.tva === "" ? null : Number(quick.tva);
+    }
+
     setLoading(true);
     try {
-      const res = await api.post("/api/products/", payload);
+      const res = editItem
+        ? await api.put(`/api/products/${editItem.id}/`, payload)
+        : await api.post("/api/products/", payload);
       const warnings = res?.data?.warnings || [];
       const filteredWarnings = warnings.filter(
         (warning) =>
@@ -343,10 +505,15 @@ export default function Inventory() {
           !String(warning).toLowerCase().includes("prix de vente")
       );
       const generatedSku =
-        skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
+        !editItem && skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
 
       if (filteredWarnings.length) pushToast?.({ message: filteredWarnings.join(" "), type: "warn" });
-      else pushToast?.({ message: "Comptage enregistré.", type: "success" });
+      else {
+        pushToast?.({
+          message: editItem ? "Comptage mis à jour." : "Comptage enregistré.",
+          type: "success",
+        });
+      }
       if (generatedSku) {
         pushToast?.({ message: `SKU généré : ${generatedSku} (modifiable).`, type: "info" });
       }
@@ -381,6 +548,67 @@ export default function Inventory() {
     }
   };
 
+  const buildPayloadFromItem = (item, overrides = {}) => {
+    return {
+      name: item?.name || "",
+      category: item?.category || "",
+      quantity: overrides.quantity ?? item?.quantity ?? 0,
+      inventory_month: item?.inventory_month || month,
+      service: item?.service || serviceId,
+      unit: overrides.unit ?? item?.unit ?? "pcs",
+      notes: overrides.notes ?? item?.notes ?? "",
+      barcode: barcodeEnabled ? item?.barcode || "" : "",
+      internal_sku: skuEnabled ? item?.internal_sku || "" : "",
+      variant_name: item?.variant_name || "",
+      variant_value: item?.variant_value || "",
+      min_qty: item?.min_qty ?? "",
+      conversion_unit: item?.conversion_unit || "",
+      conversion_factor: item?.conversion_factor ?? "",
+      product_role: item?.product_role || "",
+      dlc: item?.dlc || null,
+      lot_number: item?.lot_number || null,
+      container_status: item?.container_status || "SEALED",
+      pack_size: item?.pack_size ?? null,
+      pack_uom: item?.pack_uom ?? null,
+      remaining_qty: item?.remaining_qty ?? null,
+      remaining_fraction: item?.remaining_fraction ?? null,
+      purchase_price: item?.purchase_price ?? null,
+      selling_price: item?.selling_price ?? null,
+      tva: item?.tva ?? null,
+      brand: item?.brand ?? null,
+      supplier: item?.supplier ?? null,
+    };
+  };
+
+  const saveInlineQuantity = async (item, nextValue) => {
+    if (!item || isAllServices) return;
+    const parsed = Number(nextValue);
+    if (Number.isNaN(parsed)) {
+      pushToast?.({ message: "Quantité invalide.", type: "error" });
+      return;
+    }
+    try {
+      await api.put(`/api/products/${item.id}/`, buildPayloadFromItem(item, { quantity: parsed }));
+      setQtyEdits((prev) => {
+        const copy = { ...prev };
+        delete copy[item.id];
+        return copy;
+      });
+      pushToast?.({ message: "Quantité mise à jour.", type: "success" });
+      await load();
+    } catch (e) {
+      pushToast?.({
+        message:
+          e?.response?.data?.detail || e?.response?.data?.error || "Mise à jour impossible.",
+        type: "error",
+      });
+    }
+  };
+
+  const submitQuickFromDrawer = () => {
+    addQuick({ preventDefault: () => {} });
+  };
+
   const lookupBarcode = async (overrideBarcode) => {
     const code = String(overrideBarcode ?? quick.barcode ?? "").trim();
 
@@ -405,6 +633,9 @@ export default function Inventory() {
           conversion_unit: p.conversion_unit || prev.conversion_unit,
           conversion_factor: p.conversion_factor ?? prev.conversion_factor,
           product_role: p.product_role || prev.product_role,
+          purchase_price: p.purchase_price ?? prev.purchase_price,
+          selling_price: p.selling_price ?? prev.selling_price,
+          tva: p.tva === null || p.tva === undefined ? prev.tva : String(p.tva),
           dlc: p.dlc || prev.dlc,
           unit: p.unit || prev.unit,
           lotNumber: p.lot_number || prev.lotNumber,
@@ -558,21 +789,13 @@ export default function Inventory() {
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
             {services?.length > 0 && (
-              <label className="space-y-1.5 min-w-0">
-                <span className="text-sm font-medium text-[var(--text)]">Service</span>
-                <select
-                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
-                  value={serviceId || ""}
-                  onChange={(e) => selectService(e.target.value)}
-                >
-                  {services.length > 1 && <option value="all">Tous les services (lecture)</option>}
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                label="Service"
+                value={serviceId || ""}
+                onChange={(value) => selectService(value)}
+                options={serviceOptions}
+                ariaLabel="Sélectionner un service"
+              />
             )}
 
             <Input
@@ -587,342 +810,153 @@ export default function Inventory() {
           </div>
 
           <div className="rounded-2xl border border-[var(--border)] p-4 bg-[var(--surface)] shadow-soft min-w-0">
-            <div className="text-sm font-semibold text-[var(--text)] mb-2">{ux.quickAddTitle}</div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text)]">{ux.quickAddTitle}</div>
+                <div className="text-xs text-[var(--muted)]">
+                  Comptage rapide : ajoutez une ligne, les options avancées restent dans “Options”.
+                </div>
+              </div>
+              {isEditing && (
+                <span className="text-xs rounded-full border border-blue-200/60 dark:border-blue-400/30 bg-blue-50/70 dark:bg-blue-500/10 text-blue-700 dark:text-blue-200 px-3 py-1">
+                  Mode édition
+                </span>
+              )}
+            </div>
 
             {isAllServices ? (
-              <div className="text-sm text-[var(--muted)]">
+              <div className="mt-3 text-sm text-[var(--muted)]">
                 Sélectionnez un service pour ajouter. En mode “Tous les services”, l’ajout est désactivé.
               </div>
             ) : (
-              <form className="grid md:grid-cols-3 gap-3 items-end min-w-0" onSubmit={addQuick}>
-                <fieldset disabled={loading || authLoading} className="contents">
-                  <Input
-                    label={wording.itemLabel}
-                    placeholder={placeholders.name}
-                    value={quick.name}
-                    onChange={(e) => setQuick((p) => ({ ...p, name: e.target.value }))}
-                    required
-                    inputRef={nameInputRef}
-                  />
-
-                  {categories.length > 0 ? (
-                    <label className="space-y-1.5 min-w-0">
-                      <span className="text-sm font-medium text-[var(--text)]">{wording.categoryLabel}</span>
-                      <select
-                        value={quick.category}
-                        onChange={(e) => setQuick((p) => ({ ...p, category: e.target.value }))}
-                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                      >
-                        <option value="">Aucune</option>
-                        {categories.map((c) => (
-                          <option key={c.id || c.name} value={c.name}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-[var(--muted)]">Catégories du service sélectionné.</p>
-                    </label>
-                  ) : (
-                    <Input
-                      label={wording.categoryLabel}
-                      placeholder={categoryPlaceholder}
-                      value={quick.category}
-                      onChange={(e) => setQuick((p) => ({ ...p, category: e.target.value }))}
-                      helper={helpers.category}
-                    />
-                  )}
-
-                  {itemTypeEnabled && (
-                    <label className="space-y-1.5 min-w-0">
-                      <span className="text-sm font-medium text-[var(--text)]">Type d’article</span>
-                      <select
-                        value={quick.product_role}
-                        onChange={(e) => setQuick((p) => ({ ...p, product_role: e.target.value }))}
-                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                      >
-                        {productRoleOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-xs text-[var(--muted)]">
-                        {helpers.productRole || "Classez pour distinguer coûts matière et valeur de vente."}
-                      </p>
-                    </label>
-                  )}
-
-                  <Input
-                    label="Comptage (quantité)"
-                    type="number"
-                    min={0}
-                    required
-                    value={quick.quantity}
-                    onChange={(e) => setQuick((p) => ({ ...p, quantity: e.target.value }))}
-                    helper="Quantité comptée pour ce mois."
-                  />
-
-                  <Input
-                    label="Stock minimum (alerte)"
-                    type="number"
-                    min={0}
-                    value={quick.min_qty}
-                    onChange={(e) => setQuick((p) => ({ ...p, min_qty: e.target.value }))}
-                    helper="Optionnel : seuil pour alerte stock (plan Duo/Multi)."
-                  />
-
-                  {barcodeEnabled && (
-                    <Input
-                      label={wording.barcodeLabel}
-                      placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
-                      value={quick.barcode}
-                      onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
-                      helper={helpers.barcode}
-                    />
-                  )}
-
-                  {barcodeEnabled && (
-                    <div className="flex items-end gap-2 min-w-0">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => setScannerOpen(true)}
-                        className="w-full flex gap-2 justify-center"
-                      >
-                        <ScanLine className="w-4 h-4" />
-                        Scanner caméra
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => lookupBarcode()}
-                        className="w-full justify-center"
-                        disabled={!String(quick.barcode || "").trim()}
-                      >
-                        Chercher
-                      </Button>
-                    </div>
-                  )}
-
-                  {showOpenFields && (
-                    <label className="space-y-1.5 min-w-0">
-                      <span className="text-sm font-medium text-[var(--text)]">Statut</span>
-                      <select
-                        value={quick.container_status}
-                        onChange={(e) => setQuick((p) => ({ ...p, container_status: e.target.value }))}
-                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                      >
-                        <option value="SEALED">Non entamé</option>
-                        <option value="OPENED">Entamé</option>
-                      </select>
-                    </label>
-                  )}
-
-                  {skuEnabled && (
-                    <Input
-                      label={wording.skuLabel}
-                      placeholder={placeholders.sku}
-                      value={quick.internal_sku}
-                      onChange={(e) => setQuick((p) => ({ ...p, internal_sku: e.target.value }))}
-                      helper={showIdentifierWarning ? helpers.sku : "Optionnel"}
-                    />
-                  )}
-
-                  {variantsEnabled && (
-                    <>
+              <form className="mt-4 space-y-3" onSubmit={addQuick}>
+                <fieldset disabled={loading || authLoading} className="space-y-3">
+                  <div className="grid md:grid-cols-[1.1fr_1.4fr_0.8fr_auto] gap-3 items-end min-w-0">
+                    {barcodeEnabled && (
                       <Input
-                        label="Variante (libellé)"
-                        placeholder="Ex. Taille ou Couleur"
-                        value={quick.variant_name}
-                        onChange={(e) => setQuick((p) => ({ ...p, variant_name: e.target.value }))}
-                        helper="Optionnel : libellé de variante."
+                        label={wording.barcodeLabel}
+                        placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
+                        value={quick.barcode}
+                        onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
+                        helper={helpers.barcode}
+                        rightSlot={
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
+                              onClick={() => setScannerOpen(true)}
+                              title="Scanner"
+                            >
+                              <ScanLine className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10"
+                              onClick={() => lookupBarcode()}
+                              disabled={!String(quick.barcode || "").trim()}
+                            >
+                              Chercher
+                            </button>
+                          </div>
+                        }
                       />
-                      <Input
-                        label="Variante (valeur)"
-                        placeholder="Ex. M, Bleu, 75cl"
-                        value={quick.variant_value}
-                        onChange={(e) => setQuick((p) => ({ ...p, variant_value: e.target.value }))}
-                        helper="Optionnel : valeur de variante."
-                      />
-                    </>
-                  )}
-
-                  {multiUnitEnabled && (
-                    <>
-                      <Input
-                        label="Conversion (facteur)"
-                        type="number"
-                        min={0}
-                        step="0.0001"
-                        placeholder="Ex. 0.75"
-                        value={quick.conversion_factor}
-                        onChange={(e) => setQuick((p) => ({ ...p, conversion_factor: e.target.value }))}
-                        helper="Ex. 1 unité = 0.75 L (facteur)."
-                      />
-                      <label className="space-y-1.5 min-w-0">
-                        <span className="text-sm font-medium text-[var(--text)]">Unité convertie</span>
-                        <select
-                          value={quick.conversion_unit}
-                          onChange={(e) => setQuick((p) => ({ ...p, conversion_unit: e.target.value }))}
-                          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                        >
-                          <option value="">—</option>
-                          {conversionUnitOptions.map((u) => (
-                            <option key={u} value={u}>
-                              {u}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </>
-                  )}
-
-                  {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (
-                    <label className="space-y-1.5 min-w-0">
-                      <span className="text-sm font-medium text-[var(--text)]">{unitLabel}</span>
-                      <select
-                        value={quick.unit}
-                        onChange={(e) => setQuick((p) => ({ ...p, unit: e.target.value }))}
-                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                      >
-                        {unitOptions.map((u) => (
-                          <option key={u} value={u}>
-                            {u}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-
-                  {lotEnabled && (
-                    <Input
-                      label="Lot / Batch"
-                      placeholder="Ex. LOT-2025-12"
-                      value={quick.lotNumber}
-                      onChange={(e) => setQuick((p) => ({ ...p, lotNumber: e.target.value }))}
-                      helper="Optionnel : utile pour traçabilité et exports."
-                    />
-                  )}
-
-                  {dlcEnabled && (
-                    <Input
-                      label="DLC"
-                      type="date"
-                      value={quick.dlc}
-                      onChange={(e) => setQuick((p) => ({ ...p, dlc: e.target.value }))}
-                      helper={showDlcWarning ? "Recommandée pour limiter les pertes." : "Optionnel"}
-                    />
-                  )}
-
-                  {isOpened && (
-                    <>
-                      <Input
-                        label="Pack (taille)"
-                        type="number"
-                        step="0.01"
-                        placeholder="Ex. 0.75"
-                        value={quick.pack_size}
-                        onChange={(e) => setQuick((p) => ({ ...p, pack_size: e.target.value }))}
-                        helper="Optionnel (bouteilles/paquets)"
-                      />
-                      <label className="space-y-1.5 min-w-0">
-                        <span className="text-sm font-medium text-[var(--text)]">Unité pack</span>
-                        <select
-                          value={quick.pack_uom}
-                          onChange={(e) => setQuick((p) => ({ ...p, pack_uom: e.target.value }))}
-                          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                        >
-                          <option value="">—</option>
-                          <option value="l">l</option>
-                          <option value="ml">ml</option>
-                          <option value="kg">kg</option>
-                          <option value="g">g</option>
-                          <option value="pcs">pcs</option>
-                        </select>
-                      </label>
-                      <Input
-                        label="Reste (quantité)"
-                        type="number"
-                        step="0.01"
-                        placeholder="Ex. 0.25"
-                        value={quick.remaining_qty}
-                        onChange={(e) => setQuick((p) => ({ ...p, remaining_qty: e.target.value }))}
-                        helper="Optionnel si vous préférez la fraction."
-                      />
-                      <Input
-                        label="Reste (fraction 0-1)"
-                        type="number"
-                        step="0.1"
-                        min={0}
-                        max={1}
-                        placeholder="Ex. 0.5 = moitié"
-                        value={quick.remaining_fraction}
-                        onChange={(e) => setQuick((p) => ({ ...p, remaining_fraction: e.target.value }))}
-                        helper="Pratique : bouteille à moitié = 0.5"
-                      />
-                    </>
-                  )}
-
-                  <Input
-                    label="Commentaire (optionnel)"
-                    placeholder={placeholders.notes}
-                    value={quick.comment}
-                    onChange={(e) => setQuick((p) => ({ ...p, comment: e.target.value }))}
-                    helper="Note interne liée au comptage du mois."
-                  />
-
-                  <div className="md:col-span-3 grid md:grid-cols-3 gap-3 items-end min-w-0">
-                    <Input
-                      label="Pertes (quantité)"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={quick.loss_quantity}
-                      onChange={(e) => setQuick((p) => ({ ...p, loss_quantity: e.target.value }))}
-                      helper="Optionnel : pertes ou casse."
-                    />
-                    <label className="space-y-1.5 min-w-0">
-                      <span className="text-sm font-medium text-[var(--text)]">Raison</span>
-                      <select
-                        value={quick.loss_reason}
-                        onChange={(e) => setQuick((p) => ({ ...p, loss_reason: e.target.value }))}
-                        className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
-                      >
-                        {lossReasons.map((reason) => (
-                          <option key={reason.value} value={reason.value}>
-                            {reason.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <Input
-                      label="Note perte"
-                      placeholder="Ex. casse en livraison"
-                      value={quick.loss_note}
-                      onChange={(e) => setQuick((p) => ({ ...p, loss_note: e.target.value }))}
-                      helper="Optionnel : détail utile pour les exports."
-                    />
-                  </div>
-
-                  <div className="md:col-span-3 flex flex-wrap gap-3 items-center min-w-0">
-                    {showIdentifierWarning && (
-                      <div className="text-xs text-amber-700 dark:text-amber-200 bg-amber-50/70 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-400/25 rounded-full px-3 py-1">
-                        Conseil : ajoutez un identifiant ({wording.identifierLabel || "code-barres ou SKU"}) pour éviter les doublons.
-                      </div>
                     )}
-                    <Button type="submit" loading={loading}>
-                      Ajouter
-                    </Button>
-                    <Button variant="secondary" type="button" onClick={resetQuick} disabled={loading}>
-                      Réinitialiser
-                    </Button>
+
+                    <div className="relative min-w-0" ref={suggestionsRef}>
+                      <Input
+                        label={wording.itemLabel}
+                        placeholder={placeholders.name}
+                        value={quick.name}
+                        onChange={(e) => {
+                          setQuick((p) => ({ ...p, name: e.target.value }));
+                          if (!suggestionsOpen && suggestions.length) setSuggestionsOpen(true);
+                        }}
+                        onFocus={() => suggestions.length && setSuggestionsOpen(true)}
+                        required
+                        inputRef={nameInputRef}
+                      />
+                      {suggestionsOpen && suggestions.length > 0 && (
+                        <div className="absolute z-40 mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-soft">
+                          {suggestions.map((s) => (
+                            <button
+                              key={s.id}
+                              type="button"
+                              className="w-full text-left px-3 py-2 rounded-xl hover:bg-[var(--accent)]/15 transition"
+                              onClick={() => handleSuggestionSelect(s)}
+                            >
+                              <div className="text-sm font-semibold text-[var(--text)]">{s.name}</div>
+                              <div className="text-xs text-[var(--muted)]">
+                                {(s.category || "Sans catégorie") + " · " + (s.barcode || s.internal_sku || "—")}
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5 min-w-0">
+                      <span className="text-sm font-medium text-[var(--text)]">Quantité</span>
+                      <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 py-2.5">
+                        <button
+                          type="button"
+                          className="h-8 w-8 rounded-full border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--accent)]/15"
+                          onClick={() => bumpQuantity(-quantityStep)}
+                        >
+                          −
+                        </button>
+                        <input
+                          type="number"
+                          min={0}
+                          step={quantityStep}
+                          value={quick.quantity}
+                          onChange={(e) => setQuick((p) => ({ ...p, quantity: e.target.value }))}
+                          className="w-full bg-transparent text-sm text-[var(--text)] outline-none text-center"
+                          required
+                        />
+                        <button
+                          type="button"
+                          className="h-8 w-8 rounded-full border border-[var(--border)] text-[var(--muted)] hover:bg-[var(--accent)]/15"
+                          onClick={() => bumpQuantity(quantityStep)}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">Unité : {quick.unit || "pcs"}</div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 min-w-0">
+                      <Button type="submit" loading={loading}>
+                        {isEditing ? "Mettre à jour" : "Ajouter"}
+                      </Button>
+                      <Button variant="secondary" type="button" onClick={() => setDrawerOpen(true)}>
+                        Options
+                      </Button>
+                    </div>
                   </div>
 
-                  {barcodeEnabled && (
-                    <div className="md:col-span-3">
-                      <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>
-                    </div>
-                  )}
+                  <div className="flex flex-wrap gap-2 items-center text-xs text-[var(--muted)]">
+                    {showIdentifierWarning && (
+                      <span className="rounded-full border border-amber-200/70 dark:border-amber-400/25 bg-amber-50/70 dark:bg-amber-500/10 text-amber-700 dark:text-amber-200 px-3 py-1">
+                        Conseil : ajoutez un identifiant ({wording.identifierLabel || "code-barres ou SKU"}).
+                      </span>
+                    )}
+                    {showDlcWarning && (
+                      <span className="rounded-full border border-amber-200/70 dark:border-amber-400/25 bg-amber-50/70 dark:bg-amber-500/10 text-amber-700 dark:text-amber-200 px-3 py-1">
+                        DLC recommandée pour ce service.
+                      </span>
+                    )}
+                    {isEditing && (
+                      <button
+                        type="button"
+                        className="rounded-full border border-[var(--border)] px-3 py-1 hover:bg-[var(--accent)]/10"
+                        onClick={resetQuick}
+                      >
+                        Annuler l’édition
+                      </button>
+                    )}
+                  </div>
+
+                  {barcodeEnabled && <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>}
                 </fieldset>
               </form>
             )}
@@ -999,6 +1033,7 @@ export default function Inventory() {
                   paginatedInventory.map((p, idx) => {
                     const highlighted = isRowHighlighted(p);
                     const idValue = renderIdentifier(p);
+                    const qtyValue = qtyEdits[p.id] ?? String(p.quantity ?? "");
 
                     return (
                       <Card
@@ -1030,8 +1065,24 @@ export default function Inventory() {
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs min-w-0">
                           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
                             <div className="text-[var(--muted)]">Comptage</div>
-                            <div className="font-semibold text-[var(--text)]">
-                              {p.quantity} {p.unit || "pcs"}
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                step={quantityStep}
+                                value={qtyValue}
+                                onChange={(e) =>
+                                  setQtyEdits((prev) => ({ ...prev, [p.id]: e.target.value }))
+                                }
+                                onBlur={() => {
+                                  if (qtyValue !== String(p.quantity ?? "")) {
+                                    saveInlineQuantity(p, qtyValue);
+                                  }
+                                }}
+                                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)]"
+                                disabled={isAllServices}
+                              />
+                              <span className="text-[var(--muted)]">{p.unit || "pcs"}</span>
                             </div>
                           </div>
                           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 min-w-0">
@@ -1044,6 +1095,14 @@ export default function Inventory() {
                             </div>
                           </div>
                         </div>
+
+                        {!isAllServices && (
+                          <div className="mt-3 flex justify-end">
+                            <Button size="sm" variant="secondary" onClick={() => startEdit(p)}>
+                              Détails
+                            </Button>
+                          </div>
+                        )}
                       </Card>
                     );
                   })
@@ -1056,13 +1115,14 @@ export default function Inventory() {
                   <thead className="bg-[var(--surface)] sticky top-0">
                     <tr className="text-[var(--muted)]">
                       {isAllServices && <th className="text-left px-4 py-3 w-40">Service</th>}
-                      <th className="text-left px-4 py-3 w-[28%]">{wording.itemLabel}</th>
-                      <th className="text-left px-4 py-3 w-[20%]">{wording.categoryLabel}</th>
+                      <th className="text-left px-4 py-3 w-[26%]">{wording.itemLabel}</th>
+                      <th className="text-left px-4 py-3 w-[18%]">{wording.categoryLabel}</th>
                       <th className="text-left px-4 py-3 w-28">Mois</th>
-                      <th className="text-left px-4 py-3 w-32">Comptage</th>
-                      <th className="text-left px-4 py-3 w-[24%]">
+                      <th className="text-left px-4 py-3 w-40">Comptage</th>
+                      <th className="text-left px-4 py-3 w-[22%]">
                         {barcodeEnabled ? wording.barcodeLabel : "Identifiant"} {skuEnabled ? `/ ${wording.skuLabel}` : ""}
                       </th>
+                      {!isAllServices && <th className="text-left px-4 py-3 w-24">Actions</th>}
                     </tr>
                   </thead>
 
@@ -1085,6 +1145,7 @@ export default function Inventory() {
                       paginatedInventory.map((p, idx) => {
                         const highlighted = isRowHighlighted(p);
                         const rowKey = getRowKey(p);
+                        const qtyValue = qtyEdits[p.id] ?? String(p.quantity ?? "");
 
                         return (
                           <tr
@@ -1111,11 +1172,36 @@ export default function Inventory() {
                             </td>
                             <td className="px-4 py-3 text-[var(--muted)]">{p.inventory_month}</td>
                             <td className="px-4 py-3 text-[var(--muted)]">
-                              {p.quantity} {p.unit || "pcs"}
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={quantityStep}
+                                  value={qtyValue}
+                                  onChange={(e) =>
+                                    setQtyEdits((prev) => ({ ...prev, [p.id]: e.target.value }))
+                                  }
+                                  onBlur={() => {
+                                    if (qtyValue !== String(p.quantity ?? "")) {
+                                      saveInlineQuantity(p, qtyValue);
+                                    }
+                                  }}
+                                  className="w-24 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)]"
+                                  disabled={isAllServices}
+                                />
+                                <span>{p.unit || "pcs"}</span>
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-[var(--muted)] break-anywhere">
                               {renderIdentifier(p)}
                             </td>
+                            {!isAllServices && (
+                              <td className="px-4 py-3">
+                                <Button size="sm" variant="secondary" onClick={() => startEdit(p)}>
+                                  Détails
+                                </Button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })
@@ -1147,6 +1233,281 @@ export default function Inventory() {
           </div>
         </Card>
       </div>
+
+      <Drawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title={isEditing ? "Détails du comptage" : "Options avancées"}
+        footer={
+          <div className="flex flex-wrap gap-2 justify-end">
+            <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>
+              Fermer
+            </Button>
+            <Button type="button" onClick={submitQuickFromDrawer} loading={loading}>
+              {isEditing ? "Mettre à jour" : "Enregistrer"}
+            </Button>
+          </div>
+        }
+      >
+        <form className="space-y-5" onSubmit={addQuick}>
+          <div>
+            <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Essentiel</div>
+            <div className="mt-3 grid gap-3">
+              {categories.length > 0 ? (
+                <Select
+                  label={wording.categoryLabel}
+                  value={quick.category}
+                  onChange={(value) => setQuick((p) => ({ ...p, category: value }))}
+                  options={categoryOptions}
+                  helper="Catégories du service sélectionné."
+                />
+              ) : (
+                <Input
+                  label={wording.categoryLabel}
+                  placeholder={categoryPlaceholder}
+                  value={quick.category}
+                  onChange={(e) => setQuick((p) => ({ ...p, category: e.target.value }))}
+                  helper={helpers.category}
+                />
+              )}
+
+              {itemTypeEnabled && (
+                <Select
+                  label="Type d’article"
+                  value={quick.product_role}
+                  onChange={(value) => setQuick((p) => ({ ...p, product_role: value }))}
+                  options={productRoleSelectOptions}
+                  helper={helpers.productRole || "Classez pour distinguer coûts matière et valeur de vente."}
+                />
+              )}
+
+              {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (
+                <Select
+                  label={unitLabel}
+                  value={quick.unit}
+                  onChange={(value) => setQuick((p) => ({ ...p, unit: value }))}
+                  options={unitSelectOptions}
+                />
+              )}
+
+              {canStockAlerts && (
+                <Input
+                  label="Stock minimum (alerte)"
+                  type="number"
+                  min={0}
+                  value={quick.min_qty}
+                  onChange={(e) => setQuick((p) => ({ ...p, min_qty: e.target.value }))}
+                  helper="Optionnel : seuil pour alerte stock."
+                />
+              )}
+            </div>
+          </div>
+
+          {(barcodeEnabled || skuEnabled) && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Identifiants</div>
+              <div className="mt-3 grid gap-3">
+                {barcodeEnabled && (
+                  <Input
+                    label={wording.barcodeLabel}
+                    placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
+                    value={quick.barcode}
+                    onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
+                    helper={helpers.barcode}
+                  />
+                )}
+                {skuEnabled && (
+                  <Input
+                    label={wording.skuLabel}
+                    placeholder={placeholders.sku}
+                    value={quick.internal_sku}
+                    onChange={(e) => setQuick((p) => ({ ...p, internal_sku: e.target.value }))}
+                    helper={showIdentifierWarning ? helpers.sku : "Optionnel"}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          {(variantsEnabled || multiUnitEnabled || lotEnabled || dlcEnabled || showOpenFields) && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Options métier</div>
+              <div className="mt-3 grid gap-3">
+                {variantsEnabled && (
+                  <>
+                    <Input
+                      label="Variante (libellé)"
+                      placeholder="Ex. Taille ou Couleur"
+                      value={quick.variant_name}
+                      onChange={(e) => setQuick((p) => ({ ...p, variant_name: e.target.value }))}
+                    />
+                    <Input
+                      label="Variante (valeur)"
+                      placeholder="Ex. M, Bleu, 75cl"
+                      value={quick.variant_value}
+                      onChange={(e) => setQuick((p) => ({ ...p, variant_value: e.target.value }))}
+                    />
+                  </>
+                )}
+
+                {multiUnitEnabled && (
+                  <>
+                    <Input
+                      label="Conversion (facteur)"
+                      type="number"
+                      min={0}
+                      step="0.0001"
+                      placeholder="Ex. 0.75"
+                      value={quick.conversion_factor}
+                      onChange={(e) => setQuick((p) => ({ ...p, conversion_factor: e.target.value }))}
+                    />
+                    <Select
+                      label="Unité convertie"
+                      value={quick.conversion_unit}
+                      onChange={(value) => setQuick((p) => ({ ...p, conversion_unit: value }))}
+                      options={conversionSelectOptions}
+                    />
+                  </>
+                )}
+
+                {lotEnabled && (
+                  <Input
+                    label="Lot / Batch"
+                    placeholder="Ex. LOT-2025-12"
+                    value={quick.lotNumber}
+                    onChange={(e) => setQuick((p) => ({ ...p, lotNumber: e.target.value }))}
+                  />
+                )}
+
+                {dlcEnabled && (
+                  <Input
+                    label="DLC"
+                    type="date"
+                    value={quick.dlc}
+                    onChange={(e) => setQuick((p) => ({ ...p, dlc: e.target.value }))}
+                    helper={showDlcWarning ? "Recommandée pour limiter les pertes." : "Optionnel"}
+                  />
+                )}
+
+                {showOpenFields && (
+                  <>
+                    <Select
+                      label="Statut"
+                      value={quick.container_status}
+                      onChange={(value) => setQuick((p) => ({ ...p, container_status: value }))}
+                      options={containerStatusOptions}
+                    />
+                    {quick.container_status === "OPENED" && (
+                      <>
+                        <Input
+                          label="Pack (taille)"
+                          type="number"
+                          step="0.01"
+                          placeholder="Ex. 0.75"
+                          value={quick.pack_size}
+                          onChange={(e) => setQuick((p) => ({ ...p, pack_size: e.target.value }))}
+                        />
+                        <Input
+                          label="Unité pack"
+                          placeholder="Ex. l, kg"
+                          value={quick.pack_uom}
+                          onChange={(e) => setQuick((p) => ({ ...p, pack_uom: e.target.value }))}
+                        />
+                        <Input
+                          label="Reste (quantité)"
+                          type="number"
+                          step="0.01"
+                          placeholder="Ex. 0.25"
+                          value={quick.remaining_qty}
+                          onChange={(e) => setQuick((p) => ({ ...p, remaining_qty: e.target.value }))}
+                        />
+                        <Input
+                          label="Reste (fraction 0-1)"
+                          type="number"
+                          step="0.1"
+                          min={0}
+                          max={1}
+                          placeholder="Ex. 0.5"
+                          value={quick.remaining_fraction}
+                          onChange={(e) => setQuick((p) => ({ ...p, remaining_fraction: e.target.value }))}
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(purchaseEnabled || sellingEnabled) && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Prix & TVA</div>
+              <div className="mt-3 grid gap-3">
+                {purchaseEnabled && (
+                  <Input
+                    label="Prix d’achat HT (€)"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={quick.purchase_price}
+                    onChange={(e) => setQuick((p) => ({ ...p, purchase_price: e.target.value }))}
+                  />
+                )}
+                {sellingEnabled && (
+                  <Input
+                    label="Prix de vente HT (€)"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={quick.selling_price}
+                    onChange={(e) => setQuick((p) => ({ ...p, selling_price: e.target.value }))}
+                  />
+                )}
+                {tvaEnabled && (purchaseEnabled || sellingEnabled) && (
+                  <Select
+                    label="TVA"
+                    value={quick.tva}
+                    onChange={(value) => setQuick((p) => ({ ...p, tva: value }))}
+                    options={tvaOptions}
+                  />
+                )}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Pertes & notes</div>
+            <div className="mt-3 grid gap-3">
+              <Input
+                label="Pertes (quantité)"
+                type="number"
+                min={0}
+                step="0.01"
+                value={quick.loss_quantity}
+                onChange={(e) => setQuick((p) => ({ ...p, loss_quantity: e.target.value }))}
+              />
+              <Select
+                label="Raison"
+                value={quick.loss_reason}
+                onChange={(value) => setQuick((p) => ({ ...p, loss_reason: value }))}
+                options={lossReasonOptions}
+              />
+              <Input
+                label="Note perte"
+                placeholder="Ex. casse en livraison"
+                value={quick.loss_note}
+                onChange={(e) => setQuick((p) => ({ ...p, loss_note: e.target.value }))}
+              />
+              <Input
+                label="Commentaire (optionnel)"
+                placeholder={placeholders.notes}
+                value={quick.comment}
+                onChange={(e) => setQuick((p) => ({ ...p, comment: e.target.value }))}
+              />
+            </div>
+          </div>
+        </form>
+      </Drawer>
     </PageTransition>
   );
 }

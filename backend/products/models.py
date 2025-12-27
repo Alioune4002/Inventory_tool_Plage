@@ -204,3 +204,24 @@ class ExportEvent(models.Model):
 
     def __str__(self):
         return f"{self.tenant_id} export {self.format} ({self.created_at.date()})"
+
+
+class CatalogPdfEvent(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="catalog_pdf_events")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="catalog_pdf_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    params = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["tenant", "created_at"], name="catpdf_tenant_created_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id} catalog_pdf ({self.created_at.date()})"

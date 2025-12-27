@@ -16,6 +16,9 @@ import json
 from django.db.models import Q, F
 from django.core.cache import cache
 from django.utils import timezone
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
 
 from accounts.mixins import TenantQuerySetMixin
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
@@ -33,7 +36,7 @@ from utils.sendgrid_email import send_email_with_sendgrid
 from utils.renderers import XLSXRenderer, CSVRenderer
 from inventory.metrics import track_export_event, track_off_lookup_failure
 
-from .models import Product, Category, LossEvent, ExportEvent
+from .models import Product, Category, LossEvent, ExportEvent, CatalogPdfEvent
 from .serializers import ProductSerializer, CategorySerializer, LossEventSerializer
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,38 @@ EXPORT_HEADER_FONT = Font(bold=True, color="FFFFFF")
 OFF_TIMEOUT_SECONDS = 3
 OFF_LOG_CODE = "OFF_LOOKUP_FAILED"
 OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
+CATALOG_PDF_MAX_PRODUCTS = 500
+CATALOG_ALLOWED_FIELDS = {
+    "barcode",
+    "sku",
+    "unit",
+    "purchase_price",
+    "selling_price",
+    "tva",
+    "variants",
+    "dlc",
+    "lot",
+    "min_qty",
+    "supplier",
+    "notes",
+    "brand",
+}
+CATALOG_DEFAULT_FIELDS = ["barcode", "sku", "unit"]
+CATALOG_FIELD_LABELS = {
+    "barcode": "EAN",
+    "sku": "SKU",
+    "unit": "Unité",
+    "purchase_price": "Prix achat",
+    "selling_price": "Prix vente",
+    "tva": "TVA",
+    "variants": "Variante",
+    "dlc": "DLC",
+    "lot": "Lot",
+    "min_qty": "Stock min",
+    "supplier": "Fournisseur",
+    "notes": "Notes",
+    "brand": "Marque",
+}
 
 
 def _is_numeric(value):
@@ -136,6 +171,175 @@ def _log_export_event(tenant, user, export_format, emailed=False, params=None):
         track_export_event(export_format, emailed)
     except Exception:
         logger.exception("ExportEvent metric failed")
+
+
+def _pdf_catalog_limit(tenant):
+    limits = get_limits(tenant)
+    return limits.get("pdf_catalog_monthly_limit")
+
+
+def _enforce_pdf_catalog_quota(tenant):
+    limit = _pdf_catalog_limit(tenant)
+    if limit is None:
+        return
+    start = _month_start(timezone.now())
+    used = CatalogPdfEvent.objects.filter(tenant=tenant, created_at__gte=start).count()
+    if used >= int(limit):
+        raise LimitExceeded(code="LIMIT_PDF_CATALOG_MONTH", detail="Limite mensuelle du catalogue PDF atteinte.")
+
+
+def _log_catalog_pdf_event(tenant, user, params=None):
+    try:
+        CatalogPdfEvent.objects.create(
+            tenant=tenant,
+            user=user if user and getattr(user, "is_authenticated", False) else None,
+            params=params or {},
+        )
+    except Exception:
+        logger.exception("CatalogPdfEvent log failed")
+
+
+def _parse_pdf_fields(raw_fields):
+    if not raw_fields:
+        return list(CATALOG_DEFAULT_FIELDS)
+    fields = [f.strip().lower() for f in str(raw_fields).split(",") if f.strip()]
+    filtered = [f for f in fields if f in CATALOG_ALLOWED_FIELDS]
+    return filtered if filtered else list(CATALOG_DEFAULT_FIELDS)
+
+
+def _format_catalog_field(label, value):
+    if value is None or value == "":
+        return None
+    return f"{label}: {value}"
+
+
+def _format_catalog_line(product, fields, include_service=False):
+    values = []
+    if include_service and getattr(product, "service", None):
+        values.append(_format_catalog_field("Service", product.service.name))
+
+    if "barcode" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["barcode"], product.barcode))
+    if "sku" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["sku"], product.internal_sku))
+    if "unit" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["unit"], product.unit))
+    if "variants" in fields:
+        variant = _format_variant(product)
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["variants"], variant))
+    if "purchase_price" in fields:
+        val = f"{product.purchase_price} €" if product.purchase_price is not None else None
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["purchase_price"], val))
+    if "selling_price" in fields:
+        val = f"{product.selling_price} €" if product.selling_price is not None else None
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["selling_price"], val))
+    if "tva" in fields:
+        val = f"{product.tva}%" if product.tva is not None else None
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["tva"], val))
+    if "dlc" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["dlc"], product.dlc))
+    if "lot" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["lot"], product.lot_number))
+    if "min_qty" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["min_qty"], product.min_qty))
+    if "supplier" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["supplier"], product.supplier))
+    if "brand" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["brand"], product.brand))
+    if "notes" in fields:
+        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["notes"], product.notes))
+
+    return " · ".join([v for v in values if v])
+
+
+class NumberedCanvas(canvas.Canvas):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        num_pages = len(self._saved_page_states)
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self._draw_page_number(num_pages)
+            canvas.Canvas.showPage(self)
+        canvas.Canvas.save(self)
+
+    def _draw_page_number(self, page_count):
+        self.setFont("Helvetica", 9)
+        self.setFillColorRGB(0.45, 0.45, 0.45)
+        self.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"Page {self._pageNumber} / {page_count}")
+
+
+def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, company_address, fields, products, truncated, include_service):
+    buffer = io.BytesIO()
+    c = NumberedCanvas(buffer, pagesize=A4)
+    width, height = A4
+
+    def draw_cover():
+        c.setFont("Helvetica-Bold", 20)
+        c.setFillColorRGB(0.1, 0.1, 0.1)
+        c.drawString(2 * cm, height - 3 * cm, company_name or tenant.name or "StockScan")
+        c.setFont("Helvetica", 12)
+        c.drawString(2 * cm, height - 3.8 * cm, "Catalogue produits")
+        c.setFont("Helvetica", 10)
+        c.setFillColorRGB(0.4, 0.4, 0.4)
+        c.drawString(2 * cm, height - 4.6 * cm, timezone.now().strftime("%d/%m/%Y"))
+
+        info_lines = [company_email, company_phone, company_address]
+        y = height - 6 * cm
+        c.setFont("Helvetica", 10)
+        c.setFillColorRGB(0.25, 0.25, 0.25)
+        for line in info_lines:
+            if line:
+                c.drawString(2 * cm, y, str(line))
+                y -= 0.6 * cm
+
+        if truncated:
+            c.setFillColorRGB(0.55, 0.2, 0.2)
+            c.drawString(2 * cm, y - 0.6 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
+
+    draw_cover()
+    c.showPage()
+
+    y = height - 2.5 * cm
+    c.setFont("Helvetica", 11)
+    c.setFillColorRGB(0.1, 0.1, 0.1)
+
+    grouped = {}
+    for p in products:
+        key = (p.category or "Sans catégorie").strip() or "Sans catégorie"
+        grouped.setdefault(key, []).append(p)
+
+    for category, items in grouped.items():
+        if y < 3 * cm:
+            c.showPage()
+            y = height - 2.5 * cm
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(2 * cm, y, category)
+        y -= 0.6 * cm
+
+        c.setFont("Helvetica", 10)
+        for p in items:
+            if y < 2.5 * cm:
+                c.showPage()
+                y = height - 2.5 * cm
+            line = _format_catalog_line(p, fields, include_service=include_service)
+            c.setFillColorRGB(0.1, 0.1, 0.1)
+            c.drawString(2 * cm, y, f"• {p.name}")
+            y -= 0.45 * cm
+            if line:
+                c.setFillColorRGB(0.4, 0.4, 0.4)
+                c.drawString(2.6 * cm, y, line[:160])
+                y -= 0.45 * cm
+        y -= 0.4 * cm
+
+    c.save()
+    return buffer.getvalue()
 
 
 def _converted_quantity(product):
@@ -1106,6 +1310,77 @@ def export_advanced(request):
             "email": email_to,
         },
     )
+    return resp
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def catalog_pdf(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "pdf_catalog")
+    _enforce_pdf_catalog_quota(tenant)
+
+    service_param = request.query_params.get("service")
+    include_service = service_param == "all"
+
+    qs = Product.objects.filter(tenant=tenant)
+    qs = _apply_retention(qs, tenant)
+    if service_param and service_param != "all":
+        try:
+            qs = qs.filter(service_id=int(service_param))
+        except (ValueError, TypeError):
+            pass
+
+    query = request.query_params.get("q")
+    if query:
+        qs = qs.filter(
+            Q(name__icontains=query)
+            | Q(barcode__icontains=query)
+            | Q(internal_sku__icontains=query)
+            | Q(brand__icontains=query)
+            | Q(supplier__icontains=query)
+        )
+
+    category = request.query_params.get("category")
+    if category:
+        qs = qs.filter(category__iexact=category)
+
+    qs = qs.select_related("service").order_by("category", "name")
+    raw_products = list(qs[: CATALOG_PDF_MAX_PRODUCTS + 1])
+    truncated = len(raw_products) > CATALOG_PDF_MAX_PRODUCTS
+    products = raw_products[:CATALOG_PDF_MAX_PRODUCTS]
+
+    fields = _parse_pdf_fields(request.query_params.get("fields"))
+    company_name = (request.query_params.get("company_name") or "").strip() or tenant.name
+    company_email = (request.query_params.get("company_email") or "").strip()
+    company_phone = (request.query_params.get("company_phone") or "").strip()
+    company_address = (request.query_params.get("company_address") or "").strip()
+
+    pdf_bytes = _build_catalog_pdf(
+        tenant=tenant,
+        company_name=company_name,
+        company_email=company_email,
+        company_phone=company_phone,
+        company_address=company_address,
+        fields=fields,
+        products=products,
+        truncated=truncated,
+        include_service=include_service,
+    )
+
+    _log_catalog_pdf_event(
+        tenant=tenant,
+        user=request.user,
+        params={
+            "service": service_param,
+            "fields": fields,
+            "q": query,
+            "category": category,
+        },
+    )
+
+    resp = Response(pdf_bytes, content_type="application/pdf")
+    resp["Content-Disposition"] = 'attachment; filename="stockscan_catalogue.pdf"'
     return resp
 
 

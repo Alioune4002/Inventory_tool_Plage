@@ -14,6 +14,7 @@ from products.views import (
     export_excel,
     export_advanced,
     export_generic,
+    catalog_pdf,
     home,
     alerts,
     search_products,
@@ -53,6 +54,7 @@ urlpatterns = [
     path("api/products/export/excel/", export_excel), 
     path("api/export-advanced/", export_advanced),
     path("api/exports/", export_generic),
+    path("api/catalog/pdf/", catalog_pdf),
     path("api/alerts/", alerts),
 
     path("api/products/lookup/", lookup_product),

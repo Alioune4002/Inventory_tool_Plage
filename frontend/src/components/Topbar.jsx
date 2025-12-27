@@ -4,6 +4,7 @@ import { LogOut, Moon, Sun, Menu } from "lucide-react";
 import { useAuth } from "../app/AuthProvider";
 import Button from "../ui/Button";
 import Badge from "../ui/Badge";
+import Select from "../ui/Select";
 
 function useIsLightTheme() {
   return useMemo(() => {
@@ -18,6 +19,7 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
 
   const isGeneral = tenant?.domain === "general";
   const showServiceSelect = !isGeneral && services?.length > 1;
+  const serviceOptions = (services || []).map((s) => ({ value: s.id, label: s.name }));
 
   return (
     <header className="sticky top-0 z-20 backdrop-blur bg-[var(--surface)]/90 border-b border-[var(--border)]">
@@ -33,22 +35,15 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
           </div>
 
           {showServiceSelect && (
-            <div className="flex items-center gap-2 rounded-2xl bg-[var(--surface)] border border-[var(--border)] px-3 py-2 shadow-soft min-w-0 max-w-[72vw]">
-              <div className="text-xs text-[var(--muted)] shrink-0">Service</div>
-
-              <select
+            <div className="min-w-0 max-w-[72vw]">
+              <Select
+                label="Service"
                 value={serviceId || ""}
-                onChange={(e) => selectService(e.target.value)}
-                className="text-sm font-semibold text-[var(--text)] bg-transparent outline-none min-w-0 truncate max-w-[55vw]"
-                aria-label="Sélectionner un service"
-              >
-                {services.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-                <option value="all">Tous les services</option>
-              </select>
+                onChange={(value) => selectService(value)}
+                options={[...serviceOptions, { value: "all", label: "Tous les services" }]}
+                ariaLabel="Sélectionner un service"
+                buttonClassName="shadow-soft"
+              />
             </div>
           )}
         </div>

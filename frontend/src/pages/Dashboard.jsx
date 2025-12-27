@@ -7,6 +7,7 @@ import Card from "../ui/Card";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
+import Select from "../ui/Select";
 import Skeleton from "../ui/Skeleton";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
@@ -416,22 +417,16 @@ export default function Dashboard() {
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
             {showServiceSelect && (
-              <label className="space-y-1.5 min-w-0">
-                <span className="text-sm font-medium text-[var(--text)]">Service</span>
-                <select
-                  className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
-                  value={isAllServices ? "all" : serviceId || ""}
-                  onChange={(e) => selectService(e.target.value)}
-                  aria-label="Sélection du service"
-                >
-                  {(services || []).length > 1 && <option value="all">Tous les services</option>}
-                  {(services || []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                label="Service"
+                value={isAllServices ? "all" : serviceId || ""}
+                onChange={(value) => selectService(value)}
+                ariaLabel="Sélection du service"
+                options={[
+                  ...(services || []).map((s) => ({ value: s.id, label: s.name })),
+                  ...(services || []).length > 1 ? [{ value: "all", label: "Tous les services" }] : [],
+                ]}
+              />
             )}
 
             <div className="flex gap-2 min-w-0">
