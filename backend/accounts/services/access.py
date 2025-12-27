@@ -104,7 +104,9 @@ def get_effective_plan(tenant: Tenant) -> Tuple[str, Dict[str, Any]]:
     """
     Plan effectif:
     - lifetime => tenant.plan.code (ou fallback)
-    - license_expires_at future => tenant.plan.code (ou fallback)
+    - license_expires_at future (trial/grace) => tenant.plan.code (ou fallback)
+    - subscription active/past_due => tenant.plan.code (ou fallback)
+    - manual override => tenant.plan.code (ou fallback)
     - sinon => ESSENTIEL
     """
     plan_code = DEFAULT_PLAN_CODE
@@ -116,6 +118,14 @@ def get_effective_plan(tenant: Tenant) -> Tuple[str, Dict[str, Any]]:
         return plan_code, cfg
 
     if tenant.license_expires_at and tenant.license_expires_at > _now():
+        cfg = PLAN_REGISTRY.get(plan_code, PLAN_REGISTRY[DEFAULT_PLAN_CODE])
+        return plan_code, cfg
+
+    if getattr(tenant, "subscription_status", None) in ("ACTIVE", "PAST_DUE"):
+        cfg = PLAN_REGISTRY.get(plan_code, PLAN_REGISTRY[DEFAULT_PLAN_CODE])
+        return plan_code, cfg
+
+    if getattr(tenant, "plan_source", None) in ("MANUAL", "LIFETIME"):
         cfg = PLAN_REGISTRY.get(plan_code, PLAN_REGISTRY[DEFAULT_PLAN_CODE])
         return plan_code, cfg
 

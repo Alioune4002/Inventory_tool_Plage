@@ -787,16 +787,6 @@ class EmailChangeConfirmView(APIView):
         return Response({"detail": "Email mis à jour.", "redirect": f"{settings.FRONTEND_URL}/login"})
 
 
-# --------------------------------
-# Entitlements (compatibles front)
-# --------------------------------
-
-def _tenant_plan_code(tenant: Tenant) -> str:
-    if tenant.plan_id and getattr(tenant.plan, "code", None):
-        return str(tenant.plan.code).upper()
-    return "ESSENTIEL"
-
-
 class EntitlementsView(APIView):
     """
     GET /api/auth/me/org/entitlements
@@ -818,30 +808,31 @@ class EntitlementsView(APIView):
             "users_count": users_count,
         }
 
-    def _resolve_plan_cfg(self, plan_code: str):
-        try:
-            from accounts.services.access import PLAN_REGISTRY
-            return PLAN_REGISTRY.get(plan_code, PLAN_REGISTRY.get("ESSENTIEL", {}))
-        except Exception:
-            return {}
-
     def get(self, request):
         tenant = get_tenant_for_request(request)
         usage = self.get_usage(tenant)
-        now = timezone.now()
+        from accounts.services.access import get_effective_plan, get_entitlements, get_limits
 
-        plan_code = _tenant_plan_code(tenant)
-        if tenant.is_lifetime:
-            plan_effective = plan_code
-        elif tenant.license_expires_at and tenant.license_expires_at > now:
-            plan_effective = plan_code
-        else:
-            plan_effective = "ESSENTIEL"
+        plan_effective, _ = get_effective_plan(tenant)
+        plan_declared = "ESSENTIEL"
+        if tenant.plan_id and getattr(tenant.plan, "code", None):
+            plan_declared = str(tenant.plan.code).upper()
 
-        plan_cfg = self._resolve_plan_cfg(plan_effective)
-
-        limits = plan_cfg.get("limits") or {"max_products": 100, "max_services": 1, "max_users": 1}
-        ent_list = plan_cfg.get("entitlements") or [
+        if (
+            plan_effective != plan_declared
+            and getattr(tenant, "subscription_status", None) in ("ACTIVE", "PAST_DUE")
+        ):
+            LOGGER.warning(
+                "Entitlements mismatch for tenant=%s plan=%s source=%s status=%s expires=%s effective=%s",
+                tenant.id,
+                plan_declared,
+                getattr(tenant, "plan_source", None),
+                getattr(tenant, "subscription_status", None),
+                getattr(tenant, "license_expires_at", None),
+                plan_effective,
+            )
+        limits = get_limits(tenant) or {"max_products": 100, "max_services": 1, "max_users": 1}
+        ent_list = get_entitlements(tenant) or [
             "inventory_basic",
             "stock_movements_basic",
             "reports_basic",
