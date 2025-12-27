@@ -7,7 +7,7 @@ export default function Badge({ children, variant = "neutral", className = "" })
     default: "bg-[var(--accent)]/20 text-[var(--text)] border border-[var(--border)]",
     info: "bg-blue-500/15 text-blue-700 border border-blue-500/25",
     success: "bg-emerald-500/15 text-emerald-700 border border-emerald-500/25",
-    warn: "bg-amber-500/15 text-amber-700 border border-amber-500/25",
+    warn: "bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]",
     danger: "bg-rose-500/15 text-rose-700 border border-rose-500/25",
   };
 

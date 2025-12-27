@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from rest_framework import status, viewsets, permissions, exceptions
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
@@ -11,16 +13,27 @@ import logging
 import csv
 import io
 import json
-from django.db.models import Q
+from django.db.models import Q, F
+from django.core.cache import cache
+from django.utils import timezone
 
 from accounts.mixins import TenantQuerySetMixin
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
 from accounts.permissions import ProductPermission, ManagerPermission
-from accounts.services.access import check_entitlement, check_limit, get_usage
+from accounts.services.access import (
+    check_entitlement,
+    check_limit,
+    get_usage,
+    get_retention_days,
+    get_limits,
+    get_entitlements,
+    LimitExceeded,
+)
 from utils.sendgrid_email import send_email_with_sendgrid
 from utils.renderers import XLSXRenderer, CSVRenderer
+from inventory.metrics import track_export_event, track_off_lookup_failure
 
-from .models import Product, Category, LossEvent
+from .models import Product, Category, LossEvent, ExportEvent
 from .serializers import ProductSerializer, CategorySerializer, LossEventSerializer
 
 logger = logging.getLogger(__name__)
@@ -34,10 +47,129 @@ EXPORT_BORDER = Border(
     bottom=Side(style="thin"),
 )
 EXPORT_HEADER_FONT = Font(bold=True, color="FFFFFF")
+OFF_TIMEOUT_SECONDS = 3
+OFF_LOG_CODE = "OFF_LOOKUP_FAILED"
+OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 
 
 def _is_numeric(value):
     return isinstance(value, numbers.Number) and not isinstance(value, bool)
+
+
+def _parse_positive_int(value, default, max_value=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    if max_value is not None:
+        return min(parsed, max_value)
+    return parsed
+
+
+def _retention_start(tenant):
+    days = get_retention_days(tenant)
+    if not days:
+        return None
+    return timezone.now() - timedelta(days=days)
+
+
+def _apply_retention(qs, tenant):
+    start = _retention_start(tenant)
+    if not start:
+        return qs
+    return qs.filter(created_at__gte=start)
+
+
+def _track_off_failure(reason):
+    try:
+        day = timezone.now().strftime("%Y-%m-%d")
+        key = f"off_lookup_errors:{day}"
+        count = int(cache.get(key) or 0) + 1
+        cache.set(key, count, OFF_CACHE_TTL_SECONDS)
+        track_off_lookup_failure(reason)
+        return count
+    except Exception:
+        logger.warning("OFF_LOOKUP_METRIC_FAILED code=OFF_LOOKUP_METRIC_FAILED reason=%s", reason)
+        return None
+
+
+def _month_start(dt):
+    return dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def _export_limit_for_format(tenant, export_format):
+    limits = get_limits(tenant)
+    if export_format == "csv":
+        return limits.get("csv_monthly_limit")
+    return limits.get("xlsx_monthly_limit")
+
+
+def _enforce_export_quota(tenant, export_format):
+    limit = _export_limit_for_format(tenant, export_format)
+    if limit is None:
+        return
+    start = _month_start(timezone.now())
+    used = ExportEvent.objects.filter(
+        tenant=tenant,
+        format=export_format,
+        created_at__gte=start,
+    ).count()
+    if used >= int(limit):
+        code = "LIMIT_EXPORT_CSV_MONTH" if export_format == "csv" else "LIMIT_EXPORT_XLSX_MONTH"
+        raise LimitExceeded(code=code, detail="Limite d’export mensuelle atteinte pour votre plan.")
+
+
+def _log_export_event(tenant, user, export_format, emailed=False, params=None):
+    try:
+        ExportEvent.objects.create(
+            tenant=tenant,
+            user=user if user and getattr(user, "is_authenticated", False) else None,
+            format=export_format,
+            emailed=bool(emailed),
+            params=params or {},
+        )
+    except Exception:
+        logger.exception("ExportEvent log failed")
+    try:
+        track_export_event(export_format, emailed)
+    except Exception:
+        logger.exception("ExportEvent metric failed")
+
+
+def _converted_quantity(product):
+    factor = getattr(product, "conversion_factor", None)
+    unit = getattr(product, "conversion_unit", None)
+    if factor is None or not unit:
+        return None, None
+    try:
+        return float(product.quantity or 0) * float(factor), unit
+    except (TypeError, ValueError):
+        return None, unit
+
+
+def _format_variant(product):
+    name = (getattr(product, "variant_name", None) or "").strip()
+    value = (getattr(product, "variant_value", None) or "").strip()
+    if name and value:
+        return f"{name}: {value}"
+    return value or name or ""
+
+
+def _history_month_cutoff(months):
+    if months is None:
+        return None
+    total = _parse_positive_int(months, None)
+    if not total:
+        return None
+    today = timezone.now().date().replace(day=1)
+    year = today.year
+    month = today.month - (total - 1)
+    while month <= 0:
+        month += 12
+        year -= 1
+    return f"{year:04d}-{month:02d}"
 
 
 def _build_csv_bytes(headers, rows, delimiter=";"):
@@ -110,6 +242,7 @@ class ProductViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        tenant = get_tenant_for_request(self.request)
         service = get_service_from_request(self.request)
         qs = qs.filter(service=service)
 
@@ -117,6 +250,7 @@ class ProductViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         if month:
             qs = qs.filter(inventory_month=month)
 
+        qs = _apply_retention(qs, tenant)
         return qs
 
     def perform_create(self, serializer):
@@ -154,20 +288,27 @@ def lookup_product(request):
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
 
-    product = (
-        Product.objects.filter(tenant=tenant, service=service, barcode=barcode)
-        .order_by("-inventory_month", "-created_at")
-        .first()
-    )
+    product_qs = Product.objects.filter(tenant=tenant, service=service, barcode=barcode)
+    product_qs = _apply_retention(product_qs, tenant)
+    product = product_qs.order_by("-inventory_month", "-created_at").first()
 
     if product:
         serializer = ProductSerializer(product)
 
-        recent = Product.objects.filter(tenant=tenant, service=service).order_by("-created_at")[:5]
-        history = (
-            Product.objects.filter(tenant=tenant, service=service, barcode=barcode)
-            .order_by("-inventory_month", "-created_at")
+        recent = Product.objects.filter(tenant=tenant, service=service).order_by("-created_at")
+        recent = _apply_retention(recent, tenant)[:5]
+        history = Product.objects.filter(tenant=tenant, service=service, barcode=barcode).order_by(
+            "-inventory_month", "-created_at"
         )
+        history = _apply_retention(history, tenant)
+        history_limit = _parse_positive_int(request.query_params.get("history_limit"), 200, 500)
+        history_months = request.query_params.get("history_months")
+        if history_months in (None, ""):
+            history_months = 12
+        history_cutoff = _history_month_cutoff(history_months)
+        if history_cutoff:
+            history = history.filter(inventory_month__gte=history_cutoff)
+        history = history[:history_limit]
 
         return Response(
             {
@@ -180,10 +321,12 @@ def lookup_product(request):
 
     if tenant.domain == "food":
         try:
+            import socket
+            import urllib.error
             import urllib.request
 
             url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
-            with urllib.request.urlopen(url, timeout=3) as resp:
+            with urllib.request.urlopen(url, timeout=OFF_TIMEOUT_SECONDS) as resp:
                 data = json.loads(resp.read().decode())
                 if data.get("status") == 1:
                     p = data.get("product", {}) or {}
@@ -194,10 +337,40 @@ def lookup_product(request):
                         "quantity": p.get("quantity"),
                     }
                     return Response({"found": False, "suggestion": suggestion})
+        except (urllib.error.URLError, urllib.error.HTTPError, socket.timeout) as exc:
+            count = _track_off_failure("url_error")
+            logger.warning(
+                "OFF_LOOKUP_FAILED code=%s reason=url_error count=%s barcode=%s",
+                OFF_LOG_CODE,
+                count,
+                barcode,
+                exc_info=exc,
+            )
+            return Response(
+                {
+                    "found": False,
+                    "off_error": "Préremplissage indisponible (OpenFoodFacts). Réessayez plus tard.",
+                },
+                status=200,
+            )
         except Exception:
-            pass
+            count = _track_off_failure("exception")
+            logger.warning(
+                "OFF_LOOKUP_FAILED code=%s reason=exception count=%s barcode=%s",
+                OFF_LOG_CODE,
+                count,
+                barcode,
+                exc_info=True,
+            )
+            return Response(
+                {
+                    "found": False,
+                    "off_error": "Préremplissage indisponible (OpenFoodFacts). Réessayez plus tard.",
+                },
+                status=200,
+            )
 
-    return Response({"found": False}, status=404)
+    return Response({"found": False}, status=200)
 
 
 class CategoryViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
@@ -230,11 +403,13 @@ class LossEventViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        tenant = get_tenant_for_request(self.request)
         service = get_service_from_request(self.request)
         qs = qs.filter(service=service)
         month = self.request.query_params.get("month")
         if month:
             qs = qs.filter(inventory_month=month)
+        qs = _apply_retention(qs, tenant)
         return qs
 
     def perform_create(self, serializer):
@@ -264,10 +439,12 @@ def inventory_stats(request):
     products = Product.objects.filter(tenant=tenant, service=service)
     if month:
         products = products.filter(inventory_month=month)
+    products = _apply_retention(products, tenant)
 
     losses_qs = LossEvent.objects.filter(tenant=tenant, service=service)
     if month:
         losses_qs = losses_qs.filter(inventory_month=month)
+    losses_qs = _apply_retention(losses_qs, tenant)
 
     loss_by_product = {}
     for l in losses_qs:
@@ -294,6 +471,7 @@ def inventory_stats(request):
         loss_qty = loss_by_product.get(p.id, 0)
         purchase_price = float(p.purchase_price or 0)
         selling_price = float(p.selling_price or 0)
+        converted_qty, converted_unit = _converted_quantity(p)
 
         is_raw_material = item_type_enabled and p.product_role == "raw_material"
         selling_value_current = 0
@@ -312,6 +490,8 @@ def inventory_stats(request):
                 "selling_price": selling_price,
                 "purchase_value_current": purchase_price * stock_final if purchase_price else 0,
                 "selling_value_current": selling_value_current,
+                "converted_quantity": converted_qty,
+                "converted_unit": converted_unit,
                 "quantity_sold_est": None,
                 "ca_estime": None,
                 "cout_matiere": None,
@@ -352,6 +532,14 @@ def inventory_stats(request):
             continue
         total_selling_value += float(p.selling_price or 0) * float(p.quantity or 0)
 
+    converted_totals = {}
+    for p in products:
+        converted_qty, converted_unit = _converted_quantity(p)
+        if converted_qty is None or not converted_unit:
+            continue
+        converted_totals.setdefault(converted_unit, 0)
+        converted_totals[converted_unit] += converted_qty
+
     return Response(
         {
             "total_value": total_purchase_value,
@@ -377,6 +565,7 @@ def inventory_stats(request):
             "losses_by_reason": losses_by_reason,
             "timeseries": [],
             "categories": by_category,
+            "converted_totals": converted_totals,
         }
     )
 
@@ -392,12 +581,27 @@ def export_excel(request):
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
     check_entitlement(tenant, "exports_basic")
+    _enforce_export_quota(tenant, "xlsx")
 
     products = Product.objects.filter(tenant=tenant, service=service, inventory_month=month)
+    products = _apply_retention(products, tenant)
 
-    headers = ["Nom", "Catégorie", "Prix achat (€)", "Prix vente (€)", "TVA (%)", "DLC", "Quantité"]
+    headers = [
+        "Nom",
+        "Catégorie",
+        "Prix achat (€)",
+        "Prix vente (€)",
+        "TVA (%)",
+        "DLC",
+        "Quantité",
+        "Variante",
+        "Stock min",
+        "Quantité convertie",
+        "Unité convertie",
+    ]
     rows = []
     for p in products:
+        converted_qty, converted_unit = _converted_quantity(p)
         rows.append(
             [
                 p.name,
@@ -407,6 +611,10 @@ def export_excel(request):
                 float(p.tva or 0) if p.tva is not None else "",
                 p.dlc or "",
                 float(p.quantity or 0),
+                _format_variant(p),
+                float(p.min_qty) if p.min_qty is not None else "",
+                converted_qty if converted_qty is not None else "",
+                converted_unit or "",
             ]
         )
 
@@ -425,6 +633,13 @@ def export_excel(request):
     filename = f"inventaire_{month}.xlsx"
     resp = Response(xlsx_bytes, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    _log_export_event(
+        tenant=tenant,
+        user=request.user,
+        export_format="xlsx",
+        emailed=False,
+        params={"month": month, "service": service.id},
+    )
     return resp
 
 
@@ -447,8 +662,10 @@ def export_generic(request):
         check_entitlement(tenant, "exports_xlsx")
     if email_to:
         check_entitlement(tenant, "exports_email")
+    _enforce_export_quota(tenant, export_format)
 
     qs = Product.objects.filter(tenant=tenant)
+    qs = _apply_retention(qs, tenant)
     if service_param and service_param != "all":
         try:
             qs = qs.filter(service_id=int(service_param))
@@ -468,9 +685,13 @@ def export_generic(request):
         "Service",
         "Category",
         "ProductName",
+        "Variant",
         "ContainerStatus",
         "Qty",
         "UOM",
+        "MinQty",
+        "ConvertedQty",
+        "ConvertedUnit",
         "RemainingFraction",
         "PackSize",
         "PackUOM",
@@ -479,15 +700,20 @@ def export_generic(request):
     ]
     rows = []
     for p in qs.select_related("service"):
+        converted_qty, converted_unit = _converted_quantity(p)
         rows.append(
             [
                 p.inventory_month,
                 p.service.name if p.service else "",
                 p.category or "",
                 p.name,
+                _format_variant(p),
                 p.container_status,
                 float(p.quantity or 0),
                 p.unit or "",
+                float(p.min_qty) if p.min_qty is not None else "",
+                converted_qty if converted_qty is not None else "",
+                converted_unit or "",
                 p.remaining_fraction or "",
                 p.pack_size or "",
                 p.pack_uom or "",
@@ -531,6 +757,19 @@ def export_generic(request):
 
     resp = Response(attachment_bytes, content_type=mimetype if export_format == "xlsx" else f"{mimetype}; charset=utf-8")
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    _log_export_event(
+        tenant=tenant,
+        user=request.user,
+        export_format=export_format,
+        emailed=bool(email_to),
+        params={
+            "service": service_param,
+            "from": from_month,
+            "to": to_month,
+            "mode": mode,
+            "email": email_to,
+        },
+    )
     return resp
 
 
@@ -581,8 +820,10 @@ def export_advanced(request):
         check_entitlement(tenant, "reports_advanced")
     if email_to:
         check_entitlement(tenant, "exports_email")
+    _enforce_export_quota(tenant, export_format)
 
     qs = Product.objects.filter(tenant=tenant)
+    qs = _apply_retention(qs, tenant)
 
     def _none_if_blank(v):
         if v is None:
@@ -635,6 +876,20 @@ def export_advanced(request):
         "inventory_month": ("Mois", lambda p: p.inventory_month or ""),
         "service": ("Service", lambda p: p.service.name if p.service else ""),
         "unit": ("Unité", lambda p: p.unit or ""),
+        "min_qty": ("Stock min", lambda p: float(p.min_qty) if p.min_qty is not None else ""),
+        "variant_name": ("Variante (libellé)", lambda p: p.variant_name or ""),
+        "variant_value": ("Variante (valeur)", lambda p: p.variant_value or ""),
+        "variant": ("Variante", lambda p: _format_variant(p)),
+        "lot_number": ("Lot", lambda p: p.lot_number or ""),
+        "container_status": ("Statut", lambda p: p.container_status or ""),
+        "remaining_fraction": ("Reste (fraction)", lambda p: p.remaining_fraction if p.remaining_fraction is not None else ""),
+        "conversion_unit": ("Unité conversion", lambda p: p.conversion_unit or ""),
+        "conversion_factor": ("Facteur conversion", lambda p: float(p.conversion_factor) if p.conversion_factor else ""),
+        "converted_quantity": (
+            "Quantité convertie",
+            lambda p: (_converted_quantity(p)[0] if _converted_quantity(p)[0] is not None else ""),
+        ),
+        "converted_unit": ("Unité convertie", lambda p: _converted_quantity(p)[1] or ""),
         "brand": ("Marque", lambda p: p.brand or ""),
         "supplier": ("Fournisseur", lambda p: p.supplier or ""),
         "notes": ("Notes", lambda p: p.notes or ""),
@@ -656,6 +911,7 @@ def export_advanced(request):
         headers.append("Quantité")
         if include_sku:
             headers.append("Code-barres / SKU")
+        headers.extend(["Variante", "Stock min", "Quantité convertie", "Unité convertie"])
         headers.append("Mois")
         headers.append("Service")
 
@@ -675,6 +931,15 @@ def export_advanced(request):
         row.append(product.quantity or 0)
         if include_sku:
             row.append(product.internal_sku if getattr(product, "no_barcode", False) else product.barcode or "")
+        converted_qty, converted_unit = _converted_quantity(product)
+        row.extend(
+            [
+                _format_variant(product),
+                float(product.min_qty) if product.min_qty is not None else "",
+                converted_qty if converted_qty is not None else "",
+                converted_unit or "",
+            ]
+        )
         row.append(product.inventory_month)
         row.append(product.service.name if product.service else "")
         return row
@@ -827,6 +1092,20 @@ def export_advanced(request):
         content_type=mimetype if export_format != "csv" else f"{mimetype}; charset=utf-8",
     )
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
+    _log_export_event(
+        tenant=tenant,
+        user=request.user,
+        export_format=export_format,
+        emailed=bool(email_to),
+        params={
+            "services": services,
+            "from": from_month,
+            "to": to_month,
+            "mode": mode,
+            "format": export_format,
+            "email": email_to,
+        },
+    )
     return resp
 
 
@@ -837,6 +1116,7 @@ def search_products(request):
     service = get_service_from_request(request)
     query = request.query_params.get("q", "")
     qs = Product.objects.filter(tenant=tenant, service=service)
+    qs = _apply_retention(qs, tenant)
     if query:
         qs = qs.filter(
             Q(name__icontains=query)
@@ -849,3 +1129,84 @@ def search_products(request):
         )
     )
     return Response(results)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ProductPermission])
+def alerts(request):
+    tenant = get_tenant_for_request(request)
+    service = get_service_from_request(request)
+
+    entitlements = set(get_entitlements(tenant))
+    allow_stock = "alerts_stock" in entitlements
+    allow_expiry = "alerts_expiry" in entitlements
+    if not allow_stock and not allow_expiry:
+        raise LimitExceeded(
+            code="FEATURE_NOT_INCLUDED",
+            detail="Alertes non incluses dans votre plan. Stock: plan Duo+. Dates: plan Multi+.",
+        )
+
+    limit = _parse_positive_int(request.query_params.get("limit"), 50, 200)
+    offset = _parse_positive_int(request.query_params.get("offset"), 0)
+
+    alerts_list = []
+    now = timezone.now().date()
+    expiry_critical_days = 30
+    expiry_warning_days = 90
+
+    base_qs = Product.objects.filter(tenant=tenant, service=service)
+    base_qs = _apply_retention(base_qs, tenant)
+
+    if allow_stock:
+        stock_qs = base_qs.filter(min_qty__isnull=False, quantity__lte=F("min_qty"))
+        for p in stock_qs:
+            qty = float(p.quantity or 0)
+            min_qty = float(p.min_qty or 0)
+            severity = "critical" if qty <= 0 else "warning"
+            alerts_list.append(
+                {
+                    "type": "stock_low",
+                    "severity": severity,
+                    "product_id": p.id,
+                    "product_name": p.name,
+                    "service_id": service.id,
+                    "service_name": service.name,
+                    "quantity": qty,
+                    "min_qty": min_qty,
+                    "message": f"Stock bas (min {min_qty}).",
+                }
+            )
+
+    dlc_enabled = bool((getattr(service, "features", {}) or {}).get("dlc", {}).get("enabled"))
+    if allow_expiry and dlc_enabled:
+        expiry_qs = base_qs.filter(dlc__isnull=False).exclude(expiry_type="none")
+        for p in expiry_qs:
+            days_left = (p.dlc - now).days if p.dlc else None
+            if days_left is None or days_left > expiry_warning_days:
+                continue
+            severity = "critical" if days_left <= expiry_critical_days else "warning"
+            alerts_list.append(
+                {
+                    "type": "expiry",
+                    "severity": severity,
+                    "product_id": p.id,
+                    "product_name": p.name,
+                    "service_id": service.id,
+                    "service_name": service.name,
+                    "dlc": p.dlc.isoformat() if p.dlc else None,
+                    "days_left": days_left,
+                    "message": f"DLC/DDM proche ({days_left}j).",
+                }
+            )
+
+    alerts_list.sort(
+        key=lambda a: (
+            0 if a["severity"] == "critical" else 1,
+            a.get("days_left", 9999),
+            a.get("product_name", ""),
+        )
+    )
+    total = len(alerts_list)
+    paginated = alerts_list[offset : offset + limit]
+
+    return Response({"count": total, "limit": limit, "offset": offset, "results": paginated})

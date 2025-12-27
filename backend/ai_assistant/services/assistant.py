@@ -43,6 +43,7 @@ Rules:
 - Keep `suggested_actions` empty if no safe action.
 - Use French for message/insights/question.
 - `payload` must stay small.
+- If CONTEXT.ai_mode is "light", keep answers short, limit insights to essentials, and avoid destructive or irreversible suggested actions.
 """
 
 ACTION_TEMPLATES = {
@@ -53,7 +54,7 @@ ACTION_TEMPLATES = {
 }
 
 
-def build_context(user, scope=None, period_start=None, period_end=None, filters=None, user_question=None):
+def build_context(user, scope=None, period_start=None, period_end=None, filters=None, user_question=None, mode="full"):
     filters = filters or {}
     tenant = getattr(user, "profile", None) and user.profile.tenant
     if tenant is None:
@@ -95,27 +96,30 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
         losses_qs.values("reason").annotate(total_qty=Sum("quantity")).order_by("-total_qty")[:5]
     )
 
+    movers_limit = 3 if mode == "light" else 5
     fast_movers = list(
-        products_qs.order_by("-quantity").values("name", "quantity", "unit", "category")[:5]
+        products_qs.order_by("-quantity").values("name", "quantity", "unit", "category")[:movers_limit]
     )
     slow_movers = list(
-        products_qs.filter(quantity__gt=0).order_by("quantity").values("name", "quantity", "unit", "category")[:5]
+        products_qs.filter(quantity__gt=0).order_by("quantity").values("name", "quantity", "unit", "category")[:movers_limit]
     )
     top_losses = list(
         losses_qs.values("product__name")
         .annotate(total_qty=Sum("quantity"))
-        .order_by("-total_qty")[:5]
+        .order_by("-total_qty")[:movers_limit]
     )
 
     # Focus items list (limit 50)
+    items_limit = 12 if mode == "light" else 50
     items = list(
         products_qs.order_by("quantity")
-        .values("name", "quantity", "unit", "category", "service_id", "barcode", "internal_sku", "container_status")[:50]
+        .values("name", "quantity", "unit", "category", "service_id", "barcode", "internal_sku", "container_status")[:items_limit]
     )
 
     missing_id_count = products_qs.filter(barcode__isnull=True, internal_sku__isnull=True).count()
     question = (user_question or "").strip()[:500]
     context = {
+        "ai_mode": mode,
         "tenant": {"id": tenant.id, "name": tenant.name, "business_type": tenant.business_type, "domain": tenant.domain},
         "service": (
             {

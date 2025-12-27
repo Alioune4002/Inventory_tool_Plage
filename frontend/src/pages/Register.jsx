@@ -140,8 +140,16 @@ export default function Register() {
     };
   }, []);
 
+  useEffect(() => {
+    if (multiServicesLocked && isGroundedMulti) {
+      setIsGroundedMulti(false);
+      setServiceList(servicePresets(familyId, false, linkedMode));
+    }
+  }, [multiServicesLocked, isGroundedMulti, familyId, linkedMode]);
+
   const familyMeta = useMemo(() => FAMILLES.find((f) => f.id === familyId) ?? FAMILLES[0], [familyId]);
   const linkedFamilies = useMemo(() => new Set(["restauration", "boulangerie", "pharmacie"]), []);
+  const multiServicesLocked = true;
 
   const moduleListForFamily = useMemo(
     () => MODULES.filter((module) => module.families.includes(familyId)),
@@ -323,7 +331,7 @@ export default function Register() {
     }[familyId] || "";
 
   return (
-    <div className="min-h-screen py-10 px-2 sm:px-4 relative overflow-hidden">
+    <div className="min-h-screen w-full py-10 px-2 sm:px-4 relative overflow-x-hidden">
       <Helmet>
         <title>Créer mon espace | StockScan</title>
         <meta name="description" content="Créez votre espace StockScan en quelques minutes." />
@@ -384,14 +392,17 @@ export default function Register() {
                   <button
                     type="button"
                     onClick={() => {
+                      if (multiServicesLocked) return;
                       setIsGroundedMulti(true);
                       setServiceList(servicePresets(familyId, true, linkedMode));
                     }}
+                    disabled={multiServicesLocked}
                     className={[
                       "rounded-2xl border p-4 text-left transition",
                       isGroundedMulti
                         ? "border-blue-500 bg-[var(--surface)] shadow-[0_0_30px_rgba(37,99,235,0.18)]"
                         : "border-[var(--border)] hover:border-blue-500/50",
+                      multiServicesLocked ? "opacity-60 cursor-not-allowed" : "",
                     ].join(" ")}
                   >
                     <div className="font-semibold text-[var(--text)]">Multi-services</div>
@@ -400,6 +411,11 @@ export default function Register() {
                       <span className="block mt-1 text-xs text-[var(--muted)] opacity-80">
                         Parfait aussi pour camping / hôtel multi-services.
                       </span>
+                      {multiServicesLocked && (
+                        <span className="block mt-2 text-xs text-[var(--warn-text)]">
+                          Disponible à partir du plan Duo.
+                        </span>
+                      )}
                     </div>
                   </button>
                 </div>

@@ -23,6 +23,12 @@ def _base_features():
     }
 
 
+def normalize_email(value: str) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def _merge_features(base: dict, overrides: dict) -> dict:
     out = deepcopy(base)
     for k, v in (overrides or {}).items():
@@ -34,6 +40,8 @@ def _merge_features(base: dict, overrides: dict) -> dict:
 
 
 def apply_service_preset(service_type: str, domain: str = None):
+    if service_type == "dining":
+        service_type = "restaurant_dining"
     base = _base_features()
 
     presets = {

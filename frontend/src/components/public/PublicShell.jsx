@@ -12,7 +12,7 @@ export default function PublicShell({ children }) {
   }, []);
 
   return (
-    <div className="public-shell relative overflow-hidden">
+    <div className="public-shell relative w-full overflow-x-hidden">
       <div className="pointer-events-none absolute inset-0 opacity-20 bg-grid" />
       <div className="pointer-events-none absolute -top-20 -left-24 h-72 w-72 rounded-full bg-blue-600 blur-[140px] opacity-30" />
       <div className="pointer-events-none absolute -bottom-24 right-0 h-80 w-80 rounded-full bg-cyan-400 blur-[160px] opacity-20" />

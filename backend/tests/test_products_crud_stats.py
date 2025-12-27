@@ -108,6 +108,12 @@ def test_stats_excludes_raw_material_from_selling_when_item_type_enabled(client_
 @pytest.mark.django_db
 def test_no_barcode_requires_internal_sku(client_with_user):
     client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    features = service.features or {}
+    features["sku"] = {"enabled": False, "recommended": False}
+    service.features = features
+    service.save(update_fields=["features"])
+
     res = client.post(
         "/api/products/",
         {
@@ -118,12 +124,115 @@ def test_no_barcode_requires_internal_sku(client_with_user):
             "quantity": 2,
             "inventory_month": "2025-04",
             "no_barcode": True,
-            "service": tenant.services.first().id,
+            "service": service.id,
         },
         format="json",
     )
     assert res.status_code == 400
 
+
+@pytest.mark.django_db
+def test_no_barcode_autogenerates_sku_when_enabled(client_with_user):
+    client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    features = service.features or {}
+    features["sku"] = {"enabled": True, "recommended": True}
+    service.features = features
+    service.save(update_fields=["features"])
+
+    res = client.post(
+        "/api/products/",
+        {
+            "name": "Pain",
+            "category": "sec",
+            "purchase_price": "0.5",
+            "selling_price": "1.0",
+            "quantity": 2,
+            "inventory_month": "2025-04",
+            "no_barcode": True,
+            "service": service.id,
+        },
+        format="json",
+    )
+    assert res.status_code == 201
+    assert res.data.get("internal_sku", "").startswith("SKU-")
+
+
+@pytest.mark.django_db
+def test_auto_sku_generated_when_missing(client_with_user):
+    client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    res = client.post(
+        "/api/products/",
+        {
+            "name": "Cola",
+            "category": "sec",
+            "quantity": 2,
+            "barcode": "AUTO-001",
+            "inventory_month": "2025-05",
+            "service": service.id,
+        },
+        format="json",
+    )
+    assert res.status_code == 201
+    assert res.data.get("internal_sku", "").startswith("SKU-")
+
+
+@pytest.mark.django_db
+def test_auto_sku_respects_manual_value(client_with_user):
+    client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    res = client.post(
+        "/api/products/",
+        {
+            "name": "Cola Zero",
+            "category": "sec",
+            "quantity": 2,
+            "barcode": "AUTO-002",
+            "internal_sku": "CUSTOM-001",
+            "inventory_month": "2025-05",
+            "service": service.id,
+        },
+        format="json",
+    )
+    assert res.status_code == 201
+    assert res.data.get("internal_sku") == "CUSTOM-001"
+
+
+@pytest.mark.django_db
+def test_auto_sku_skips_existing_sequence(client_with_user):
+    client, tenant, _ = client_with_user
+    service = tenant.services.first()
+    res_existing = client.post(
+        "/api/products/",
+        {
+            "name": "Existing",
+            "category": "sec",
+            "quantity": 1,
+            "barcode": "AUTO-003",
+            "internal_sku": "SKU-000005",
+            "inventory_month": "2025-06",
+            "service": service.id,
+        },
+        format="json",
+    )
+    assert res_existing.status_code == 201
+
+    res = client.post(
+        "/api/products/",
+        {
+            "name": "Next",
+            "category": "sec",
+            "quantity": 1,
+            "barcode": "AUTO-004",
+            "inventory_month": "2025-06",
+            "service": service.id,
+        },
+        format="json",
+    )
+    assert res.status_code == 201
+    assert res.data.get("internal_sku") != "SKU-000005"
+    assert res.data.get("internal_sku", "").startswith("SKU-")
     res_ok = client.post(
         "/api/products/",
         {

@@ -5,9 +5,10 @@ from rest_framework import serializers, exceptions  # type: ignore
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer  # pyright: ignore[reportMissingImports]
 
 from .models import Tenant, UserProfile, Service, Membership
-from .utils import get_default_service
+from .utils import normalize_email
 
 User = get_user_model()
+SERVICE_TYPE_VALUES = {key for key, _ in Service.SERVICE_TYPES}
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -23,6 +24,63 @@ class RegisterSerializer(serializers.Serializer):
     service_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     extra_services = serializers.JSONField(required=False)
 
+    def _resolve_services(self, attrs):
+        tenant_name = attrs.get("tenant_name") or f"{attrs['username']}'s store"
+        business_type = attrs.get("business_type", "other")
+        service_type = attrs.get("service_type") or "other"
+        service_name = attrs.get("service_name") or "Principal"
+        extra_services = attrs.get("extra_services") or []
+
+        user_defined_services = [(service_name, service_type)]
+        for item in extra_services:
+            if isinstance(item, dict):
+                name = (item.get("name") or item.get("service_name") or "").strip()
+                stype = (item.get("service_type") or "other").strip() or "other"
+            else:
+                name = str(item or "").strip()
+                stype = "other"
+            if name:
+                user_defined_services.append((name, stype))
+
+        defaults_by_business = {
+            "restaurant": [("Cuisine", "kitchen"), ("Salle", "restaurant_dining")],
+            "bar": [("Bar", "bar"), ("Stock", "retail_general")],
+            "grocery": [("Principal", "grocery_food")],
+            "retail": [("Boutique", "retail_general")],
+            "camping_multi": [("Épicerie", "grocery_food"), ("Bar", "bar"), ("Restauration", "kitchen")],
+        }
+        chosen_services = (
+            user_defined_services
+            if any(n for n, _ in user_defined_services)
+            else defaults_by_business.get(business_type, [("Principal", "other")])
+        )
+        return tenant_name, business_type, chosen_services
+
+    def validate_email(self, value):
+        if not value:
+            return ""
+        normalized = normalize_email(value)
+        if User.objects.filter(email__iexact=normalized).exists():
+            raise serializers.ValidationError("Un compte existe déjà avec cet email.")
+        return normalized
+
+    def validate_extra_services(self, value):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("extra_services doit être une liste.")
+        errors = []
+        for idx, item in enumerate(value):
+            if isinstance(item, dict):
+                stype = (item.get("service_type") or "other").strip() or "other"
+            else:
+                stype = "other"
+            if stype not in SERVICE_TYPE_VALUES:
+                errors.append({idx: f"service_type invalide '{stype}'. Utilisez un type supporté."})
+        if errors:
+            raise serializers.ValidationError(errors)
+        return value
+
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
             raise serializers.ValidationError(
@@ -37,47 +95,37 @@ class RegisterSerializer(serializers.Serializer):
 
         if attrs.get("password") != attrs.get("password_confirm"):
             raise serializers.ValidationError("Les mots de passe ne correspondent pas.")
+
+        try:
+            from accounts.services.access import PLAN_REGISTRY
+            _, _, chosen_services = self._resolve_services(attrs)
+            max_services = PLAN_REGISTRY.get("ESSENTIEL", {}).get("limits", {}).get("max_services")
+            if max_services is not None and len(chosen_services) > int(max_services):
+                raise serializers.ValidationError(
+                    {
+                        "extra_services": (
+                            "Plan Solo : 1 service max. "
+                            "Supprimez les services supplémentaires ou passez à un plan supérieur."
+                        )
+                    }
+                )
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            pass
         return attrs
 
     def create(self, validated_data):
         from .utils import apply_service_preset
 
-        tenant_name = validated_data.get("tenant_name") or f"{validated_data['username']}'s store"
-        business_type = validated_data.get("business_type", "other")
-        service_type = validated_data.get("service_type") or "other"
-        service_name = validated_data.get("service_name") or "Principal"
-        extra_services = validated_data.get("extra_services") or []
-
-        user_defined_services = [(service_name, service_type)]
-        for item in extra_services:
-            if isinstance(item, dict):
-                name = (item.get("name") or item.get("service_name") or "").strip()
-                stype = item.get("service_type") or "other"
-            else:
-                name = str(item or "").strip()
-                stype = "other"
-            if name:
-                user_defined_services.append((name, stype))
-
-        defaults_by_business = {
-            "restaurant": [("Cuisine", "kitchen"), ("Salle", "dining")],
-            "bar": [("Bar", "bar"), ("Stock", "retail_general")],
-            "grocery": [("Principal", "grocery_food")],
-            "retail": [("Boutique", "retail_general")],
-            "camping_multi": [("Épicerie", "grocery_food"), ("Bar", "bar"), ("Restauration", "kitchen")],
-        }
-        chosen_services = (
-            user_defined_services
-            if any(n for n, _ in user_defined_services)
-            else defaults_by_business.get(business_type, [("Principal", "other")])
-        )
+        tenant_name, business_type, chosen_services = self._resolve_services(validated_data)
 
         # ✅ Respecte le domain envoyé par l’API (tests attendent "food")
         domain_from_request = validated_data.get("domain") or None
         if domain_from_request:
             domain = domain_from_request
         else:
-            food_types = {"grocery_food", "bulk_food", "bar", "kitchen", "dining"}
+            food_types = {"grocery_food", "bulk_food", "bar", "kitchen", "restaurant_dining"}
             has_food_service = any(stype in food_types for _, stype in chosen_services)
             domain = "food" if has_food_service else "general"
 
@@ -102,7 +150,7 @@ class RegisterSerializer(serializers.Serializer):
 
         user = User.objects.create_user(
             username=validated_data["username"],
-            email=(validated_data.get("email") or ""),
+            email=normalize_email(validated_data.get("email") or ""),
             password=validated_data["password"],
         )
         UserProfile.objects.create(user=user, tenant=tenant, role="owner")
@@ -122,7 +170,14 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         username = attrs.get(self.username_field)
         if username and "@" in username:
-            user_by_email = User.objects.filter(email__iexact=username).order_by("id").first()
+            normalized = normalize_email(username)
+            matches = User.objects.filter(email__iexact=normalized)
+            if matches.count() > 1:
+                raise exceptions.AuthenticationFailed(
+                    "Plusieurs comptes utilisent cet email. Connectez-vous avec votre nom d’utilisateur.",
+                    code="email_not_unique",
+                )
+            user_by_email = matches.first()
             if user_by_email:
                 attrs[self.username_field] = user_by_email.username
 
@@ -130,7 +185,7 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
         if attrs.get(self.username_field):
             candidate = User.objects.filter(username=attrs[self.username_field]).first()
         if not candidate and username and "@" in username:
-            candidate = User.objects.filter(email__iexact=username).first()
+            candidate = User.objects.filter(email__iexact=normalize_email(username)).first()
         if candidate and not candidate.is_active:
             raise exceptions.AuthenticationFailed(
                 "Email non vérifié. Vérifie ta boîte mail pour activer ton compte.",
@@ -257,7 +312,13 @@ class MembershipSerializer(serializers.ModelSerializer):
 
         user_obj = None
         if email:
-            user_obj = User.objects.filter(email=email).first()
+            email = normalize_email(email)
+            matches = User.objects.filter(email__iexact=email)
+            if matches.count() > 1:
+                raise serializers.ValidationError(
+                    "Plusieurs comptes utilisent cet email. Utilisez un nom d’utilisateur."
+                )
+            user_obj = matches.first()
         if not user_obj and username:
             user_obj = User.objects.filter(username=username).first()
 
@@ -266,7 +327,7 @@ class MembershipSerializer(serializers.ModelSerializer):
             base_username = username or (email.split("@")[0] if email else "user")
             final_username = f"{base_username}-{Tenant.objects.count()+1}"
             temp_password = User.objects.make_random_password(length=10)
-            user_obj = User.objects.create_user(username=final_username, email=email, password=temp_password)
+            user_obj = User.objects.create_user(username=final_username, email=normalize_email(email), password=temp_password)
             self._temp_password = temp_password
             created_new = True
 

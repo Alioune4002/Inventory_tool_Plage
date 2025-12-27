@@ -251,7 +251,7 @@ export default function Tarifs() {
             </div>
             <div>
               <p className="font-semibold">Exports CSV/Excel ?</p>
-              <p>Solo : CSV limité. Duo : CSV illimités. Multi : CSV + Excel + partage e-mail.</p>
+              <p>Solo : CSV + Excel (1/mois). Duo : CSV illimités, Excel 30/mois. Multi : CSV + Excel illimités + partage e-mail.</p>
             </div>
             <div>
               <p className="font-semibold">Plan Entreprise : ça sert à quoi ?</p>
@@ -265,7 +265,7 @@ export default function Tarifs() {
             </div>
             <div>
               <p className="font-semibold">Support</p>
-              <p>Réponse sous 24h ouvrées : {SALES_EMAIL}</p>
+              <p>Réponse sous 24h ouvrées (objectif) : {SALES_EMAIL}</p>
             </div>
           </div>
         </section>
@@ -322,7 +322,7 @@ function buildPlans(cycle) {
       features: [
         "1 service, 1 utilisateur, 100 produits",
         "Historique 14 jours",
-        "Exports CSV (1/jour)",
+        "Exports CSV (1/mois) + Excel (1/mois)",
         "Inventaire simple (code-barres / référence interne)",
         "Lecture/export même en dépassement",
       ],
@@ -338,7 +338,8 @@ function buildPlans(cycle) {
       yearly: isYearly ? "Économie ≈ 2 mois" : "ou 90€ / an",
       features: [
         "2 services, 3 utilisateurs, 1 000 produits",
-        "Exports CSV illimités",
+        "Exports CSV illimités + Excel (30/mois)",
+        "IA (15 requêtes/mois) + analyses light",
         "Pertes + alertes stock",
         "Rôles par service",
         "Support prioritaire par e-mail",
@@ -357,8 +358,8 @@ function buildPlans(cycle) {
       features: [
         "5 services, 10 utilisateurs, produits illimités",
         "Options avancées (dates, lots, entamés…)",
-        "Exports CSV + Excel, partage e-mail",
-        "Analyses et aide au pilotage",
+        "Exports CSV + Excel illimités, partage e-mail",
+        "IA pilotage (200 requêtes/mois)",
         "Alertes avancées",
       ],
       cta: "Choisir le plan Multi",

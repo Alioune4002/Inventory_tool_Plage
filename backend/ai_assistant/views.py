@@ -3,6 +3,7 @@ import time
 from uuid import uuid4
 
 from django.conf import settings
+from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -11,8 +12,10 @@ from rest_framework import status
 from accounts.services.paywall import paywall_response
 
 from .services.assistant import build_context, call_llm, validate_llm_json, SYSTEM_PROMPT
-from accounts.services.access import check_entitlement
+from accounts.services.access import check_entitlement, get_limits, get_plan_code, LimitExceeded
 from accounts.utils import get_tenant_for_request
+from .models import AIRequestEvent
+from inventory.metrics import track_ai_request
 
 
 class AiAssistantRateThrottle(SimpleRateThrottle):
@@ -54,7 +57,6 @@ class AiAssistantView(APIView):
 
         tenant = get_tenant_for_request(request)
 
-       
         try:
             check_entitlement(tenant, "ai_assistant_basic")
         except Exception as exc:
@@ -83,6 +85,20 @@ class AiAssistantView(APIView):
                 status=status.HTTP_200_OK,
             )
 
+        limits = get_limits(tenant)
+        ai_limit = limits.get("ai_requests_monthly_limit")
+        if ai_limit is not None:
+            start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            used = AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start).count()
+            if used >= int(ai_limit):
+                raise LimitExceeded(
+                    code="LIMIT_AI_REQUESTS_MONTH",
+                    detail="Quota IA mensuel atteint. Passez à un plan supérieur pour continuer.",
+                )
+
+        plan_code = get_plan_code(tenant)
+        ai_mode = "light" if plan_code == "BOUTIQUE" else "full"
+
         context = build_context(
             request.user,
             scope,
@@ -90,6 +106,7 @@ class AiAssistantView(APIView):
             period_end,
             filters,
             user_question=question,
+            mode=ai_mode,
         )
 
         context_json = json.dumps(context, ensure_ascii=False)
@@ -106,4 +123,19 @@ class AiAssistantView(APIView):
                 "invalid_json": invalid_json,
             }
         )
+        try:
+            AIRequestEvent.objects.create(
+                tenant=tenant,
+                user=request.user if request.user and request.user.is_authenticated else None,
+                scope=scope or "inventory",
+                mode=ai_mode,
+                meta={"duration_ms": duration_ms},
+            )
+        except Exception:
+            pass
+        try:
+            track_ai_request(ai_mode)
+        except Exception:
+            pass
+
         return Response(data, status=status.HTTP_200_OK)

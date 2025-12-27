@@ -11,6 +11,7 @@ et_xmlfile==2.0.0
 gunicorn==23.0.0
 openpyxl==3.1.5
 packaging==25.0
+prometheus-client==0.20.0
 sqlparse==0.5.3
 tzdata==2025.2
 waitress==3.0.2

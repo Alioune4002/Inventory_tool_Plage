@@ -1,10 +1,18 @@
+import re
+
 from rest_framework import serializers
 from django.utils.text import slugify
 from django.utils import timezone
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 from .models import Product, Category, LossEvent
+from accounts.models import Service
 from accounts.utils import get_service_from_request, get_tenant_for_request
+
+SKU_PREFIX = "SKU-"
+SKU_PADDING = 6
+SKU_MAX_ATTEMPTS = 20
+SKU_RE = re.compile(r"^SKU-(\d+)$")
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -91,6 +99,50 @@ class ProductSerializer(serializers.ModelSerializer):
 
         return warnings
 
+    def _max_existing_sku_sequence(self, tenant, service):
+        max_seq = 0
+        skus = (
+            Product.objects.filter(
+                tenant=tenant,
+                service=service,
+                internal_sku__startswith=SKU_PREFIX,
+            )
+            .values_list("internal_sku", flat=True)
+            .iterator()
+        )
+        for sku in skus:
+            match = SKU_RE.match(str(sku))
+            if not match:
+                continue
+            try:
+                max_seq = max(max_seq, int(match.group(1)))
+            except ValueError:
+                continue
+        return max_seq
+
+    def _generate_auto_sku(self, tenant, service):
+        with transaction.atomic():
+            locked = Service.objects.select_for_update().get(id=service.id)
+            seq = int(locked.sku_sequence or 0)
+            if seq < 1:
+                seq = max(seq, self._max_existing_sku_sequence(tenant, locked))
+
+            for _ in range(SKU_MAX_ATTEMPTS):
+                seq += 1
+                candidate = f"{SKU_PREFIX}{seq:0{SKU_PADDING}d}"
+                exists = Product.objects.filter(tenant=tenant, service=locked, internal_sku=candidate).exists()
+                if exists:
+                    continue
+                locked.sku_sequence = seq
+                locked.save(update_fields=["sku_sequence"])
+                return candidate
+
+            locked.sku_sequence = seq
+            locked.save(update_fields=["sku_sequence"])
+        raise serializers.ValidationError(
+            {"internal_sku": "Impossible de générer un SKU unique pour ce service. Réessayez."}
+        )
+
     def validate(self, attrs):
         request = self.context.get("request")
         service = get_service_from_request(request)
@@ -98,6 +150,8 @@ class ProductSerializer(serializers.ModelSerializer):
         features = getattr(service, "features", {}) or {}
         counting_mode = getattr(service, "counting_mode", "unit")
         prices_cfg = features.get("prices", {})
+        sku_cfg = features.get("sku", {})
+        sku_enabled = sku_cfg.get("enabled") is not False
 
         # ✅ Normalisation : ne jamais laisser "" en DB (sinon contraintes uniques explosent)
         current_barcode = attrs.get("barcode", getattr(self.instance, "barcode", None))
@@ -105,14 +159,41 @@ class ProductSerializer(serializers.ModelSerializer):
         attrs["barcode"] = self._clean_optional_str(current_barcode)
         attrs["internal_sku"] = self._clean_optional_str(current_sku)
 
+        attrs["variant_name"] = self._clean_optional_str(
+            attrs.get("variant_name", getattr(self.instance, "variant_name", None))
+        )
+        attrs["variant_value"] = self._clean_optional_str(
+            attrs.get("variant_value", getattr(self.instance, "variant_value", None))
+        )
+
+        attrs["conversion_unit"] = self._clean_optional_str(
+            attrs.get("conversion_unit", getattr(self.instance, "conversion_unit", None))
+        )
+        conversion_factor = attrs.get("conversion_factor", getattr(self.instance, "conversion_factor", None))
+        if conversion_factor is not None:
+            if conversion_factor <= 0:
+                raise serializers.ValidationError({"conversion_factor": "Le facteur de conversion doit être positif."})
+            if not attrs.get("conversion_unit"):
+                raise serializers.ValidationError({"conversion_unit": "Unité de conversion requise."})
+        if attrs.get("conversion_unit") and conversion_factor is None:
+            raise serializers.ValidationError({"conversion_factor": "Facteur de conversion requis."})
+
+        min_qty = attrs.get("min_qty", getattr(self.instance, "min_qty", None))
+        if min_qty is not None and min_qty < 0:
+            raise serializers.ValidationError({"min_qty": "Le stock minimum doit être positif."})
+
         # ✅ no_barcode cohérent : dérivé du barcode réel, avec enforcement seulement si explicitement demandé
         explicit_no_barcode = False
         if hasattr(self, "initial_data"):
             raw_flag = self.initial_data.get("no_barcode")
             explicit_no_barcode = str(raw_flag).lower() in ("true", "1", "yes")
 
+        self._auto_generate_sku = False
+        if self.instance is None and sku_enabled and not attrs.get("internal_sku"):
+            self._auto_generate_sku = True
+
         attrs["no_barcode"] = attrs.get("barcode") is None
-        if explicit_no_barcode and not attrs.get("internal_sku"):
+        if explicit_no_barcode and not attrs.get("internal_sku") and not self._auto_generate_sku:
             raise serializers.ValidationError({"internal_sku": "SKU requis quand le code-barres est absent."})
 
         # ✅ Unité selon counting_mode
@@ -140,6 +221,10 @@ class ProductSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        if getattr(self, "_auto_generate_sku", False):
+            tenant = validated_data.get("tenant") or get_tenant_for_request(self.context.get("request"))
+            service = validated_data.get("service") or get_service_from_request(self.context.get("request"))
+            validated_data["internal_sku"] = self._generate_auto_sku(tenant, service)
         try:
             instance = super().create(validated_data)
             instance._warnings = getattr(self, "_warnings", [])
@@ -164,12 +249,30 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        for num_field in ["quantity", "purchase_price", "selling_price", "remaining_qty", "remaining_fraction", "pack_size"]:
+        for num_field in [
+            "quantity",
+            "purchase_price",
+            "selling_price",
+            "remaining_qty",
+            "remaining_fraction",
+            "pack_size",
+            "min_qty",
+            "conversion_factor",
+        ]:
             if num_field in data and data[num_field] is not None:
                 try:
                     data[num_field] = float(data[num_field])
                 except (TypeError, ValueError):
                     pass
+        factor = getattr(instance, "conversion_factor", None)
+        unit = getattr(instance, "conversion_unit", None)
+        if factor is not None and unit:
+            try:
+                data["converted_quantity"] = float(instance.quantity or 0) * float(factor)
+                data["converted_unit"] = unit
+            except (TypeError, ValueError):
+                data["converted_quantity"] = None
+                data["converted_unit"] = unit
         return data
 
 

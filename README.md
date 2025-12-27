@@ -17,6 +17,9 @@ SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec 
 - Exports : `/api/exports/` CSV/XLSX (from/to, service/all, mode sealed/opened/all) + envoi par email (param `email` + `message`).
 - Inventaire : filtre mois/service, ajout produit rapide, search, empty state premium.
 - Lookup / Scan : `/api/products/lookup/?barcode=` cherche d’abord dans le tenant/service, renvoie historique + derniers produits; fallback OpenFoodFacts (alimentaire) pour préremplir.
+- Alertes : stock minimum + DLC/DDM (seuils 30/90j) via `/api/alerts/` (plan Duo/Multi).
+- Variantes & conversions : variantes simples + conversions d’unités par produit (affichées dans exports/stats).
+- Rétention Solo : 14 jours (filtrage created_at) pour inventaires, pertes, stats, exports, lookup.
 - Settings : services, (à compléter : email/password, invitations).
 - Suppression de compte avec confirmations.
 
@@ -56,7 +59,7 @@ cd ../frontend
 npm install
 npm run dev
 ```
-Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `https://inventory-tool-plage.onrender.com`.
+Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:8000` en dev et `https://inventory-tool-plage.onrender.com` en prod.
 
 ## Endpoints principaux (extraits)
 - Auth :  
@@ -69,7 +72,7 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `https://inventory
   - `GET /api/products/?month=YYYY-MM&service=<id>`  
   - `POST /api/products/` (champs optionnels barcode/SKU/prix/DLC + entamé : container_status, pack_size, remaining_qty/fraction)  
   - `GET /api/inventory-stats/?month=YYYY-MM&service=<id>`
-  - `GET /api/products/lookup/?barcode=CODE` (local + historique + suggestion OpenFoodFacts)
+  - `GET /api/products/lookup/?barcode=CODE` (local + historique limité + suggestion OpenFoodFacts, options `history_limit`, `history_months`)
 - Pertes :  
   - `GET /api/losses/?month=YYYY-MM&service=<id>`  
   - `POST /api/losses/` (reason, qty, unit, product)  
@@ -79,6 +82,8 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `https://inventory
 - Entitlements / limites :  
   - `GET /api/me/org/entitlements` : plan_effective, plan_source, expires_at, subscription_status, entitlements, limits, usage, over_limit.  
   - Les endpoints bloqués pour dépassement retournent 403 avec code `LIMIT_*` et message explicite (lecture/export restent possibles).
+- Alertes :  
+  - `GET /api/alerts/` : stock bas + DLC/DDM proches (seuils 30/90j), pagination `limit`/`offset`.
 - Export :  
   - `GET /api/exports/?from=YYYY-MM&to=YYYY-MM&service=<id|all>&mode=sealed|opened|all&format=csv|xlsx&email=<dest>&message=<txt>`
 - Divers :  
@@ -112,6 +117,7 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `https://inventory
 - Frontend : Vercel/Netlify (build Vite). `VITE_API_BASE_URL` doit pointer vers `https://inventory-tool-plage.onrender.com`, `VITE_DEMO_MODE=false` en prod (pour désactiver AutoDemo) et `VITE_STRIPE_ENABLED=true/false` pour activer les boutons checkout. Le script `scripts/validate.sh` vérifie la présence des env critiques et ne bloque pas si `npm test` n’existe pas.
 
 Consultez `DEPLOYMENT.md` pour le runbook complet, les smoke tests curl (Stripe, invitations, entitlements, export, IA) et les alertes à surveiller en production.
+Consultez `RUNBOOK.md` pour un guide minimal (dev/prod, commandes, smoke tests).
 
 ## Points d’attention actuels
 - Appliquer les migrations avant de tester (sinon erreurs “no such column business_type”).
@@ -124,6 +130,7 @@ Consultez `DEPLOYMENT.md` pour le runbook complet, les smoke tests curl (Stripe,
 python manage.py makemigrations 
 python manage.py migrate
 python manage.py runserver 0.0.0.0:8000
+python manage.py report_duplicate_emails --csv /tmp/duplicate_emails.csv
 
 # frontend
 npm run dev

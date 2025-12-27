@@ -1,9 +1,11 @@
 import pytest
+from datetime import timedelta
+from django.utils import timezone
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .factories import TenantFactory, UserFactory
-from accounts.models import Service
+from accounts.models import Service, Plan
 
 
 @pytest.fixture
@@ -26,6 +28,22 @@ def test_services_list_and_create(auth_client):
     assert res_list.status_code == 200
     existing = [s["name"] for s in res_list.json()]
     assert "Principal" in existing
+
+    res_create = client.post("/api/auth/services/", {"name": "Bar"}, format="json")
+    assert res_create.status_code == 403
+    assert res_create.data.get("code") == "LIMIT_MAX_SERVICES"
+    assert not Service.objects.filter(name="Bar", tenant=tenant).exists()
+
+
+@pytest.mark.django_db
+def test_services_create_when_plan_allows(auth_client):
+    tenant = TenantFactory()
+    plan, _ = Plan.objects.get_or_create(code="BOUTIQUE", defaults={"name": "Duo"})
+    tenant.plan = plan
+    tenant.license_expires_at = timezone.now() + timedelta(days=30)
+    tenant.save(update_fields=["plan", "license_expires_at"])
+    user = UserFactory(profile=tenant)
+    client = auth_client(user)
 
     res_create = client.post("/api/auth/services/", {"name": "Bar"}, format="json")
     assert res_create.status_code == 201

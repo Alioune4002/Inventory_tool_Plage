@@ -40,6 +40,11 @@ export default function Products() {
     category: "",
     barcode: "",
     internal_sku: "",
+    variant_name: "",
+    variant_value: "",
+    min_qty: "",
+    conversion_unit: "",
+    conversion_factor: "",
     brand: "",
     supplier: "",
     notes: "",
@@ -121,6 +126,7 @@ export default function Products() {
 
   const barcodeEnabled = getFeatureFlag("barcode", familyIdentifiers.barcode ?? true);
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
+  const variantsEnabled = getFeatureFlag("variants", familyModules.includes("variants"));
   const multiUnitEnabled = getFeatureFlag("multi_unit", familyModules.includes("multiUnit"));
   const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
 
@@ -141,6 +147,7 @@ export default function Products() {
     if (countingMode === "mixed") return ["pcs", "kg", "g", "l", "ml"];
     return ["pcs"];
   }, [countingMode]);
+  const conversionUnitOptions = ["pcs", "kg", "g", "l", "ml"];
 
   const vatOptions = ["0", "5.5", "10", "20"];
   const showUnit = multiUnitEnabled || countingMode !== "unit";
@@ -205,6 +212,11 @@ export default function Products() {
       category: "",
       barcode: "",
       internal_sku: "",
+      variant_name: "",
+      variant_value: "",
+      min_qty: "",
+      conversion_unit: "",
+      conversion_factor: "",
       brand: "",
       supplier: "",
       notes: "",
@@ -247,6 +259,16 @@ export default function Products() {
         notes: form.notes.trim() || "",
       };
 
+      if (variantsEnabled) {
+        payload.variant_name = form.variant_name || null;
+        payload.variant_value = form.variant_value || null;
+      }
+      if (form.min_qty !== "") payload.min_qty = form.min_qty;
+      if (multiUnitEnabled) {
+        payload.conversion_unit = form.conversion_unit || null;
+        payload.conversion_factor = form.conversion_factor || null;
+      }
+
       const cleanedBarcode = (form.barcode || "").trim();
       const cleanedSku = (form.internal_sku || "").trim();
 
@@ -266,12 +288,17 @@ export default function Products() {
       else res = await api.post("/api/products/", payload);
 
       const warnings = res?.data?.warnings || [];
+      const generatedSku =
+        !editId && skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
       if (warnings.length) pushToast?.({ message: warnings.join(" "), type: "warn" });
       else {
         pushToast?.({
           message: editId ? `${itemLabel} mis à jour.` : `${itemLabel} ajouté.`,
           type: "success",
         });
+      }
+      if (generatedSku) {
+        pushToast?.({ message: `SKU généré : ${generatedSku} (modifiable).`, type: "info" });
       }
 
       resetForm();
@@ -755,6 +782,64 @@ export default function Products() {
                 />
               )}
 
+              {variantsEnabled && (
+                <>
+                  <Input
+                    label="Variante (libellé)"
+                    placeholder="Ex. Taille ou Couleur"
+                    value={form.variant_name}
+                    onChange={(e) => setForm((p) => ({ ...p, variant_name: e.target.value }))}
+                    helper="Optionnel : libellé de variante."
+                  />
+                  <Input
+                    label="Variante (valeur)"
+                    placeholder="Ex. M, Bleu, 75cl"
+                    value={form.variant_value}
+                    onChange={(e) => setForm((p) => ({ ...p, variant_value: e.target.value }))}
+                    helper="Optionnel : valeur de variante."
+                  />
+                </>
+              )}
+
+              <Input
+                label="Stock minimum (alerte)"
+                type="number"
+                min={0}
+                value={form.min_qty}
+                onChange={(e) => setForm((p) => ({ ...p, min_qty: e.target.value }))}
+                helper="Optionnel : seuil pour alerte stock (plan Duo/Multi)."
+              />
+
+              {multiUnitEnabled && (
+                <>
+                  <Input
+                    label="Conversion (facteur)"
+                    type="number"
+                    min={0}
+                    step="0.0001"
+                    placeholder="Ex. 0.75"
+                    value={form.conversion_factor}
+                    onChange={(e) => setForm((p) => ({ ...p, conversion_factor: e.target.value }))}
+                    helper="Ex. 1 unité = 0.75 L (facteur)."
+                  />
+                  <label className="space-y-1.5">
+                    <span className="text-sm font-medium text-[var(--text)]">Unité convertie</span>
+                    <select
+                      value={form.conversion_unit}
+                      onChange={(e) => setForm((p) => ({ ...p, conversion_unit: e.target.value }))}
+                      className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
+                    >
+                      <option value="">—</option>
+                      {conversionUnitOptions.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
+
               <Input
                 label={brandLabel}
                 placeholder={placeholders.brand || "Ex. Marque X"}
@@ -888,6 +973,14 @@ export default function Products() {
                             Type : {productRoleLabels[p.product_role] || p.product_role}
                           </div>
                         )}
+                        {(p.variant_name || p.variant_value) && (
+                          <div className="text-xs text-[var(--muted)]">
+                            Variante : {[p.variant_name, p.variant_value].filter(Boolean).join(" ")}
+                          </div>
+                        )}
+                        {p.min_qty !== null && p.min_qty !== undefined && p.min_qty !== "" && (
+                          <div className="text-xs text-[var(--muted)]">Stock min : {p.min_qty}</div>
+                        )}
                         {(p.brand || p.supplier) && (
                           <div className="text-xs text-[var(--muted)]">
                             {[p.brand, p.supplier].filter(Boolean).join(" · ")}
@@ -939,6 +1032,11 @@ export default function Products() {
                                 category: p.category || "",
                                 barcode: p.barcode || "",
                                 internal_sku: p.internal_sku || "",
+                                variant_name: p.variant_name || "",
+                                variant_value: p.variant_value || "",
+                                min_qty: p.min_qty ?? "",
+                                conversion_unit: p.conversion_unit || "",
+                                conversion_factor: p.conversion_factor ?? "",
                                 brand: p.brand || "",
                                 supplier: p.supplier || "",
                                 notes: p.notes || "",

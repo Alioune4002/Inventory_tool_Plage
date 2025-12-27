@@ -97,7 +97,7 @@ export default function Landing() {
           <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
         </Helmet>
 
-        <main className="w-full max-w-none px-3 sm:px-6 lg:px-10 pb-16 space-y-14">
+        <main className="w-full max-w-none px-3 sm:px-6 lg:px-10 pb-16 space-y-14 overflow-x-hidden">
           {/* HERO */}
           <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-8 items-center">
             <div className="space-y-5">

@@ -18,13 +18,16 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "stock_movements_basic",
             "reports_basic",
             "exports_basic",
+            "exports_xlsx",
         ],
         "limits": {
             "max_products": 100,
-            # ✅ FIX: les tests créent "Principal" + "Bar"
-            # donc il faut au moins 2 services sur ESSENTIEL
-            "max_services": 2,
+            "max_services": 1,
             "max_users": 1,
+            "csv_monthly_limit": 1,
+            "xlsx_monthly_limit": 1,
+            "ai_requests_monthly_limit": 0,
+            "history_days": 14,
         },
     },
     "BOUTIQUE": {
@@ -37,12 +40,18 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "low_stock_alerts_email",
             "reports_standard",
             "exports_unlimited_csv",
+            "exports_xlsx",
             "roles_per_service",
+            "ai_assistant_basic",
+            "alerts_stock",
         ],
         "limits": {
             "max_products": 1000,
             "max_services": 2,
             "max_users": 3,
+            "csv_monthly_limit": None,
+            "xlsx_monthly_limit": 30,
+            "ai_requests_monthly_limit": 15,
         },
     },
     "PRO": {
@@ -64,11 +73,16 @@ PLAN_REGISTRY: Dict[str, Dict[str, Any]] = {
             "ai_assistant_basic",
             "multi_service_analytics",
             "advanced_roles",
+            "alerts_stock",
+            "alerts_expiry",
         ],
         "limits": {
             "max_products": None,  # illimité
             "max_services": 5,
             "max_users": 10,
+            "csv_monthly_limit": None,
+            "xlsx_monthly_limit": None,
+            "ai_requests_monthly_limit": 200,
         },
     },
     # ENTERPRISE: via overrides
@@ -138,6 +152,17 @@ def get_limits(tenant: Tenant) -> Dict[str, Optional[int]]:
         limits = dict(plan_cfg.get("limits", {}))
 
     return limits
+
+
+def get_retention_days(tenant: Tenant) -> Optional[int]:
+    limits = get_limits(tenant)
+    days = limits.get("history_days")
+    return int(days) if days is not None else None
+
+
+def get_plan_code(tenant: Tenant) -> str:
+    plan_code, _ = get_effective_plan(tenant)
+    return plan_code
 
 
 def get_usage(tenant: Tenant) -> Dict[str, int]:

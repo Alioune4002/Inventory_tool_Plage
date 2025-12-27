@@ -48,6 +48,8 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
   const entLoaded = entitlements !== null;
   const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
+  const planEffective = entitlements?.plan_effective;
+  const aiModeLabel = planEffective === "BOUTIQUE" ? "IA light" : planEffective === "PRO" ? "IA complet" : null;
 
   // UX soft : autorisé tant que les entitlements ne sont pas chargés (évite un flash paywall)
   const canUseAI = !entLoaded || aiAllowed;
@@ -181,14 +183,20 @@ export default function AIAssistantPanel({ month, serviceId }) {
 
         const code = e?.response?.data?.code;
         if (e?.response?.status === 403 && (code === "FEATURE_NOT_INCLUDED" || code?.startsWith?.("LIMIT_"))) {
-          showNotice("Plan Multi requis pour l’assistant IA.");
+          const isLimit = code === "LIMIT_AI_REQUESTS_MONTH";
+          const message = isLimit
+            ? "Quota IA mensuel atteint. Passez au plan Multi pour continuer."
+            : "Plan Multi requis pour utiliser l’assistant IA.";
+          showNotice(message);
           setData((prev) => ({
             ...prev,
-            message: "Plan Multi requis pour utiliser l’assistant IA.",
+            message,
             insights: [
               {
-                title: "Plan requis",
-                description: "Passez au plan Multi pour activer l’assistant IA.",
+                title: isLimit ? "Quota atteint" : "Plan requis",
+                description: isLimit
+                  ? "Votre quota IA mensuel est atteint. Passez au plan Multi pour plus de requêtes."
+                  : "Passez au plan Multi pour activer l’assistant IA.",
                 severity: "warning",
               },
             ],
@@ -251,6 +259,11 @@ export default function AIAssistantPanel({ month, serviceId }) {
           {disabledBecausePaywall && attempted ? (
             <Badge className="bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]">
               Plan Multi
+            </Badge>
+          ) : null}
+          {aiModeLabel && !disabledBecausePaywall ? (
+            <Badge className="bg-[var(--info-bg)] text-[var(--info-text)] border border-[var(--info-border)]">
+              {aiModeLabel}
             </Badge>
           ) : null}
 

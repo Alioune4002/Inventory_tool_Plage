@@ -10,7 +10,7 @@ const presets = {
       { title: "Ajouter sans code-barres", text: "Création rapide avec SKU généré automatiquement." },
       { title: "Changer de service", text: "Passez d’un bar à une cuisine ou boutique en un clic." },
       { title: "Déclarer une perte", text: "Casse / DLC / invendu : impact visible dans les stats." },
-      { title: "Exporter", text: "Générez un CSV/XLSX et partagez-le par email." },
+      { title: "Exporter", text: "Générez un CSV/XLSX (partage e-mail en plan Multi)." },
     ],
   },
   bar: {
@@ -30,7 +30,7 @@ const presets = {
       { title: "Production du jour", text: "Ajoutez les produits finis du jour." },
       { title: "Invendus", text: "Déclarez les invendus fin de journée." },
       { title: "Matières premières", text: "Suivez farine / beurre / œufs." },
-      { title: "Exporter pertes", text: "CSV pertes journalières + stock matières." },
+      { title: "Exporter inventaire", text: "CSV/XLSX pour la comptabilité ou l’équipe." },
     ],
   },
   epicerie: {
@@ -59,8 +59,8 @@ const presets = {
     steps: [
       { title: "Lot + péremption", text: "Ajoutez le lot et la date, alertes 30/90 jours." },
       { title: "Emplacement", text: "Réserve, rayon, frigo ou coffre." },
-      { title: "Mouvements sécurisés", text: "Entrée/sortie/transfert, registre exportable." },
-      { title: "Stupéfiants", text: "Mouvements verrouillés après validation." },
+      { title: "Pertes & traçabilité", text: "Déclarez casse / péremption, exports propres." },
+      { title: "Exports santé", text: "CSV/XLSX structuré pour votre suivi." },
     ],
   },
   camping: {

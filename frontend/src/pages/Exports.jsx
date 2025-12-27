@@ -58,6 +58,7 @@ export default function Exports() {
   const [includeCharts, setIncludeCharts] = useState(true);
   const [includeSummary, setIncludeSummary] = useState(true);
   const [toast, setToast] = useState("");
+  const [exportService, setExportService] = useState(serviceId || "");
 
   const pricingCfg = serviceFeatures?.prices || {};
   const purchaseEnabled = pricingCfg.purchase_enabled !== false;
@@ -87,6 +88,9 @@ export default function Exports() {
   const skuEnabled = getFeatureFlag("sku", familyIdentifiers.sku ?? true);
   const identifierEnabled = barcodeEnabled || skuEnabled;
   const itemTypeEnabled = getFeatureFlag("item_type", familyMeta?.modules?.includes("itemType"));
+  const variantsEnabled = getFeatureFlag("variants", familyMeta?.modules?.includes("variants"));
+  const multiUnitEnabled = getFeatureFlag("multi_unit", familyMeta?.modules?.includes("multiUnit"));
+  const lotEnabled = getFeatureFlag("lot", familyMeta?.modules?.includes("lot"));
 
   const fieldOptions = useMemo(() => {
     const fields = [
@@ -96,6 +100,7 @@ export default function Exports() {
       { key: "unit", label: "Unité", helper: "Unité de comptage." },
       { key: "inventory_month", label: "Mois", helper: "Mois d’inventaire." },
       { key: "service", label: "Service", helper: "Service concerné." },
+      { key: "min_qty", label: "Stock min", helper: "Seuil d’alerte stock." },
       { key: "purchase_price", label: "Prix achat (€)", helper: "Prix d’achat HT." },
       { key: "selling_price", label: "Prix vente (€)", helper: "Prix de vente HT." },
       { key: "tva", label: "TVA (%)", helper: "Taux de TVA." },
@@ -115,8 +120,42 @@ export default function Exports() {
         helper: "Identifiant principal catalogue.",
       });
     }
+    if (variantsEnabled) {
+      fields.push(
+        { key: "variant", label: "Variante", helper: "Libellé + valeur de variante." },
+        { key: "variant_name", label: "Variante (libellé)", helper: "Ex. Taille, Couleur." },
+        { key: "variant_value", label: "Variante (valeur)", helper: "Ex. M, Bleu, 75cl." }
+      );
+    }
+    if (lotEnabled) {
+      fields.push({ key: "lot_number", label: "Lot / Batch", helper: "Numéro de lot (si activé)." });
+    }
+    if (showOpenFilter) {
+      fields.push(
+        { key: "container_status", label: "Statut (entamé)", helper: "Statut du contenant." },
+        { key: "remaining_fraction", label: "Reste (fraction)", helper: "Reste pour les contenants ouverts." }
+      );
+    }
+    if (multiUnitEnabled) {
+      fields.push(
+        { key: "conversion_factor", label: "Conversion (facteur)", helper: "Ex. 1 unité = 0.75 L." },
+        { key: "conversion_unit", label: "Conversion (unité)", helper: "Unité convertie." },
+        { key: "converted_quantity", label: "Quantité convertie", helper: "Quantité après conversion." },
+        { key: "converted_unit", label: "Unité convertie (résultat)", helper: "Unité de la quantité convertie." }
+      );
+    }
     return fields;
-  }, [identifierEnabled, itemTypeEnabled, wording.identifierLabel, wording.categoryLabel, itemLabelLower]);
+  }, [
+    identifierEnabled,
+    itemTypeEnabled,
+    variantsEnabled,
+    lotEnabled,
+    showOpenFilter,
+    multiUnitEnabled,
+    wording.identifierLabel,
+    wording.categoryLabel,
+    itemLabelLower,
+  ]);
 
   const defaultFields = useMemo(() => {
     const base = ["name", "category", "quantity", "unit"];
@@ -150,6 +189,18 @@ export default function Exports() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    if (!serviceId) return;
+    if (exportService !== "all") setExportService(serviceId);
+  }, [serviceId, exportService]);
+
+  useEffect(() => {
+    if (exportService === "all") {
+      setSelectedCategories([]);
+      setAvailableCategories([]);
+    }
+  }, [exportService]);
+
   const toggleField = (key) => {
     setSelectedFields((prev) => {
       if (prev.includes(key)) {
@@ -165,7 +216,8 @@ export default function Exports() {
   const includeIdentifier = selectedFields.includes("identifier");
 
   const doExport = async (format = "xlsx") => {
-    if (!serviceId) {
+    const effectiveService = exportService || serviceId;
+    if (!effectiveService) {
       setToast("Choisissez un service d’abord.");
       return;
     }
@@ -186,7 +238,6 @@ export default function Exports() {
       }
 
       const payload = {
-        service: serviceId,
         mode,
         include_tva: includeTVA,
         include_dlc: includeDLC,
@@ -201,6 +252,11 @@ export default function Exports() {
         message,
         fields: selectedFields,
       };
+      if (effectiveService === "all") {
+        payload.services = (services || []).map((s) => s.id);
+      } else {
+        payload.service = effectiveService;
+      }
 
       const res = await api.post("/api/export-advanced/", payload, {
         responseType: "blob",
@@ -245,12 +301,12 @@ export default function Exports() {
   };
 
   useEffect(() => {
-    if (!serviceId) return;
+    if (!serviceId || exportService === "all") return;
     api
-      .get("/api/categories/", { params: { service: serviceId } })
+      .get("/api/categories/", { params: { service: exportService || serviceId } })
       .then((res) => setAvailableCategories(res.data || []))
       .catch(() => setAvailableCategories([]));
-  }, [serviceId]);
+  }, [serviceId, exportService]);
 
   const toggleCategory = (slug) => {
     setSelectedCategories((prev) => (prev.includes(slug) ? prev.filter((s) => s !== slug) : [...prev, slug]));
@@ -288,16 +344,19 @@ export default function Exports() {
                 <span className="text-sm font-medium text-[var(--text)]">Service</span>
                 <select
                   className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
-                  value={serviceId || ""}
-                  onChange={() => setToast("Change le service dans la topbar.")}
-                  disabled
+                  value={exportService || serviceId || ""}
+                  onChange={(e) => setExportService(e.target.value)}
                 >
                   {services.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
-                  <option value="all">Tous les services</option>
+                  {services.length > 1 && <option value="all">Tous les services</option>}
                 </select>
-                <span className="text-xs text-[var(--muted)]">Service sélectionné dans la topbar.</span>
+                <span className="text-xs text-[var(--muted)]">
+                  {exportService === "all"
+                    ? "Export global (tous services). Les catégories sont désactivées."
+                    : "Vous pouvez exporter un service précis ou tout regrouper."}
+                </span>
               </label>
             )}
 
@@ -336,7 +395,9 @@ export default function Exports() {
             <div className="space-y-2">
               <span className="text-sm font-medium text-[var(--text)]">{wording.categoryLabel}</span>
               <div className="flex flex-wrap gap-2">
-                {availableCategories.length === 0 ? (
+                {exportService === "all" ? (
+                  <span className="text-xs text-[var(--muted)]">Catégories désactivées en export global.</span>
+                ) : availableCategories.length === 0 ? (
                   <span className="text-xs text-[var(--muted)]">Chargement des catégories…</span>
                 ) : (
                   availableCategories.map((category) => {

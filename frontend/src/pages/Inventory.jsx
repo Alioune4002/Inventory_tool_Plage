@@ -52,6 +52,11 @@ export default function Inventory() {
     quantity: "",
     barcode: "",
     internal_sku: "",
+    variant_name: "",
+    variant_value: "",
+    min_qty: "",
+    conversion_unit: "",
+    conversion_factor: "",
     product_role: "",
     dlc: "",
     unit: "pcs",
@@ -106,6 +111,8 @@ export default function Inventory() {
   const lotEnabled = getFeatureFlag("lot", familyModules.includes("lot"));
   const dlcEnabled = getFeatureFlag("dlc", familyModules.includes("expiry"));
   const dlcRecommended = !!dlcCfg.recommended;
+  const variantsEnabled = getFeatureFlag("variants", familyModules.includes("variants"));
+  const multiUnitEnabled = getFeatureFlag("multi_unit", familyModules.includes("multiUnit"));
 
   const openEnabled = getFeatureFlag("open_container_tracking", familyModules.includes("opened"));
   const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
@@ -124,6 +131,7 @@ export default function Inventory() {
     if (countingMode === "mixed") return ["pcs", "kg", "g", "l", "ml"];
     return ["pcs"];
   }, [countingMode]);
+  const conversionUnitOptions = ["pcs", "kg", "g", "l", "ml"];
 
   useEffect(() => {
     setQuick((prev) => {
@@ -237,6 +245,11 @@ export default function Inventory() {
       quantity: "",
       barcode: "",
       internal_sku: "",
+      variant_name: "",
+      variant_value: "",
+      min_qty: "",
+      conversion_unit: "",
+      conversion_factor: "",
       product_role: "",
       dlc: "",
       unit: unitOptions[0],
@@ -286,6 +299,16 @@ export default function Inventory() {
       notes: quick.comment || "",
     };
 
+    if (variantsEnabled) {
+      payload.variant_name = quick.variant_name || null;
+      payload.variant_value = quick.variant_value || null;
+    }
+    if (quick.min_qty !== "") payload.min_qty = quick.min_qty;
+    if (multiUnitEnabled) {
+      payload.conversion_unit = quick.conversion_unit || null;
+      payload.conversion_factor = quick.conversion_factor || null;
+    }
+
     if (barcodeEnabled) payload.barcode = cleanedBarcode;
     else payload.barcode = "";
 
@@ -319,9 +342,14 @@ export default function Inventory() {
           !String(warning).toLowerCase().includes("prix d'achat") &&
           !String(warning).toLowerCase().includes("prix de vente")
       );
+      const generatedSku =
+        skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
 
       if (filteredWarnings.length) pushToast?.({ message: filteredWarnings.join(" "), type: "warn" });
       else pushToast?.({ message: "Comptage enregistré.", type: "success" });
+      if (generatedSku) {
+        pushToast?.({ message: `SKU généré : ${generatedSku} (modifiable).`, type: "info" });
+      }
 
       if (shouldCreateLoss && res?.data?.id) {
         try {
@@ -371,6 +399,11 @@ export default function Inventory() {
           name: p.name || prev.name,
           category: p.category || prev.category,
           internal_sku: p.internal_sku || prev.internal_sku,
+          variant_name: p.variant_name || prev.variant_name,
+          variant_value: p.variant_value || prev.variant_value,
+          min_qty: p.min_qty ?? prev.min_qty,
+          conversion_unit: p.conversion_unit || prev.conversion_unit,
+          conversion_factor: p.conversion_factor ?? prev.conversion_factor,
           product_role: p.product_role || prev.product_role,
           dlc: p.dlc || prev.dlc,
           unit: p.unit || prev.unit,
@@ -390,6 +423,10 @@ export default function Inventory() {
         setLastFound({ type: "external", suggestion: res.data.suggestion });
         pushToast?.({ message: "Suggestion trouvée : vérifiez puis complétez.", type: "info" });
         return { kind: "external", data: res.data.suggestion };
+      }
+
+      if (res?.data?.off_error) {
+        pushToast?.({ message: res.data.off_error, type: "info" });
       }
 
       setLastFound(null);
@@ -625,6 +662,15 @@ export default function Inventory() {
                     helper="Quantité comptée pour ce mois."
                   />
 
+                  <Input
+                    label="Stock minimum (alerte)"
+                    type="number"
+                    min={0}
+                    value={quick.min_qty}
+                    onChange={(e) => setQuick((p) => ({ ...p, min_qty: e.target.value }))}
+                    helper="Optionnel : seuil pour alerte stock (plan Duo/Multi)."
+                  />
+
                   {barcodeEnabled && (
                     <Input
                       label={wording.barcodeLabel}
@@ -680,6 +726,55 @@ export default function Inventory() {
                       onChange={(e) => setQuick((p) => ({ ...p, internal_sku: e.target.value }))}
                       helper={showIdentifierWarning ? helpers.sku : "Optionnel"}
                     />
+                  )}
+
+                  {variantsEnabled && (
+                    <>
+                      <Input
+                        label="Variante (libellé)"
+                        placeholder="Ex. Taille ou Couleur"
+                        value={quick.variant_name}
+                        onChange={(e) => setQuick((p) => ({ ...p, variant_name: e.target.value }))}
+                        helper="Optionnel : libellé de variante."
+                      />
+                      <Input
+                        label="Variante (valeur)"
+                        placeholder="Ex. M, Bleu, 75cl"
+                        value={quick.variant_value}
+                        onChange={(e) => setQuick((p) => ({ ...p, variant_value: e.target.value }))}
+                        helper="Optionnel : valeur de variante."
+                      />
+                    </>
+                  )}
+
+                  {multiUnitEnabled && (
+                    <>
+                      <Input
+                        label="Conversion (facteur)"
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        placeholder="Ex. 0.75"
+                        value={quick.conversion_factor}
+                        onChange={(e) => setQuick((p) => ({ ...p, conversion_factor: e.target.value }))}
+                        helper="Ex. 1 unité = 0.75 L (facteur)."
+                      />
+                      <label className="space-y-1.5 min-w-0">
+                        <span className="text-sm font-medium text-[var(--text)]">Unité convertie</span>
+                        <select
+                          value={quick.conversion_unit}
+                          onChange={(e) => setQuick((p) => ({ ...p, conversion_unit: e.target.value }))}
+                          className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] px-3 py-2.5 text-sm font-semibold"
+                        >
+                          <option value="">—</option>
+                          {conversionUnitOptions.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </>
                   )}
 
                   {(countingMode === "weight" || countingMode === "volume" || countingMode === "mixed") && (

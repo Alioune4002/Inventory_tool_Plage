@@ -2,11 +2,12 @@
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
-const defaultBackendURL = "https://inventory-tool-plage.onrender.com";
+const defaultBackendURL = import.meta.env.DEV
+  ? "http://localhost:8000"
+  : "https://inventory-tool-plage.onrender.com";
+const baseURL = import.meta.env.VITE_API_BASE_URL || defaultBackendURL;
 
-export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || defaultBackendURL,
-});
+export const api = axios.create({ baseURL });
 
 export const setAuthToken = (token) => {
   if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`;
@@ -138,7 +139,11 @@ api.interceptors.response.use(
     // Gestion limites / plan
     if (status === 403) {
       const c = error.response?.data?.code;
-      if (c && String(c).startsWith("LIMIT_")) {
+      if (c && String(c).startsWith("LIMIT_EXPORT_")) {
+        error.friendlyMessage =
+          error.response?.data?.detail ||
+          "Limite d’export mensuelle atteinte. Passez à un plan supérieur pour continuer.";
+      } else if (c && String(c).startsWith("LIMIT_")) {
         error.friendlyMessage =
           error.response?.data?.detail ||
           "Action bloquée : vous avez atteint la limite de votre plan. Lecture et export restent possibles.";

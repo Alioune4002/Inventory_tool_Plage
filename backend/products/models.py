@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from accounts.models import Tenant, Service
@@ -22,6 +23,7 @@ class Product(models.Model):
 
     quantity = models.DecimalField(max_digits=10, decimal_places=3, default=0)
     unit = models.CharField(max_length=10, default="pcs")
+    min_qty = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
 
     CONTAINER_STATUS = (
         ("SEALED", "Non entamé"),
@@ -70,6 +72,12 @@ class Product(models.Model):
     barcode = models.CharField(max_length=50, null=True, blank=True)
     no_barcode = models.BooleanField(default=False)
     internal_sku = models.CharField(max_length=50, null=True, blank=True)
+
+    variant_name = models.CharField(max_length=80, null=True, blank=True)
+    variant_value = models.CharField(max_length=120, null=True, blank=True)
+
+    conversion_unit = models.CharField(max_length=10, null=True, blank=True)
+    conversion_factor = models.DecimalField(max_digits=12, decimal_places=6, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     inventory_month = models.CharField(max_length=7, db_index=True)  # Format: YYYY-MM
@@ -167,3 +175,32 @@ class Category(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.service})"
+
+
+class ExportEvent(models.Model):
+    FORMAT_CHOICES = (
+        ("csv", "CSV"),
+        ("xlsx", "XLSX"),
+    )
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="export_events")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="export_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    format = models.CharField(max_length=10, choices=FORMAT_CHOICES)
+    emailed = models.BooleanField(default=False)
+    params = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["tenant", "created_at"], name="exp_evt_tenant_created_idx"),
+            models.Index(fields=["tenant", "format", "created_at"], name="exp_evt_tenant_fmt_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id} export {self.format} ({self.created_at.date()})"

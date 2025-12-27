@@ -165,7 +165,7 @@ export default function PublicSupport() {
                 {emailSupport}
               </a>
             </p>
-            <p className="text-slate-200 text-sm">Réponse sous 24h ouvrées.</p>
+            <p className="text-slate-200 text-sm">Réponse sous 24h ouvrées (objectif).</p>
 
             <div className="pt-2">
               <Button as="a" href={mailto} variant="secondary" className="w-full sm:w-auto">

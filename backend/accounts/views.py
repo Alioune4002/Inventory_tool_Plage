@@ -40,7 +40,7 @@ from .serializers import (
     PasswordResetConfirmSerializer,
     MembershipSerializer,
 )
-from .utils import get_tenant_for_request, get_user_role
+from .utils import get_tenant_for_request, get_user_role, normalize_email
 from .services.access import check_limit, get_usage
 from utils.sendgrid_email import send_email_with_sendgrid
 
@@ -615,7 +615,18 @@ class PasswordResetRequestView(APIView):
         if data.get("username"):
             user = User.objects.filter(username=data["username"]).first()
         if not user and data.get("email"):
-            user = User.objects.filter(email=data["email"]).first()
+            normalized = normalize_email(data["email"])
+            if normalized:
+                matches = User.objects.filter(email__iexact=normalized)
+                if matches.count() > 1:
+                    return Response(
+                        {
+                            "detail": "Plusieurs comptes utilisent cet email. Utilisez votre nom d’utilisateur.",
+                            "code": "email_not_unique",
+                        },
+                        status=409,
+                    )
+                user = matches.first()
 
         # On ne révèle pas si le compte existe
         if not user:
@@ -678,11 +689,20 @@ class ResendVerificationEmailView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip()
+        email = normalize_email(request.data.get("email") or "")
         if not email:
             return Response({"detail": "Email requis."}, status=400)
 
-        user = User.objects.filter(email__iexact=email).first()
+        matches = User.objects.filter(email__iexact=email)
+        if matches.count() > 1:
+            return Response(
+                {
+                    "detail": "Plusieurs comptes utilisent cet email. Utilisez votre nom d’utilisateur.",
+                    "code": "email_not_unique",
+                },
+                status=409,
+            )
+        user = matches.first()
         if not user:
             return Response({"detail": "Si le compte existe, un email a été renvoyé."})
 
@@ -716,7 +736,7 @@ class EmailChangeRequestView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        new_email = (request.data.get("email") or "").strip().lower()
+        new_email = normalize_email(request.data.get("email") or "")
         if not new_email:
             return Response({"detail": "Nouvel email requis."}, status=400)
         if User.objects.filter(email__iexact=new_email).exists():

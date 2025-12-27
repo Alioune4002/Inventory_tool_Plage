@@ -117,6 +117,7 @@ class Service(models.Model):
     service_type = models.CharField(max_length=40, choices=SERVICE_TYPES, default="other")
     counting_mode = models.CharField(max_length=20, choices=COUNTING_MODES, default="unit")
     features = ModelJSONField(default=default_service_features)
+    sku_sequence = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

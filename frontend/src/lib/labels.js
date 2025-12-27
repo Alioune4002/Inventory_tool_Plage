@@ -54,6 +54,10 @@ export function getUxCopy(serviceType, domain) {
   const hasBarcode = Boolean(family.identifiers?.barcode);
   const hasSku = Boolean(family.identifiers?.sku);
   const hasItemType = family.modules?.includes("itemType");
+  const prefillNote =
+    domain === "food"
+      ? "Préremplissage automatique : alimentaire uniquement (OpenFoodFacts)."
+      : "Préremplissage automatique indisponible (hors alimentaire).";
 
   const base = {
     productsTitle: `Catalogue ${itemPlural}`,
@@ -64,7 +68,7 @@ export function getUxCopy(serviceType, domain) {
     quickAddTitle: hasBarcode ? "Ajout rapide / Scan" : "Ajout rapide",
     scanButton: "Chercher / pre-remplir",
     scanHint: hasBarcode
-      ? "Scannez pour gagner du temps et eviter les doublons. Sinon, utilisez un SKU stable."
+      ? `Scannez pour gagner du temps et eviter les doublons. ${prefillNote}`
       : "Le SKU est l'identifiant principal. Le scan reste optionnel.",
     searchHint: `Nom, ${identifierLabel}`,
     emptyProducts: `Aucun ${itemLabel} pour ce mois sur ce service.`,
@@ -91,7 +95,7 @@ export function getUxCopy(serviceType, domain) {
           "Comptage mensuel par CIP pour rester conforme et gagner du temps.",
         quickAddTitle: "Ajout rapide / Scan CIP",
         scanHint:
-          "Scannez un CIP pour retrouver un produit deja saisi et gagner du temps.",
+          `Scannez un CIP pour retrouver un produit deja saisi et gagner du temps. ${prefillNote}`,
         searchHint: "Nom, CIP ou code interne",
         barcodeHelper: "CIP recommande : evite les doublons et facilite la recherche.",
         skuHelper:
@@ -122,7 +126,7 @@ export function getUxCopy(serviceType, domain) {
         inventoryIntro:
           "Comptage mensuel pour cuisine et salle. Simple, clair, exportable.",
         scanHint:
-          "Scan optionnel. Un SKU peut suffire pour standardiser vos matieres premieres.",
+          `Scan optionnel. Un SKU peut suffire pour standardiser vos matieres premieres. ${prefillNote}`,
         categoryHelper: "Ex. Cuisine, Salle, Prepa froide",
         productRoleHelper: hasItemType
           ? "Matiere premiere = cout. Produit fini = vente. Utile pour marge estimee."
@@ -139,7 +143,7 @@ export function getUxCopy(serviceType, domain) {
         inventoryIntro:
           "Comptage du mois pour pains, patisseries et ingredients maison.",
         scanHint:
-          "Scannez les ingredients emballes. Pour le fait maison, preferez un SKU.",
+          `Scannez les ingredients emballes. Pour le fait maison, preferez un SKU. ${prefillNote}`,
         categoryHelper: "Ex. Pains, Viennoiseries, Patisseries",
         productRoleHelper: hasItemType
           ? "Definissez matiere premiere ou produit fini pour une lecture marge plus claire."
@@ -156,7 +160,7 @@ export function getUxCopy(serviceType, domain) {
         inventoryIntro:
           "Comptage mensuel propre : SKU, collections et quantites. Scan optionnel.",
         scanHint:
-          "Le SKU reste votre identifiant principal. Le code-barres reste optionnel.",
+          `Le SKU reste votre identifiant principal. Le code-barres reste optionnel. ${prefillNote}`,
         barcodeHelper: "Optionnel : utile si vous scannez en caisse ou en reception.",
         skuHelper: "SKU recommande : base stable pour gerer vos collections.",
         categoryHelper: "Ex. Collection ete, Accessoires, Bijoux",
@@ -172,7 +176,7 @@ export function getUxCopy(serviceType, domain) {
         inventoryIntro:
           "Comptage mensuel des rayons avec DLC/DDM si active.",
         scanHint:
-          "Scannez pour eviter les doublons. Sinon, utilisez un SKU interne stable.",
+          `Scannez pour eviter les doublons. Sinon, utilisez un SKU interne stable. ${prefillNote}`,
         categoryHelper: "Ex. Frais, Epicerie, Boissons, Surgeles",
       };
 

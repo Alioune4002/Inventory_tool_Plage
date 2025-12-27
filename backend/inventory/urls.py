@@ -5,6 +5,7 @@ from django.db.utils import OperationalError, ProgrammingError
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from ai_assistant.views import AiAssistantView
+from inventory.metrics import metrics_view
 from products.views import (
     ProductViewSet,
     CategoryViewSet,
@@ -14,6 +15,7 @@ from products.views import (
     export_advanced,
     export_generic,
     home,
+    alerts,
     search_products,
     lookup_product,
 )
@@ -42,19 +44,22 @@ urlpatterns = [
     path("", home, name="home"),
     path("health/", health, name="health"),
     path("health/db/", health_db, name="health-db"),
+    path("metrics/", metrics_view, name="metrics"),
     path("admin/", admin.site.urls),
 
-    path("api/", include(router.urls)),
     path("api/inventory-stats/", inventory_stats),
 
     path("api/export-excel/", export_excel),
     path("api/products/export/excel/", export_excel), 
     path("api/export-advanced/", export_advanced),
     path("api/exports/", export_generic),
+    path("api/alerts/", alerts),
 
     path("api/products/lookup/", lookup_product),
     path("api/products/search/", search_products),
 
     path("api/auth/", include("accounts.urls")),
     path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),
+
+    path("api/", include(router.urls)),
 ]

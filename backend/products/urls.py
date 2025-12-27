@@ -2,6 +2,7 @@ from django.urls import path
 from django.views.generic import RedirectView
 
 from .views import (
+    alerts,
     export_excel,
     export_advanced,
     home,
@@ -13,6 +14,7 @@ from .views import (
 urlpatterns = [
     path('favicon.ico', RedirectView.as_view(url='/static/favicon.ico', permanent=False)),
     path('inventory-stats/', inventory_stats, name='inventory_stats'),
+    path('alerts/', alerts, name='alerts'),
     path('export-excel/', export_excel, name='export_excel'),
     path('export-advanced/', export_advanced, name='export_advanced'),
     path('lookup/', lookup_product, name='lookup_product'),

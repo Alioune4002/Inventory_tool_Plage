@@ -121,7 +121,7 @@ export default function Login() {
   }, [err]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-2 sm:px-4 relative overflow-hidden">
+    <div className="min-h-screen w-full flex items-center justify-center px-2 sm:px-4 relative overflow-x-hidden">
       <Helmet>
         <title>Connexion | StockScan</title>
         <meta name="description" content="Connectez-vous à StockScan pour gérer vos inventaires." />

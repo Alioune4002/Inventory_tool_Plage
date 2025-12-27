@@ -12,6 +12,7 @@ import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import AIAssistantPanel from "../components/AIAssistantPanel";
+import AlertsPanel from "../components/AlertsPanel";
 import { getWording, getUxCopy } from "../lib/labels";
 
 const fmtCurrency = (n) =>
@@ -705,6 +706,7 @@ export default function Dashboard() {
           )}
         </Card>
 
+        <AlertsPanel />
         <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
       </div>
     </PageTransition>
