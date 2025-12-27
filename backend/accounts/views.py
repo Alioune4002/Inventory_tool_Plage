@@ -1049,13 +1049,108 @@ class CreateBillingPortalView(APIView):
         customer_id = _get_or_create_stripe_customer(tenant, request.user)
 
         _stripe_init()
-        return_url = getattr(settings, "FRONTEND_URL", "https://stockscan.app") + "/settings"
+        return_url = getattr(settings, "FRONTEND_URL", "https://stockscan.app") + "/app/settings"
 
         portal = stripe.billing_portal.Session.create(  # type: ignore
             customer=customer_id,
             return_url=return_url,
         )
         return Response({"url": portal["url"]}, status=200)
+
+
+class BillingSyncView(APIView):
+    """
+    POST /api/auth/billing/sync/
+    Synchronise un checkout Stripe si le webhook n'a pas encore mis à jour le plan.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        if not _stripe_enabled():
+            return Response({"detail": "Stripe non configuré côté serveur."}, status=503)
+
+        session_id = (request.data or {}).get("session_id") or request.query_params.get("session_id")
+        if not session_id:
+            return Response({"detail": "session_id requis."}, status=400)
+
+        tenant = get_tenant_for_request(request)
+
+        _stripe_init()
+        try:
+            session = stripe.checkout.Session.retrieve(  # type: ignore
+                session_id,
+                expand=["subscription", "customer"],
+            )
+        except Exception as e:
+            LOGGER.warning("Stripe session retrieve failed: %s", e)
+            return Response({"detail": "Session Stripe introuvable."}, status=400)
+
+        metadata = session.get("metadata") or {}
+        tenant_id = metadata.get("tenant_id") or session.get("client_reference_id")
+        if tenant_id and str(tenant_id) != str(tenant.id):
+            return Response(
+                {"detail": "Session Stripe non associée à ce commerce.", "code": "stripe_session_mismatch"},
+                status=403,
+            )
+
+        plan_code = _normalize_checkout_plan(metadata.get("plan_code") or "")
+        cycle = (metadata.get("billing_cycle") or "MONTHLY").upper()
+        if not plan_code:
+            return Response({"detail": "Plan Stripe manquant."}, status=400)
+
+        customer_id = session.get("customer") or ""
+        if customer_id and not tenant.stripe_customer_id:
+            tenant.stripe_customer_id = customer_id
+            tenant.save(update_fields=["stripe_customer_id"])
+
+        subscription_id = session.get("subscription")
+        current_period_end = None
+        status_code = "ACTIVE"
+
+        if subscription_id:
+            try:
+                sub = stripe.Subscription.retrieve(subscription_id)  # type: ignore
+                status_raw = (sub.get("status") or "").lower()
+                cpe = sub.get("current_period_end")
+                current_period_end = timezone.datetime.fromtimestamp(cpe, tz=timezone.utc) if cpe else None
+
+                if status_raw in ("past_due", "unpaid"):
+                    status_code = "PAST_DUE"
+                elif status_raw in ("canceled", "incomplete_expired"):
+                    status_code = "CANCELED"
+                else:
+                    status_code = "ACTIVE"
+
+                sub_row, _ = Subscription.objects.get_or_create(
+                    tenant=tenant,
+                    defaults={"provider": "STRIPE"},
+                )
+                sub_row.provider_sub_id = subscription_id
+                sub_row.status = status_code
+                sub_row.current_period_end = current_period_end
+                if status_code == "CANCELED":
+                    sub_row.canceled_at = timezone.now()
+                sub_row.save()
+            except Exception as e:
+                LOGGER.warning("Stripe subscription retrieve failed: %s", e)
+
+        _set_tenant_plan_active(
+            tenant,
+            plan_code=plan_code,
+            billing_cycle=cycle,
+            status_code=status_code,
+            current_period_end=current_period_end,
+            source="PAID",
+        )
+
+        return Response(
+            {
+                "detail": "Plan synchronisé.",
+                "plan_code": plan_code,
+                "status": status_code,
+            },
+            status=200,
+        )
 
 
 class StripeWebhookView(APIView):

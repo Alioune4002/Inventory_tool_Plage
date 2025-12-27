@@ -20,6 +20,7 @@ from .views import (
     # Billing / Stripe (NOMS OK)
     CreateCheckoutSessionView,
     CreateBillingPortalView,
+    BillingSyncView,
     StripeWebhookView,
 
     # Members summary
@@ -52,6 +53,7 @@ urlpatterns = [
     # Stripe Billing
     path("billing/checkout/", CreateCheckoutSessionView.as_view(), name="billing-checkout"),
     path("billing/portal/", CreateBillingPortalView.as_view(), name="billing-portal"),
+    path("billing/sync/", BillingSyncView.as_view(), name="billing-sync"),
     path("billing/webhook/", StripeWebhookView.as_view(), name="billing-webhook"),
 
     # Members summary (owner)

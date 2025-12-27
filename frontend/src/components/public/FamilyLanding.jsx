@@ -3,7 +3,7 @@ import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import Card from "../../ui/Card";
 import Button from "../../ui/Button";
-import AutoDemoShowcase from "../../demo/AutoDemoShowcase";
+import LazyAutoDemoShowcase from "./LazyAutoDemoShowcase";
 import PublicShell from "./PublicShell";
 import { FAMILLES, MODULES } from "../../lib/famillesConfig";
 
@@ -197,7 +197,7 @@ export default function FamilyLanding({ familyId, seoTitle, seoDescription }) {
               Tester avec mon compte →
             </Link>
           </div>
-          <AutoDemoShowcase />
+          <LazyAutoDemoShowcase />
         </section>
 
         {/* FAQ */}

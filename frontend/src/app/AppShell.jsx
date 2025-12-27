@@ -1,18 +1,19 @@
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
-import Topbar from "../components/Topbar";
-import Toasts from "../components/Toast";
 import AppRoutes from "./routes";
 import { useAuth } from "./AuthProvider";
 import { ToastProvider, useToast } from "./ToastContext";
-import BillingBanners from "../components/BillingBanners";
 import useEntitlements from "./useEntitlements";
-import MobileNav from "../components/MobileNav";
-import GuidedTour from "../components/GuidedTour";
 import ErrorBoundary from "./ErrorBoundary";
 import { formatApiError } from "../lib/errorUtils";
+
+const Sidebar = React.lazy(() => import("../components/Sidebar"));
+const Topbar = React.lazy(() => import("../components/Topbar"));
+const Toasts = React.lazy(() => import("../components/Toast"));
+const BillingBanners = React.lazy(() => import("../components/BillingBanners"));
+const MobileNav = React.lazy(() => import("../components/MobileNav"));
+const GuidedTour = React.lazy(() => import("../components/GuidedTour"));
 
 function getInitialTheme() {
   try {
@@ -88,21 +89,31 @@ export default function AppShell() {
 
       <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
         {isAppSection && isAuthed && (
-          <Topbar
-            onLogout={onLogout}
-            tenant={tenant}
-            user={me}
-            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-            onOpenMobileNav={() => setMobileNavOpen(true)}
-          />
+          <Suspense fallback={null}>
+            <Topbar
+              onLogout={onLogout}
+              tenant={tenant}
+              user={me}
+              onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+              onOpenMobileNav={() => setMobileNavOpen(true)}
+            />
+          </Suspense>
         )}
 
         <div className="h-full flex">
-          {isAppSection && isAuthed && <Sidebar />}
+          {isAppSection && isAuthed && (
+            <Suspense fallback={null}>
+              <Sidebar />
+            </Suspense>
+          )}
 
           <div className="flex-1 min-w-0">
             <main className="mx-auto max-w-6xl px-4 py-6">
-              {isAppSection && isAuthed && <BillingBanners entitlements={entitlements} />}
+              {isAppSection && isAuthed && (
+                <Suspense fallback={null}>
+                  <BillingBanners entitlements={entitlements} />
+                </Suspense>
+              )}
 
               <ErrorBoundary>
                 <AppRoutes />
@@ -111,9 +122,15 @@ export default function AppShell() {
           </div>
         </div>
 
-        <GuidedTour onRequestMobileNav={setMobileNavOpen} />
-        <Toasts />
-        <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
+        <Suspense fallback={null}>
+          <GuidedTour onRequestMobileNav={setMobileNavOpen} />
+        </Suspense>
+        <Suspense fallback={null}>
+          <Toasts />
+        </Suspense>
+        <Suspense fallback={null}>
+          <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
+        </Suspense>
       </div>
     </ToastProvider>
   );

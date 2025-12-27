@@ -1,12 +1,10 @@
 import React from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
 import { ArrowRight, Barcode, BookOpen, ClipboardList, Sparkles } from "lucide-react";
-import PageTransition from "../components/PageTransition";
 import PublicShell from "../components/public/PublicShell";
 import Card from "../ui/Card";
-import AutoDemoShowcase from "../demo/AutoDemoShowcase";
+import LazyAutoDemoShowcase from "../components/public/LazyAutoDemoShowcase";
 import { FAMILLES, MODULES } from "../lib/famillesConfig";
 
 const familyIcons = {
@@ -70,34 +68,33 @@ export default function Landing() {
 
   return (
     <PublicShell>
-      <PageTransition>
-        <Helmet>
-          <title>{seoTitle}</title>
-          <meta name="description" content={seoDescription} />
+      <Helmet>
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDescription} />
 
-          <link rel="canonical" href={canonicalUrl} />
+        <link rel="canonical" href={canonicalUrl} />
 
-          {/* Open Graph */}
-          <meta property="og:site_name" content="StockScan" />
-          <meta property="og:type" content="website" />
-          <meta property="og:url" content={canonicalUrl} />
-          <meta property="og:title" content={seoTitle} />
-          <meta property="og:description" content={seoDescription} />
-          <meta property="og:image" content={ogImage} />
-          <meta property="og:image:width" content="1200" />
-          <meta property="og:image:height" content="630" />
+        {/* Open Graph */}
+        <meta property="og:site_name" content="StockScan" />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta property="og:title" content={seoTitle} />
+        <meta property="og:description" content={seoDescription} />
+        <meta property="og:image" content={ogImage} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
 
-          {/* Twitter */}
-          <meta name="twitter:card" content="summary_large_image" />
-          <meta name="twitter:title" content={seoTitle} />
-          <meta name="twitter:description" content={seoDescription} />
-          <meta name="twitter:image" content={ogImage} />
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={seoTitle} />
+        <meta name="twitter:description" content={seoDescription} />
+        <meta name="twitter:image" content={ogImage} />
 
-          {/* JSON-LD */}
-          <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
-        </Helmet>
+        {/* JSON-LD */}
+        <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
+      </Helmet>
 
-        <main className="w-full max-w-none px-3 sm:px-6 lg:px-10 pb-16 space-y-14 overflow-x-hidden">
+      <main className="w-full max-w-none px-3 sm:px-6 lg:px-10 pb-16 space-y-14 overflow-x-hidden">
           {/* HERO */}
           <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-8 items-center">
             <div className="space-y-5">
@@ -149,12 +146,7 @@ export default function Landing() {
             </div>
 
             {/* PREVIEW */}
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
-              className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900/80 to-slate-950 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]"
-            >
+            <div className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900/80 to-slate-950 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
               <div className="text-sm text-white/70">Aperçu</div>
               <div className="mt-2 text-2xl font-black text-white">Tableau de bord</div>
 
@@ -175,7 +167,7 @@ export default function Landing() {
                   <div className="text-sm text-white/80">Prix & TVA · DLC · Produits entamés</div>
                 </Card>
               </div>
-            </motion.div>
+            </div>
           </section>
 
           {/* EXPLICATION SIMPLE */}
@@ -290,7 +282,7 @@ export default function Landing() {
             <p className="text-sm text-slate-300">
               Une démonstration guidée : inventaire, pertes, exports, tableau de bord — sans créer de compte.
             </p>
-            <AutoDemoShowcase />
+            <LazyAutoDemoShowcase />
           </section>
 
           {/* CTA */}
@@ -314,8 +306,7 @@ export default function Landing() {
               </Link>
             </div>
           </section>
-        </main>
-      </PageTransition>
+      </main>
     </PublicShell>
   );
 }

@@ -12,6 +12,7 @@ import { useToast } from "../../app/ToastContext";
 import { useAuth } from "../../app/AuthProvider";
 import useEntitlements from "../../app/useEntitlements";
 import { formatPlanLabel } from "../../lib/planLabels";
+import { api } from "../../lib/api";
 
 function prettyStatus(status) {
   const s = String(status || "").toUpperCase();
@@ -60,11 +61,20 @@ export default function BillingSuccess() {
 
         if (alive) setSyncing(true);
 
-        // 1) refetch direct
+        // 1) sync checkout si on a un session_id (fallback en cas de webhook lent)
+        if (sessionId) {
+          try {
+            await api.post("/api/auth/billing/sync/", { session_id: sessionId });
+          } catch {
+            // ne bloque pas l'écran de succès, on continue la synchro standard
+          }
+        }
+
+        // 2) refetch direct
         await refetch?.();
         await refreshServices?.();
 
-        // 2) si toujours pas à jour, on retente 2 fois
+        // 3) si toujours pas à jour, on retente 2 fois
         // (sans spinner agressif : juste une courte sync)
         for (let i = 0; i < 2; i++) {
           if (!alive) return;
@@ -95,7 +105,7 @@ export default function BillingSuccess() {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthed]);
+  }, [isAuthed, sessionId]);
 
   const planEffective = formatPlanLabel(entitlements?.plan_effective, "—");
   const status = prettyStatus(entitlements?.subscription_status);
@@ -157,7 +167,7 @@ export default function BillingSuccess() {
 
           <div className="flex flex-wrap gap-2 pt-3">
             <Button onClick={() => navigate("/app/dashboard")}>Aller au Dashboard</Button>
-            <Button variant="secondary" onClick={() => navigate("/settings")}>
+            <Button variant="secondary" onClick={() => navigate("/app/settings")}>
               Ouvrir les paramètres
             </Button>
             <Button

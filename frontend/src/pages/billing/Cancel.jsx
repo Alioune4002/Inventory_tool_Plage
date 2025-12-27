@@ -83,7 +83,7 @@ export default function BillingCancel() {
                 <Button variant="secondary" onClick={() => navigate("/app/dashboard")}>
                   Retour au Dashboard
                 </Button>
-                <Button variant="secondary" onClick={() => navigate("/settings")}>
+                <Button variant="secondary" onClick={() => navigate("/app/settings")}>
                   Paramètres
                 </Button>
               </>
