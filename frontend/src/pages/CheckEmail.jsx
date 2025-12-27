@@ -63,9 +63,9 @@ export default function CheckEmail() {
             </div>
 
             {!email ? (
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
-                <div className="font-semibold text-[var(--text)]">Email introuvable</div>
-                <div className="text-[var(--muted)]">
+              <div className="alert-warn px-4 py-3 text-sm">
+                <div className="font-semibold">Email introuvable</div>
+                <div>
                   On n’a pas l’adresse email sur cette page. Retourne à la connexion ou à l’inscription.
                 </div>
                 <div className="mt-2 flex gap-2 flex-wrap">

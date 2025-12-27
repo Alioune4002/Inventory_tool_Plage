@@ -7,16 +7,14 @@ import { formatPlanLabel, formatUpgradeLabel } from "../lib/planLabels";
 
 const Banner = ({ title, subtitle, tone = "info", actions = [] }) => {
   const palette = {
-    info: "from-blue-500/15 via-blue-500/10 to-cyan-500/15 border-blue-200 text-slate-800 dark:text-slate-100",
-    warning:
-      "from-amber-500/15 via-amber-500/10 to-orange-500/15 border-amber-200 text-amber-900 dark:text-amber-100",
-    danger:
-      "from-rose-500/15 via-rose-500/10 to-orange-500/15 border-rose-200 text-rose-900 dark:text-rose-100",
-    neutral: "from-slate-500/10 via-slate-500/5 to-slate-500/10 border-slate-200 text-slate-800 dark:text-slate-100",
+    info: "border-[var(--info-border)] bg-[var(--info-bg)] text-[var(--info-text)]",
+    warning: "border-[var(--warn-border)] bg-[var(--warn-bg)] text-[var(--warn-text)]",
+    danger: "border-[var(--danger-border)] bg-[var(--danger-bg)] text-[var(--danger-text)]",
+    neutral: "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
   }[tone];
 
   return (
-    <Card className={`p-4 border bg-gradient-to-r ${palette}`} hover={false}>
+    <Card className={`p-4 border ${palette}`} hover={false}>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div className="space-y-1">
           <div className="text-sm font-semibold uppercase tracking-wide opacity-80">{title}</div>

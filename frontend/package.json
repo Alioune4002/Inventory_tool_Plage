@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check:assets": "node scripts/check-assets.mjs",
+    "prebuild": "npm run check:assets",
     "build": "vite build",
     "test": "vitest run",
     "lint": "eslint .",

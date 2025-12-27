@@ -7,6 +7,7 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
+import { useEntitlements } from "../app/useEntitlements";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
 
@@ -30,7 +31,7 @@ async function blobToJsonSafe(blob) {
   }
 }
 
-function downloadBlob({ blob, filename }) {
+function downloadBlob({ blob, filename, keepUrl = false }) {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -40,12 +41,14 @@ function downloadBlob({ blob, filename }) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  window.setTimeout(() => window.URL.revokeObjectURL(url), 800);
+  if (!keepUrl) window.setTimeout(() => window.URL.revokeObjectURL(url), 800);
+  return url;
 }
 
 export default function Exports() {
   const { serviceId, services, serviceFeatures, tenant, serviceProfile } = useAuth();
   const pushToast = useToast();
+  const { data: entitlements } = useEntitlements();
 
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
@@ -59,6 +62,7 @@ export default function Exports() {
   const [includeSummary, setIncludeSummary] = useState(true);
   const [toast, setToast] = useState("");
   const [exportService, setExportService] = useState(serviceId || "");
+  const [downloadLink, setDownloadLink] = useState(null);
 
   const pricingCfg = serviceFeatures?.prices || {};
   const purchaseEnabled = pricingCfg.purchase_enabled !== false;
@@ -77,6 +81,8 @@ export default function Exports() {
   const wording = getWording(serviceType, serviceDomain);
   const itemLabelLower = (wording.itemLabel || "élément").toLowerCase();
   const categoryLabelLower = (wording.categoryLabel || "catégorie").toLowerCase();
+  const canAdvancedReports = Boolean(entitlements?.entitlements?.reports_advanced);
+  const canEmailExport = Boolean(entitlements?.entitlements?.exports_email);
 
   const getFeatureFlag = (key, fallback = false) => {
     const cfg = serviceFeatures?.[key];
@@ -195,6 +201,23 @@ export default function Exports() {
   }, [serviceId, exportService]);
 
   useEffect(() => {
+    if (!canAdvancedReports) {
+      setIncludeSummary(false);
+      setIncludeCharts(false);
+    }
+  }, [canAdvancedReports]);
+
+  useEffect(() => {
+    if (!canEmailExport && email) setEmail("");
+  }, [canEmailExport, email]);
+
+  useEffect(() => {
+    return () => {
+      if (downloadLink?.url) window.URL.revokeObjectURL(downloadLink.url);
+    };
+  }, [downloadLink]);
+
+  useEffect(() => {
     if (exportService === "all") {
       setSelectedCategories([]);
       setAvailableCategories([]);
@@ -215,6 +238,32 @@ export default function Exports() {
   const includeDLC = selectedFields.includes("dlc");
   const includeIdentifier = selectedFields.includes("identifier");
 
+  const resolveExportError = async (error) => {
+    const response = error?.response;
+    const status = response?.status;
+    let payload = response?.data;
+
+    if (payload instanceof Blob) {
+      payload = await blobToJsonSafe(payload);
+    }
+
+    const code = payload?.code || error?.code;
+    const detail = payload?.detail || payload?.message;
+
+    if (code === "LIMIT_EXPORT_CSV_MONTH") {
+      return "Limite mensuelle CSV atteinte. Passez au plan Duo ou Multi pour exporter sans limite.";
+    }
+    if (code === "LIMIT_EXPORT_XLSX_MONTH") {
+      return "Limite mensuelle Excel atteinte. Passez au plan Duo ou Multi pour exporter davantage.";
+    }
+    if (code === "FEATURE_NOT_INCLUDED") {
+      return "Synthèse & graphiques disponibles en plan Multi. Désactivez-les ou passez au plan supérieur.";
+    }
+    if (status === 403 && detail) return String(detail);
+    if (detail) return String(detail);
+    return error?.message || "Échec de l’export. Vérifie les filtres / droits / plan.";
+  };
+
   const doExport = async (format = "xlsx") => {
     const effectiveService = exportService || serviceId;
     if (!effectiveService) {
@@ -225,13 +274,17 @@ export default function Exports() {
       setToast("Sélectionnez au moins un champ à exporter.");
       return;
     }
+    if (format !== "csv" && !canAdvancedReports && (includeSummary || includeCharts)) {
+      setToast("Synthèse & graphiques disponibles en plan Multi. Désactivez-les pour exporter.");
+      return;
+    }
 
     setLoading(true);
     setToast("");
 
     try {
-      const chartsAllowed = format !== "csv" && includeCharts;
-      const summaryAllowed = format !== "csv" && includeSummary;
+      const chartsAllowed = format !== "csv" && includeCharts && canAdvancedReports;
+      const summaryAllowed = format !== "csv" && includeSummary && canAdvancedReports;
 
       if (format === "csv" && (includeCharts || includeSummary)) {
         pushToast?.({ message: "CSV : graphiques et synthèse ignorés.", type: "info" });
@@ -282,17 +335,17 @@ export default function Exports() {
         type: format === "csv" ? "text/csv;charset=utf-8" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
 
-      downloadBlob({ blob, filename });
+      const url = downloadBlob({ blob, filename, keepUrl: true });
+      setDownloadLink((prev) => {
+        if (prev?.url) window.URL.revokeObjectURL(prev.url);
+        return { url, filename, format };
+      });
 
       const emailMsg = email ? " & envoi email demandé" : "";
       setToast(`Export prêt${emailMsg}.`);
       pushToast?.({ message: `Export prêt${emailMsg}`, type: "success" });
     } catch (e) {
-      const msg =
-        e?.message ||
-        e?.friendlyMessage ||
-        e?.response?.data?.detail ||
-        "Échec de l’export. Vérifie les filtres / droits / plan.";
+      const msg = await resolveExportError(e);
       setToast(msg);
       pushToast?.({ message: msg, type: "error" });
     } finally {
@@ -382,7 +435,12 @@ export default function Exports() {
               placeholder="destinataire@exemple.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              helper="Le fichier est téléchargé et envoyé par email si renseigné."
+              disabled={!canEmailExport}
+              helper={
+                canEmailExport
+                  ? "Le fichier est téléchargé et envoyé par email si renseigné."
+                  : "Partage e-mail disponible en plan Multi."
+              }
             />
 
             <Input
@@ -473,9 +531,11 @@ export default function Exports() {
                     "rounded-2xl px-3 py-1 text-xs font-semibold border",
                     includeCharts
                       ? "border-[var(--success)] bg-[var(--success)]/15 text-[var(--text)]"
-                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]",
+                    !canAdvancedReports && "opacity-60 cursor-not-allowed"
                   )}
                   onClick={() => setIncludeCharts((prev) => !prev)}
+                  disabled={!canAdvancedReports}
                 >
                   {includeCharts ? "Graphiques ON" : "Graphiques OFF"}
                 </button>
@@ -486,9 +546,11 @@ export default function Exports() {
                     "rounded-2xl px-3 py-1 text-xs font-semibold border",
                     includeSummary
                       ? "border-[var(--primary)] bg-[var(--primary)]/15 text-[var(--text)]"
-                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+                      : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]",
+                    !canAdvancedReports && "opacity-60 cursor-not-allowed"
                   )}
                   onClick={() => setIncludeSummary((prev) => !prev)}
+                  disabled={!canAdvancedReports}
                 >
                   {includeSummary ? "Synthèse ON" : "Synthèse OFF"}
                 </button>
@@ -497,6 +559,7 @@ export default function Exports() {
 
             <p className="text-xs text-[var(--muted)]">
               Les graphiques & la synthèse sont inclus dans un onglet Excel dédié (non disponibles en CSV).
+              {!canAdvancedReports && " (Disponible en plan Multi.)"}
             </p>
           </div>
 
@@ -504,6 +567,15 @@ export default function Exports() {
             <Button onClick={() => doExport("xlsx")} loading={loading}>Export Excel</Button>
             <Button variant="secondary" onClick={() => doExport("csv")} loading={loading}>Export CSV</Button>
           </div>
+
+          {downloadLink ? (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--muted)]">
+              Si le téléchargement ne démarre pas,{" "}
+              <a className="underline text-[var(--text)]" href={downloadLink.url} download={downloadLink.filename}>
+                cliquez ici pour télécharger l’export.
+              </a>
+            </div>
+          ) : null}
 
           {toast && (
             <div className="text-sm text-[var(--text)] bg-[var(--surface)] border border-[var(--border)] rounded-2xl px-3 py-2">

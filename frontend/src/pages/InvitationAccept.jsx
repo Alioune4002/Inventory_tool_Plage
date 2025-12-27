@@ -130,7 +130,7 @@ export default function InvitationAccept() {
           ) : null}
 
           {declined ? (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <div className="alert-warn px-4 py-3 text-sm">
               Invitation refusée ✅ Vous pouvez fermer cette page.
             </div>
           ) : null}

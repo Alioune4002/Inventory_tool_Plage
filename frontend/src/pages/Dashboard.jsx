@@ -28,6 +28,30 @@ const fmtDateTime = (v) => {
   }
 };
 
+const ACTION_LABELS = {
+  MEMBER_ADDED: "Membre ajouté",
+  MEMBER_UPDATED: "Membre modifié",
+  MEMBER_REMOVED: "Membre supprimé",
+  EXPORT_SENT: "Export envoyé",
+  INVITE_SENT: "Invitation envoyée",
+  INVITE_ACCEPTED: "Invitation acceptée",
+  LOGIN: "Connexion",
+};
+
+const OBJECT_LABELS = {
+  Membership: "Membre",
+  ExportEvent: "Export",
+  Invitation: "Invitation",
+  User: "Utilisateur",
+};
+
+const formatActionLabel = (action) => ACTION_LABELS[action] || action || "Action";
+const formatObjectLabel = (type, id) => {
+  if (!type) return "";
+  const base = OBJECT_LABELS[type] || type;
+  return id ? `${base} #${id}` : base;
+};
+
 function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wording) {
   const isGeneral = tenantDomain === "general" || serviceType === "retail_general";
   const isPharma = serviceType === "pharmacy_parapharmacy";
@@ -108,6 +132,8 @@ export default function Dashboard() {
   const [membersLoading, setMembersLoading] = useState(false);
   const [membersVisible, setMembersVisible] = useState(false);
   const [membersSummary, setMembersSummary] = useState({ members: [], recent_activity: [] });
+  const [activityPage, setActivityPage] = useState(1);
+  const [membersExpanded, setMembersExpanded] = useState(false);
 
   const tenantDomain = tenant?.domain || "food";
   const serviceType = serviceProfile?.service_type || currentService?.service_type || "other";
@@ -341,6 +367,11 @@ export default function Dashboard() {
 
   const members = safeArray(membersSummary.members);
   const recentActivity = safeArray(membersSummary.recent_activity);
+  const ACTIVITY_PAGE_SIZE = 6;
+  const totalActivityPages = Math.max(1, Math.ceil(recentActivity.length / ACTIVITY_PAGE_SIZE));
+  const activityPageSafe = Math.min(Math.max(activityPage, 1), totalActivityPages);
+  const activitySliceStart = (activityPageSafe - 1) * ACTIVITY_PAGE_SIZE;
+  const pagedActivity = recentActivity.slice(activitySliceStart, activitySliceStart + ACTIVITY_PAGE_SIZE);
 
   const maxCategoryPurchase = useMemo(() => {
     const vals = categories.map((x) => x.total_purchase_value || 0);
@@ -356,6 +387,10 @@ export default function Dashboard() {
 
   const showServiceSelect = (services || []).length > 0;
 
+  useEffect(() => {
+    setActivityPage(1);
+  }, [recentActivity.length]);
+
   return (
     <PageTransition>
       <Helmet>
@@ -364,141 +399,6 @@ export default function Dashboard() {
       </Helmet>
 
       <div className="grid gap-4 min-w-0">
-        {/* Admin principal: équipe + traçabilité */}
-        {membersVisible ? (
-          <Card className="p-6 space-y-4 min-w-0">
-            <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
-              <div className="flex items-start gap-3 min-w-0">
-                <img
-                  src="/icon.svg"
-                  alt="StockScan"
-                  className="h-10 w-10 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shrink-0"
-                  loading="lazy"
-                />
-                <div className="min-w-0">
-                  <div className="text-sm text-[var(--muted)]">Espace admin</div>
-                  <div className="text-2xl font-black tracking-tight text-[var(--text)]">Équipe & activité</div>
-                  <div className="text-sm text-[var(--muted)]">
-                    Visualisez les accès par service et gardez un œil sur ce qui bouge.
-                  </div>
-                </div>
-              </div>
-              <div className="flex gap-2 flex-wrap items-center">
-                <Button variant="secondary" onClick={loadMembersSummary} loading={membersLoading}>
-                  Rafraîchir
-                </Button>
-                <Badge variant="neutral">{membersLoading ? "Chargement…" : `${members.length} membre(s)`}</Badge>
-              </div>
-            </div>
-
-            <div className="grid lg:grid-cols-2 gap-4 min-w-0">
-              <Card className="p-4 space-y-3 min-w-0" hover>
-                <div className="flex items-center justify-between gap-3 min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text)] min-w-0">Membres & rôles</div>
-                  <Badge variant="info">Admin</Badge>
-                </div>
-
-                {membersLoading ? (
-                  <div className="grid gap-2">
-                    {[1, 2, 3].map((i) => (
-                      <Skeleton key={i} className="h-12 w-full" />
-                    ))}
-                  </div>
-                ) : members.length ? (
-                  <div className="space-y-2 min-w-0">
-                    {members.map((m) => {
-                      const scope = m?.service_scope?.name ? `Service : ${m.service_scope.name}` : "Accès : multi-services";
-                      const last = m?.last_action?.action
-                        ? `${m.last_action.action} · ${fmtDateTime(m.last_action.at)}`
-                        : "—";
-                      const role = (m?.role || "operator").toUpperCase();
-                      const user = m?.user || {};
-                      return (
-                        <Card key={m.id} className="p-4 min-w-0" hover>
-                          <div className="flex items-start justify-between gap-3 min-w-0">
-                            <div className="min-w-0">
-                              {/*  plus de truncate ici => wrap + break-anywhere */}
-                              <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
-                                <span>{user.username || "Utilisateur"}</span>{" "}
-                                <span className="text-[var(--muted)] font-normal">·</span>{" "}
-                                <span className="text-[var(--muted)] font-semibold break-anywhere">
-                                  {user.email || "—"}
-                                </span>
-                              </div>
-                              <div className="text-xs text-[var(--muted)] mt-1 break-anywhere">
-                                {scope} · Dernière activité : {last}
-                              </div>
-                            </div>
-                            <div className="shrink-0">
-                              <Badge variant={role === "OWNER" ? "info" : "neutral"}>{role}</Badge>
-                            </div>
-                          </div>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-sm text-[var(--muted)]">Aucun membre à afficher pour l’instant.</div>
-                )}
-              </Card>
-
-              <Card className="p-4 space-y-3 min-w-0" hover>
-                <div className="flex items-center justify-between gap-3 min-w-0">
-                  <div className="text-sm font-semibold text-[var(--text)] min-w-0">Activité récente</div>
-                  <Badge variant="neutral">{recentActivity.length} évènement(s)</Badge>
-                </div>
-
-                {membersLoading ? (
-                  <div className="grid gap-2">
-                    {[1, 2, 3].map((i) => (
-                      <Skeleton key={i} className="h-10 w-full" />
-                    ))}
-                  </div>
-                ) : recentActivity.length ? (
-                  <div className="space-y-2 min-w-0">
-                    {recentActivity.slice(0, 12).map((a, idx) => {
-                      const who = a?.user?.username || "system";
-                      const action = a?.action || "—";
-                      const when = fmtDateTime(a?.at);
-                      const obj = a?.object_type
-                        ? `${a.object_type}${a.object_id ? `#${a.object_id}` : ""}`
-                        : "";
-
-                      return (
-                        <div
-                          key={`${action}-${idx}`}
-                          className="flex items-start justify-between gap-3 min-w-0"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
-                              {action} <span className="text-[var(--muted)] font-normal">·</span>{" "}
-                              <span className="text-[var(--muted)]">{who}</span>
-                              {obj ? <span className="text-[var(--muted)] font-normal"> · {obj}</span> : null}
-                            </div>
-                            <div className="text-xs text-[var(--muted)]">{when}</div>
-                          </div>
-                          <div className="shrink-0">
-                            <Badge variant="neutral">{action}</Badge>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-sm text-[var(--muted)]">
-                    Rien à afficher ici pour le moment — dès qu’un membre agit, l’activité apparaîtra.
-                  </div>
-                )}
-              </Card>
-            </div>
-
-            <div className="text-xs text-[var(--muted)]">
-              Astuce : gérez les rôles et le scope service depuis{" "}
-              <span className="font-semibold text-[var(--text)]">Settings → Équipe</span>.
-            </div>
-          </Card>
-        ) : null}
-
         {/* Dashboard header */}
         <Card className="p-6 space-y-3 min-w-0">
           <div className="flex flex-wrap gap-3 items-center justify-between min-w-0">
@@ -557,99 +457,106 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Categories */}
-        <Card className="p-5 space-y-3 min-w-0">
-          <div className="flex items-center justify-between gap-3 min-w-0">
-            <div className="text-sm font-semibold text-[var(--text)] min-w-0">{copy.categoryTitle}</div>
-            <Badge variant="neutral">{loading ? "Chargement" : `${categories.length || 0} catégories`}</Badge>
-          </div>
+        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-4 min-w-0">
+          <AlertsPanel />
+          <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
+        </div>
 
-          {loading ? (
-            <div className="grid gap-2">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
+        <div className="grid lg:grid-cols-2 gap-4 min-w-0">
+          {/* Categories */}
+          <Card className="p-5 space-y-3 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="text-sm font-semibold text-[var(--text)] min-w-0">{copy.categoryTitle}</div>
+              <Badge variant="neutral">{loading ? "Chargement" : `${categories.length || 0} catégories`}</Badge>
             </div>
-          ) : categories.length ? (
-            <div className="grid sm:grid-cols-2 gap-3 min-w-0">
-              {categories.map((c) => {
-                const width = Math.max(((c.total_purchase_value || 0) / maxCategoryPurchase) * 100, 6);
 
-                return (
-                  <Card key={c.category || "aucune"} className="p-4 space-y-2 min-w-0" hover>
-                    <div className="flex items-center justify-between gap-3 min-w-0">
-                      <div className="text-sm font-semibold text-[var(--text)] min-w-0 break-anywhere">
-                        {c.category || "Non catégorisé"}
+            {loading ? (
+              <div className="grid gap-2">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : categories.length ? (
+              <div className="grid sm:grid-cols-2 gap-3 min-w-0">
+                {categories.map((c) => {
+                  const width = Math.max(((c.total_purchase_value || 0) / maxCategoryPurchase) * 100, 6);
+
+                  return (
+                    <Card key={c.category || "aucune"} className="p-4 space-y-2 min-w-0" hover>
+                      <div className="flex items-center justify-between gap-3 min-w-0">
+                        <div className="text-sm font-semibold text-[var(--text)] min-w-0 break-anywhere">
+                          {c.category || "Non catégorisé"}
+                        </div>
+                        <Badge variant="neutral">{fmtNumber(c.total_quantity || 0)} u.</Badge>
                       </div>
-                      <Badge variant="neutral">{fmtNumber(c.total_quantity || 0)} u.</Badge>
-                    </div>
 
-                    <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400"
-                        style={{ width: `${width}%` }}
-                      />
-                    </div>
+                      <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
 
-                    <div className="text-xs text-[var(--muted)] break-anywhere">
-                      Achat : {fmtCurrency(c.total_purchase_value || 0)} · Vente : {fmtCurrency(c.total_selling_value || 0)}
-                    </div>
+                      <div className="text-xs text-[var(--muted)] break-anywhere">
+                        Achat : {fmtCurrency(c.total_purchase_value || 0)} · Vente : {fmtCurrency(c.total_selling_value || 0)}
+                      </div>
 
-                    <div className="text-xs text-rose-500 dark:text-rose-300">
-                      Pertes : {fmtNumber(c.losses_qty || 0)} u.
-                    </div>
-                  </Card>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--muted)]">
-              Pas encore de données sur cette période. Lancez un comptage, ou changez de mois/service ✨
-            </div>
-          )}
-        </Card>
+                      <div className="text-xs text-rose-500 dark:text-rose-300">
+                        Pertes : {fmtNumber(c.losses_qty || 0)} u.
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--muted)]">
+                Pas encore de données sur cette période. Lancez un comptage, ou changez de mois/service ✨
+              </div>
+            )}
+          </Card>
 
-        {/* Losses */}
-        <Card className="p-5 space-y-3 min-w-0">
-          <div className="flex items-center justify-between gap-3 min-w-0">
-            <div className="text-sm font-semibold text-[var(--text)] min-w-0">Pertes par raison</div>
-            <Badge variant="neutral">{loading ? "Chargement" : `${lossesByReason.length || 0} raisons`}</Badge>
-          </div>
+          {/* Losses */}
+          <Card className="p-5 space-y-3 min-w-0">
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="text-sm font-semibold text-[var(--text)] min-w-0">Pertes par raison</div>
+              <Badge variant="neutral">{loading ? "Chargement" : `${lossesByReason.length || 0} raisons`}</Badge>
+            </div>
 
-          {loading ? (
-            <div className="grid gap-2">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-10 w-full" />
-              ))}
-            </div>
-          ) : lossesByReason.length ? (
-            <div className="space-y-2 min-w-0">
-              {lossesByReason.map((l) => {
-                const width = Math.max(((l.total_cost || 0) / maxLossCost) * 100, 8);
-                return (
-                  <div key={l.reason} className="space-y-1 min-w-0">
-                    <div className="flex justify-between gap-3 text-xs font-semibold text-[var(--muted)] min-w-0">
-                      <span className="min-w-0 break-anywhere">{l.reason}</span>
-                      <span className="shrink-0">
-                        {fmtCurrency(l.total_cost || 0)} — {fmtNumber(l.total_qty || 0)} u.
-                      </span>
+            {loading ? (
+              <div className="grid gap-2">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : lossesByReason.length ? (
+              <div className="space-y-2 min-w-0">
+                {lossesByReason.map((l) => {
+                  const width = Math.max(((l.total_cost || 0) / maxLossCost) * 100, 8);
+                  return (
+                    <div key={l.reason} className="space-y-1 min-w-0">
+                      <div className="flex justify-between gap-3 text-xs font-semibold text-[var(--muted)] min-w-0">
+                        <span className="min-w-0 break-anywhere">{l.reason}</span>
+                        <span className="shrink-0">
+                          {fmtCurrency(l.total_cost || 0)} — {fmtNumber(l.total_qty || 0)} u.
+                        </span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-rose-500 to-orange-400"
+                          style={{ width: `${width}%` }}
+                        />
+                      </div>
                     </div>
-                    <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-rose-500 to-orange-400"
-                        style={{ width: `${width}%` }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--muted)]">
-              Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)
-            </div>
-          )}
-        </Card>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--muted)]">
+                Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)
+              </div>
+            )}
+          </Card>
+        </div>
 
         {/* Products preview */}
         <Card className="p-5 space-y-3 min-w-0">
@@ -688,7 +595,7 @@ export default function Dashboard() {
                   <div className="text-xs text-rose-500 dark:text-rose-300">Pertes : {fmtNumber(p.losses_qty || 0)} u.</div>
 
                   {p.notes?.length ? (
-                    <div className="text-xs text-amber-700 dark:text-amber-200 break-anywhere">
+                    <div className="text-xs break-anywhere text-[var(--warn-text)] bg-[var(--warn-bg)] border border-[var(--warn-border)] rounded-full px-3 py-1">
                       {p.notes.join(" ")}
                     </div>
                   ) : (
@@ -706,8 +613,173 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <AlertsPanel />
-        <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
+        {/* Admin principal: équipe + traçabilité */}
+        {membersVisible ? (
+          <Card className="p-6 space-y-4 min-w-0">
+            <div className="flex items-center justify-between gap-3 flex-wrap min-w-0">
+              <div className="flex items-start gap-3 min-w-0">
+                <img
+                  src="/icon.svg"
+                  alt="StockScan"
+                  className="h-10 w-10 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2 shrink-0"
+                  loading="lazy"
+                />
+                <div className="min-w-0">
+                  <div className="text-sm text-[var(--muted)]">Espace admin</div>
+                  <div className="text-2xl font-black tracking-tight text-[var(--text)]">Équipe & activité</div>
+                  <div className="text-sm text-[var(--muted)]">
+                    Visualisez les accès par service et gardez un œil sur ce qui bouge.
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 flex-wrap items-center">
+                <Button variant="secondary" onClick={loadMembersSummary} loading={membersLoading}>
+                  Rafraîchir
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setMembersExpanded((v) => !v)}
+                  disabled={membersLoading}
+                >
+                  {membersExpanded ? "Masquer" : "Afficher"}
+                </Button>
+                <Badge variant="neutral">{membersLoading ? "Chargement…" : `${members.length} membre(s)`}</Badge>
+              </div>
+            </div>
+
+            {membersExpanded ? (
+              <>
+                <div className="grid lg:grid-cols-2 gap-4 min-w-0">
+                  <Card className="p-4 space-y-3 min-w-0" hover>
+                    <div className="flex items-center justify-between gap-3 min-w-0">
+                      <div className="text-sm font-semibold text-[var(--text)] min-w-0">Membres & rôles</div>
+                      <Badge variant="info">Admin</Badge>
+                    </div>
+
+                    {membersLoading ? (
+                      <div className="grid gap-2">
+                        {[1, 2, 3].map((i) => (
+                          <Skeleton key={i} className="h-12 w-full" />
+                        ))}
+                      </div>
+                    ) : members.length ? (
+                      <div className="space-y-2 min-w-0">
+                        {members.map((m) => {
+                          const scope = m?.service_scope?.name ? `Service : ${m.service_scope.name}` : "Accès : multi-services";
+                          const last = m?.last_action?.action
+                            ? `${formatActionLabel(m.last_action.action)} · ${fmtDateTime(m.last_action.at)}`
+                            : "—";
+                          const role = (m?.role || "operator").toUpperCase();
+                          const user = m?.user || {};
+                          return (
+                            <Card key={m.id} className="p-4 min-w-0" hover>
+                              <div className="flex items-start justify-between gap-3 min-w-0">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
+                                    <span>{user.username || "Utilisateur"}</span>{" "}
+                                    <span className="text-[var(--muted)] font-normal">·</span>{" "}
+                                    <span className="text-[var(--muted)] font-semibold break-anywhere">
+                                      {user.email || "—"}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-[var(--muted)] mt-1 break-anywhere">
+                                    {scope} · Dernière activité : {last}
+                                  </div>
+                                </div>
+                                <div className="shrink-0">
+                                  <Badge variant={role === "OWNER" ? "info" : "neutral"}>{role}</Badge>
+                                </div>
+                              </div>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-[var(--muted)]">Aucun membre à afficher pour l’instant.</div>
+                    )}
+                  </Card>
+
+                  <Card className="p-4 space-y-3 min-w-0" hover>
+                    <div className="flex items-center justify-between gap-3 min-w-0">
+                      <div className="text-sm font-semibold text-[var(--text)] min-w-0">Activité récente</div>
+                      <Badge variant="neutral">{recentActivity.length} évènement(s)</Badge>
+                    </div>
+
+                    {membersLoading ? (
+                      <div className="grid gap-2">
+                        {[1, 2, 3].map((i) => (
+                          <Skeleton key={i} className="h-10 w-full" />
+                        ))}
+                      </div>
+                    ) : pagedActivity.length ? (
+                      <div className="space-y-2 min-w-0">
+                        {pagedActivity.map((a, idx) => {
+                          const who = a?.user?.username || "système";
+                          const action = formatActionLabel(a?.action);
+                          const when = fmtDateTime(a?.at);
+                          const obj = formatObjectLabel(a?.object_type, a?.object_id);
+
+                          return (
+                            <div
+                              key={`${action}-${idx}`}
+                              className="flex items-start justify-between gap-3 min-w-0"
+                            >
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
+                                  {action} <span className="text-[var(--muted)] font-normal">·</span>{" "}
+                                  <span className="text-[var(--muted)]">{who}</span>
+                                  {obj ? <span className="text-[var(--muted)] font-normal"> · {obj}</span> : null}
+                                </div>
+                                <div className="text-xs text-[var(--muted)]">{when}</div>
+                              </div>
+                              <div className="shrink-0">
+                                <Badge variant="neutral">{action}</Badge>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="flex items-center justify-between pt-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                            disabled={activityPageSafe <= 1}
+                          >
+                            Précédent
+                          </Button>
+                          <div className="text-xs text-[var(--muted)]">
+                            Page {activityPageSafe} / {totalActivityPages}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setActivityPage((p) => Math.min(totalActivityPages, p + 1))}
+                            disabled={activityPageSafe >= totalActivityPages}
+                          >
+                            Suivant
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-[var(--muted)]">
+                        Rien à afficher ici pour le moment — dès qu’un membre agit, l’activité apparaîtra.
+                      </div>
+                    )}
+                  </Card>
+                </div>
+
+                <div className="text-xs text-[var(--muted)]">
+                  Astuce : gérez les rôles et le scope service depuis{" "}
+                  <span className="font-semibold text-[var(--text)]">Settings → Équipe</span>.
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-[var(--muted)]">
+                Section repliée pour garder le focus sur l’inventaire. Cliquez sur “Afficher” pour voir l’activité.
+              </div>
+            )}
+          </Card>
+        ) : null}
       </div>
     </PageTransition>
   );

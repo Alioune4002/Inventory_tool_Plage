@@ -27,6 +27,14 @@ vi.mock("../../app/ToastContext", () => ({
   useToast: () => vi.fn(),
 }));
 
+vi.mock("../../app/useEntitlements", () => ({
+  useEntitlements: () => ({
+    data: {
+      entitlements: { reports_advanced: true, exports_email: true },
+    },
+  }),
+}));
+
 vi.mock("../../lib/api", () => ({
   api: {
     get: (...args) => apiGet(...args),
@@ -74,5 +82,30 @@ describe("Exports page", () => {
     const [, payload] = apiPost.mock.calls[0];
     expect(payload.services).toEqual([1, 2]);
     expect(payload.service).toBeUndefined();
+  });
+
+  it("affiche une erreur claire quand la limite CSV est atteinte", async () => {
+    const user = userEvent.setup();
+    apiPost.mockRejectedValueOnce({
+      response: {
+        status: 403,
+        data: new Blob(
+          [JSON.stringify({ code: "LIMIT_EXPORT_CSV_MONTH", detail: "Limite d’export mensuelle atteinte." })],
+          { type: "application/json" }
+        ),
+      },
+    });
+
+    render(
+      <HelmetProvider>
+        <Exports />
+      </HelmetProvider>
+    );
+
+    await user.click(screen.getByRole("button", { name: /export csv/i }));
+
+    expect(
+      await screen.findByText(/limite mensuelle csv atteinte/i)
+    ).toBeInTheDocument();
   });
 });
