@@ -38,11 +38,25 @@ export default function Sidebar() {
   return (
     <aside className="hidden lg:flex h-full w-72 flex-col p-3 space-y-3 text-[var(--text)] min-w-0-safe">
       <Card className="p-4 flex items-center justify-between min-w-0-safe">
-        <div className="min-w-0">
-          <div className="font-black tracking-tight text-lg truncate">StockScan</div>
-          <div className="text-xs text-[var(--muted)]">Inventaire premium</div>
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="relative inline-flex h-10 w-10 items-center justify-center shrink-0">
+            <img
+              src="/sans_fond_icon.png"
+              alt=""
+              aria-hidden="true"
+              className="h-10 w-10 object-contain drop-shadow-[0_12px_30px_rgba(56,189,248,0.20)]"
+              draggable="false"
+            />
+          </span>
+          <div className="min-w-0">
+            <div className="font-black tracking-tight text-lg truncate">
+              <span className="bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 dark:from-cyan-200 dark:via-sky-200 dark:to-fuchsia-200 bg-clip-text text-transparent">
+                StockScan
+              </span>
+            </div>
+            <div className="text-xs text-[var(--muted)]">Inventaire premium</div>
+          </div>
         </div>
-        <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 shadow-glow shrink-0" />
       </Card>
 
       <Card className="p-2" hover>

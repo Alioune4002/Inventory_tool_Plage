@@ -43,17 +43,21 @@ export default function MobileNav({ open, onClose, items, onToggleTheme }) {
         ) : null}
 
         <nav className="flex flex-1 flex-col gap-2 overflow-y-auto">
-          {items.map((item) => (
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
             <Link
               key={item.to}
               to={item.to}
               onClick={onClose}
               data-tour={item.tour}
-              className="rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface)]/70 transition"
+              className="rounded-2xl border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--text)] hover:bg-[var(--surface)]/70 transition flex items-center gap-2"
             >
-              {item.label}
+              {Icon ? <Icon size={16} className="shrink-0" /> : null}
+              <span>{item.label}</span>
             </Link>
-          ))}
+          );
+          })}
         </nav>
 
         <div className="mt-4">

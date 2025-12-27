@@ -1,6 +1,7 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { LayoutDashboard, Boxes, Package, Tag, Download, Settings, HelpCircle, MinusCircle } from "lucide-react";
 import AppRoutes from "./routes";
 import { useAuth } from "./AuthProvider";
 import { ToastProvider, useToast } from "./ToastContext";
@@ -49,14 +50,14 @@ export default function AppShell() {
 
   const navItems = useMemo(
     () => [
-      { to: "/app/dashboard", label: "Dashboard", tour: "tour-dashboard" },
-      { to: "/app/inventory", label: "Inventaire", tour: "tour-inventory" },
-      { to: "/app/products", label: "Produits", tour: "tour-products" },
-      { to: "/app/categories", label: "Catégories" },
-      { to: "/app/losses", label: "Pertes", tour: "tour-losses" },
-      { to: "/app/exports", label: "Exports", tour: "tour-exports" },
-      { to: "/app/settings", label: "Settings", tour: "tour-settings" },
-      { to: "/app/support", label: "Support" },
+      { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, tour: "tour-dashboard" },
+      { to: "/app/inventory", label: "Inventaire", icon: Boxes, tour: "tour-inventory" },
+      { to: "/app/products", label: "Produits", icon: Package, tour: "tour-products" },
+      { to: "/app/categories", label: "Catégories", icon: Tag },
+      { to: "/app/losses", label: "Pertes", icon: MinusCircle, tour: "tour-losses" },
+      { to: "/app/exports", label: "Exports", icon: Download, tour: "tour-exports" },
+      { to: "/app/settings", label: "Settings", icon: Settings, tour: "tour-settings" },
+      { to: "/app/support", label: "Support", icon: HelpCircle },
     ],
     []
   );
