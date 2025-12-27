@@ -6,8 +6,6 @@ from django.db.models import Sum, Count, Q, Value, DecimalField
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-import jsonschema
-
 try:
     from openai import OpenAI
 except Exception:  # pragma: no cover
@@ -22,27 +20,30 @@ except ImportError:  # pragma: no cover
 LOGGER = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
-You are Inventarium AI, an inventory analyst AND product coach.
-You ONLY answer in valid JSON with the shape:
+You are StockScan AI: a professional inventory coach for SMBs.
+Return ONLY valid JSON with this shape:
 {
-  "message": "<string>",
-  "insights": [{"title": "", "description": "", "severity": "info|warning|critical"}],
-  "suggested_actions": [{"action_key": "", "label": "", "payload": {}, "requires_confirmation": true}],
+  "analysis": "<string>",
+  "watch_items": ["<string>", "..."],
+  "actions": [{"label": "<string>", "type": "link|info", "href": "<string or null>"}],
   "question": "<string or null>"
 }
-Rules:
-- Never invent data; rely strictly on provided CONTEXT.
-- If data is sparse, provide short usage guidance (ex: créer des catégories, utiliser SKU interne, tester l'export, scanner un code-barres).
-- Keep tool-help contextual (multi-services, catégories, SKU, export, pertes) and concise.
-- If USER_QUESTION is present, answer it first in `message` in 1-3 sentences, then add insights.
-- If data quality is low (ex: categories_count faible, sku_missing_count > 0, very few movements), propose at most 3 recommendations, each with: benefit in 1 sentence, an example (ex format SKU, liste de catégories, routine hebdo), and cite evidence using counters from CONTEXT (ex: "categories_count=0").
-- Do not invent features; if FEATURES indicate a module is disabled, speak au conditionnel ("si vous activez l’option export/scan…").
-- If data is missing or uncertain, ask a concise clarification in `question`.
-- Keep `suggested_actions` empty if no safe action.
-- Use French for message/insights/question.
-- `payload` must stay small.
-- If CONTEXT.ai_mode is "light", keep answers short, limit insights to essentials, and avoid destructive or irreversible suggested actions.
-- If CONTEXT.scope is "support", answer with clear step-by-step help for StockScan usage/troubleshooting. Use SUPPORT_GUIDE if present.
+Rules (strict):
+- No markdown, no emojis, no bullet prefixes in strings.
+- Never invent data; rely strictly on CONTEXT.
+- Never explain what StockScan is.
+- Do NOT repeat raw stats already visible unless it directly supports a decision.
+- Avoid vague phrasing (ex: “vous pouvez améliorer”, “il serait utile”).
+- Always prioritize and say what to do now.
+- Tone: concise, professional, premium, like a store manager coach.
+- If FEATURES indicate a module is disabled, speak conditionally (ex: “si vous activez…”).
+- If data is sparse, say it clearly and propose 1-2 concrete next steps to improve data quality.
+- If CONTEXT.ai_mode == "light": keep it short, 1 analysis, 1-2 watch items, 1-2 actions, no projections.
+- If CONTEXT.ai_mode == "full": add prioritization, risk/opportunity framing, up to 3 actions, allow a “if you continue…” sentence.
+- If USER_QUESTION is present, answer it first in analysis, then continue with watch_items/actions.
+- If unsure, ask ONE concise clarification in question.
+- If CONTEXT.scope == "support": provide step-by-step help and actionable next clicks (routes from SUPPORT_GUIDE).
+- If you include actions with href, use paths from CONTEXT.support_guide.routes.
 """
 
 ACTION_TEMPLATES = {
@@ -96,6 +97,194 @@ SUPPORT_GUIDE = {
         "tip": "Envoyer page + capture + message d'erreur.",
     },
 }
+
+INTENT_KEYWORDS = {
+    "losses": ["perte", "pertes", "écart", "ecart", "gaspillage", "casse", "vol", "dlc", "ddm"],
+    "modules": ["module", "modules", "activer", "activation", "options", "fonctionnalite", "fonctionnalité", "parametres", "paramètres"],
+    "summary": ["résumé", "resume", "bilan", "mensuel", "mensuelle", "ce mois", "ce mois-ci", "stock du mois"],
+}
+
+MODULE_LABELS = {
+    "identifier": "Référence (SKU / code-barres)",
+    "pricing": "Prix & TVA",
+    "expiry": "Dates (DLC / DDM)",
+    "lot": "Lots",
+    "opened": "Entamé / non-entamé",
+    "variants": "Variantes",
+    "multi_unit": "Multi-unités",
+    "item_type": "Matières premières / produits finis",
+}
+
+
+def detect_intent(question: str):
+    if not question:
+        return None
+    q = question.lower()
+    for key in ("losses", "modules", "summary"):
+        if any(token in q for token in INTENT_KEYWORDS[key]):
+            return key
+    return None
+
+
+def _module_enabled(features, module_id):
+    if not features:
+        return False
+    if module_id == "identifier":
+        return features.get("barcode", {}).get("enabled") is True or features.get("sku", {}).get("enabled") is True
+    if module_id == "pricing":
+        prices = features.get("prices") or {}
+        return prices.get("purchase_enabled") is not False or prices.get("selling_enabled") is not False
+    if module_id == "expiry":
+        return features.get("dlc", {}).get("enabled") is True
+    if module_id == "lot":
+        return features.get("lot", {}).get("enabled") is True
+    if module_id == "opened":
+        return features.get("open_container_tracking", {}).get("enabled") is True
+    if module_id == "variants":
+        return features.get("variants", {}).get("enabled") is True
+    if module_id == "multi_unit":
+        return features.get("multi_unit", {}).get("enabled") is True
+    if module_id == "item_type":
+        return features.get("item_type", {}).get("enabled") is True
+    return False
+
+
+def _recommended_modules_for_service(service_type):
+    mapping = {
+        "bar": ["identifier", "pricing", "expiry", "opened", "lot", "multi_unit"],
+        "kitchen": ["identifier", "pricing", "expiry", "lot", "opened", "item_type"],
+        "bakery": ["identifier", "pricing", "expiry", "opened", "lot", "multi_unit"],
+        "grocery_food": ["identifier", "pricing", "expiry", "multi_unit"],
+        "bulk_food": ["identifier", "pricing", "expiry", "multi_unit", "opened"],
+        "restaurant_dining": ["identifier", "pricing", "item_type"],
+        "retail_general": ["identifier", "pricing", "variants"],
+        "pharmacy_parapharmacy": ["identifier", "pricing", "expiry", "lot"],
+        "other": ["identifier", "pricing"],
+    }
+    return mapping.get(service_type or "other", mapping["other"])
+
+
+def build_template_response(context, intent):
+    ctx = context or {}
+    mode = ctx.get("ai_mode") or "full"
+    inv = ctx.get("inventory_summary", {})
+    losses = ctx.get("losses", {})
+    quality = ctx.get("data_quality", {})
+    features = ctx.get("features", {})
+    service = ctx.get("service") or {}
+    service_type = service.get("service_type") or "other"
+
+    total_skus = inv.get("total_skus", 0)
+    low_stock = inv.get("low_stock_count", 0)
+    out_stock = inv.get("out_of_stock_count", 0)
+    loss_qty = losses.get("total_qty", 0) or 0
+    loss_by_reason = losses.get("by_reason") or []
+
+    analysis = []
+    watch_items = []
+    actions = []
+
+    if intent == "losses":
+        if loss_qty > 0:
+            main_reason = loss_by_reason[0]["reason"] if loss_by_reason else "écarts"
+            analysis.append("Les pertes sont réelles mais concentrées sur peu d’articles.")
+            analysis.append(f"La cause dominante semble liée à {main_reason}.")
+        else:
+            analysis.append("Aucune perte n’est enregistrée sur la période.")
+            analysis.append("La priorité est de fiabiliser la saisie pour confirmer la tendance.")
+
+        if quality.get("products_without_identifier_count", 0) > 0:
+            watch_items.append("Des produits sans référence rendent les pertes difficiles à tracer.")
+        if quality.get("products_without_purchase_price_count", 0) > 0 and _module_enabled(features, "pricing"):
+            watch_items.append("Des prix d’achat manquants masquent l’impact réel des pertes.")
+        if _module_enabled(features, "expiry") and quality.get("products_without_dlc_count", 0) > 0:
+            watch_items.append("Des dates manquantes limitent la prévention des pertes liées aux DLC.")
+
+        if loss_qty > 0:
+            actions.append({"label": "Analyser les pertes enregistrées", "type": "link", "href": "/app/losses"})
+        if quality.get("products_without_identifier_count", 0) > 0 and not _module_enabled(features, "identifier"):
+            actions.append({"label": "Activer le module Référence (SKU / code-barres)", "type": "link", "href": "/app/settings"})
+        if quality.get("products_without_purchase_price_count", 0) > 0 and _module_enabled(features, "pricing"):
+            actions.append({"label": "Compléter les prix d’achat des produits sensibles", "type": "link", "href": "/app/products"})
+        if service_type in ("bar", "kitchen", "bakery") and not _module_enabled(features, "opened"):
+            actions.append({"label": "Activer le suivi entamé / non-entamé", "type": "link", "href": "/app/settings"})
+
+    elif intent == "modules":
+        recommended = _recommended_modules_for_service(service_type)
+        inactive = [m for m in recommended if not _module_enabled(features, m)]
+        active = [m for m in recommended if m not in inactive]
+
+        analysis.append("Les modules adaptés à votre métier améliorent directement la fiabilité du stock.")
+        if inactive:
+            analysis.append("Certains modules clés ne sont pas encore actifs.")
+        else:
+            analysis.append("Les modules essentiels sont déjà actifs.")
+
+        if inactive:
+            watch_items.append("Priorité : activer les modules qui bloquent les données critiques.")
+            watch_items.append(f"Modules à activer : {', '.join(MODULE_LABELS.get(m, m) for m in inactive[:3])}.")
+        elif active:
+            watch_items.append("Vous êtes déjà aligné sur les modules recommandés pour ce métier.")
+
+        actions.append({"label": "Ouvrir Paramètres → Modules", "type": "link", "href": "/app/settings"})
+        if inactive:
+            actions.append({"label": "Compléter un produit avec les nouveaux champs", "type": "link", "href": "/app/products"})
+
+    else:  # summary
+        if total_skus == 0:
+            analysis.append("Votre base produits est vide sur la période.")
+            analysis.append("Commencez par structurer les fiches produits.")
+        else:
+            if out_stock > 0:
+                analysis.append("Le stock est sous tension avec des ruptures visibles.")
+            elif low_stock > 0:
+                analysis.append("Le stock est globalement stable mais des références sont à surveiller.")
+            else:
+                analysis.append("Le stock est stable et sans alerte critique immédiate.")
+
+        if loss_qty > 0:
+            analysis.append("Des pertes existent et doivent être expliquées.")
+        if quality.get("products_without_identifier_count", 0) > 0:
+            watch_items.append("Des références manquent, ce qui fragilise la lecture des écarts.")
+        if quality.get("products_without_category_count", 0) > 0:
+            watch_items.append("Des catégories manquantes limitent l’analyse par rayon/service.")
+        if loss_qty > 0:
+            watch_items.append("Les pertes doivent être surveillées pour éviter un écart récurrent.")
+
+        if out_stock > 0 or low_stock > 0:
+            actions.append({"label": "Vérifier les produits à risque", "type": "link", "href": "/app/inventory"})
+        if loss_qty > 0:
+            actions.append({"label": "Analyser les pertes", "type": "link", "href": "/app/losses"})
+        if quality.get("products_without_identifier_count", 0) > 0:
+            actions.append({"label": "Compléter les références produit", "type": "link", "href": "/app/products"})
+
+    if mode != "light" and analysis:
+        analysis.append("Si la tendance continue, l’écart entre stock réel et stock attendu va se creuser.")
+
+    max_watch = 2 if mode == "light" else 4
+    max_actions = 2 if mode == "light" else 3
+    analysis_text = " ".join(analysis).strip()
+
+    return {
+        "analysis": analysis_text,
+        "watch_items": watch_items[:max_watch],
+        "actions": actions[:max_actions],
+        "question": None,
+        "message": analysis_text,
+        "insights": [],
+        "suggested_actions": [],
+    }
+
+
+def maybe_template_response(context):
+    if not context:
+        return None
+    if (context.get("scope") or "") == "support":
+        return None
+    intent = detect_intent(context.get("user_question") or "")
+    if not intent:
+        return None
+    return build_template_response(context, intent)
 
 
 def build_context(user, scope=None, period_start=None, period_end=None, filters=None, user_question=None, mode="full"):
@@ -161,6 +350,11 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     )
 
     missing_id_count = products_qs.filter(barcode__isnull=True, internal_sku__isnull=True).count()
+    missing_category_count = products_qs.filter(Q(category__isnull=True) | Q(category="")).count()
+    missing_purchase_count = products_qs.filter(Q(purchase_price__isnull=True) | Q(purchase_price=0)).count()
+    missing_selling_count = products_qs.filter(Q(selling_price__isnull=True) | Q(selling_price=0)).count()
+    missing_dlc_count = products_qs.filter(dlc__isnull=True).count()
+    opened_count = products_qs.filter(container_status="OPENED").count()
     question = (user_question or "").strip()[:500]
     plan_code = None
     plan_entitlements = []
@@ -223,6 +417,11 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
         "data_quality": {
             "categories_count": tenant.categories.count(),
             "products_without_identifier_count": missing_id_count,
+            "products_without_category_count": missing_category_count,
+            "products_without_purchase_price_count": missing_purchase_count,
+            "products_without_selling_price_count": missing_selling_count,
+            "products_without_dlc_count": missing_dlc_count,
+            "opened_containers_count": opened_count,
             "loss_events_count": loss_totals.get("loss_count") or 0,
         },
         "top_items": {
@@ -260,63 +459,134 @@ def _local_assistant_summary(context):
     ctx = context or {}
     inv = ctx.get("inventory_summary", {})
     losses = ctx.get("losses", {})
-    usage = ctx.get("usage", {})
-    user_question = ctx.get("user_question")
-    message = (
-        f"{ctx.get('tenant', {}).get('name', 'Votre organisation')} : "
-        f"{inv.get('total_skus', 0)} SKU(s), {inv.get('low_stock_count', 0)} (<3 unités), "
-        f"{inv.get('out_of_stock_count', 0)} épuisés. "
-        f"{losses.get('total_qty', 0)} pertes depuis {ctx.get('period', {}).get('month') or 'le mois actif'}."
-    )
-    if user_question:
-        message = (
-            f"Question reçue : {user_question}. "
-            f"{message} "
-            "Voici un point rapide basé sur vos données actuelles."
-        )
+    features = ctx.get("features") or {}
+    quality = ctx.get("data_quality") or {}
+    mode = ctx.get("ai_mode") or "full"
+    service = ctx.get("service") or {}
+    service_type = service.get("service_type") or "other"
+    top_losses = (ctx.get("top_items") or {}).get("highest_loss_rate") or []
 
-    insights = []
-    if inv.get("low_stock_count", 0) > 0:
-        insights.append(
-            {
-                "title": "Stocks bas détectés",
-                "description": f"{inv['low_stock_count']} produit(s) à moins de 3 unités.",
-                "severity": "warning",
-            }
-        )
-    if inv.get("out_of_stock_count", 0) > 0:
-        insights.append(
-            {
-                "title": "Produits rupture",
-                "description": f"{inv['out_of_stock_count']} produit(s) sont à 0 stock.",
-                "severity": "critical",
-            }
-        )
-    if losses.get("total_qty", 0) > 0:
-        insights.append(
-            {
-                "title": "Pertes enregistrées",
-                "description": f"{losses['total_qty']} unité(s) perdues ce mois.",
-                "severity": "info",
-            }
-        )
+    def _enabled(flag, price=False):
+        if price:
+            prices = features.get("prices") or {}
+            return prices.get("purchase_enabled") is not False or prices.get("selling_enabled") is not False
+        cfg = features.get(flag) or {}
+        return cfg.get("enabled") is True
+
+    total_skus = inv.get("total_skus", 0)
+    low_stock = inv.get("low_stock_count", 0)
+    out_stock = inv.get("out_of_stock_count", 0)
+    loss_qty = losses.get("total_qty", 0) or 0
+
+    analysis_parts = []
+    if total_skus == 0:
+        analysis_parts.append("Aucun produit n’est suivi sur la période. L’enjeu principal est de structurer la base.")
+    else:
+        if out_stock > 0:
+            analysis_parts.append("Le stock est sous tension avec des ruptures visibles.")
+        elif low_stock > 0:
+            analysis_parts.append("Le stock est globalement en place, mais certaines références manquent de marge.")
+        else:
+            analysis_parts.append("Le stock est stable, sans alerte critique immédiate.")
+
+        if loss_qty > 0:
+            if top_losses:
+                top_names = [i.get("name") for i in top_losses if i.get("name") and i.get("name") != "N/A"][:2]
+                if top_names:
+                    analysis_parts.append(
+                        f"Les pertes se concentrent surtout sur {', '.join(top_names)}."
+                    )
+                else:
+                    analysis_parts.append("Des pertes sont enregistrées et restent concentrées sur quelques articles.")
+            else:
+                analysis_parts.append("Des pertes sont enregistrées et doivent être expliquées.")
+
+        if mode != "light" and (out_stock > 0 or low_stock > 0 or loss_qty > 0):
+            analysis_parts.append("Si cette tendance continue, l’écart entre stock réel et stock attendu va se creuser.")
+
+    analysis = " ".join(analysis_parts).strip() or "Analyse indisponible pour le moment."
+
+    watch_items = []
+    if out_stock > 0:
+        watch_items.append("Des ruptures existent : risque de ventes ou usages bloqués.")
+    if low_stock > 0 and out_stock == 0:
+        watch_items.append("Stocks faibles sur certaines références : marge de sécurité réduite.")
+    if loss_qty > 0:
+        watch_items.append("Pertes récurrentes : surveiller les produits sensibles.")
+    if quality.get("products_without_identifier_count", 0) > 0:
+        watch_items.append("Des produits sans référence rendent le suivi des pertes imprécis.")
+    if quality.get("products_without_purchase_price_count", 0) > 0 and _enabled("prices", price=True):
+        watch_items.append("Des prix d’achat manquants sous-estiment l’impact réel des pertes.")
+    if quality.get("products_without_category_count", 0) > 0:
+        watch_items.append("Des catégories manquantes rendent l’analyse moins fiable.")
+    if _enabled("dlc") and quality.get("products_without_dlc_count", 0) > 0:
+        watch_items.append("Des dates manquantes limitent la prévention des pertes liées aux DLC.")
 
     actions = []
-    if insights and usage.get("services_count", 0) > 1:
+    if quality.get("products_without_identifier_count", 0) > 0 and not _enabled("barcode") and not _enabled("sku"):
         actions.append(
             {
-                "action_key": "refresh_stats",
-                "label": "Mettre à jour les stats",
-                "payload": {},
-                "requires_confirmation": False,
+                "label": "Activer le module Référence (SKU / code-barres)",
+                "type": "link",
+                "href": "/app/settings",
+            }
+        )
+    elif quality.get("products_without_identifier_count", 0) > 0:
+        actions.append(
+            {
+                "label": "Compléter les références des produits à risque",
+                "type": "link",
+                "href": "/app/products",
             }
         )
 
+    if loss_qty > 0:
+        actions.append(
+            {
+                "label": "Analyser les pertes enregistrées",
+                "type": "link",
+                "href": "/app/losses",
+            }
+        )
+
+    if out_stock > 0:
+        actions.append(
+            {
+                "label": "Vérifier les ruptures dans l’inventaire",
+                "type": "link",
+                "href": "/app/inventory",
+            }
+        )
+
+    if quality.get("products_without_purchase_price_count", 0) > 0 and _enabled("prices", price=True):
+        actions.append(
+            {
+                "label": "Renseigner les prix d’achat sur les produits clés",
+                "type": "link",
+                "href": "/app/products",
+            }
+        )
+
+    if service_type in ("bar", "kitchen", "bakery") and not _enabled("open_container_tracking"):
+        actions.append(
+            {
+                "label": "Activer le suivi entamé / non-entamé",
+                "type": "link",
+                "href": "/app/settings",
+            }
+        )
+
+    max_watch = 2 if mode == "light" else 4
+    max_actions = 2 if mode == "light" else 3
+
     return {
-        "message": message,
-        "insights": insights[:3],
-        "suggested_actions": actions,
+        "analysis": analysis,
+        "watch_items": watch_items[:max_watch],
+        "actions": actions[:max_actions],
         "question": None,
+        "message": analysis,
+        "insights": [],
+        "suggested_actions": [],
     }
 
 
@@ -330,74 +600,122 @@ def _local_support_response(context):
 
     def _msg(text, question=None):
         return {
+            "analysis": text,
+            "watch_items": [],
+            "actions": [],
+            "question": question,
             "message": text,
             "insights": [],
             "suggested_actions": [],
-            "question": question,
         }
 
     if any(k in q for k in ["export", "csv", "excel"]):
-        return _msg(
-            "Exports: allez dans Exports, choisissez la periode et le format (CSV/Excel), puis lancez le telechargement. "
-            "Si vous voyez une erreur 403, le quota de votre plan est atteint.",
-            "Le probleme arrive-t-il sur CSV, Excel, ou les deux ?",
-        )
+        return {
+            "analysis": "Ouvrez Exports, choisissez la période et le format, puis lancez le téléchargement.",
+            "watch_items": [
+                "Une erreur 403 indique un quota de plan atteint.",
+                "Excel est disponible selon le plan (Duo/Multi).",
+            ],
+            "actions": [
+                {"label": "Ouvrir Exports", "type": "link", "href": "/app/exports"},
+            ],
+            "question": "Le problème arrive-t-il sur CSV, Excel, ou les deux ?",
+            "message": "Ouvrez Exports, choisissez la période et le format, puis lancez le téléchargement.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["403", "limite", "quota"]):
-        return _msg(
-            "Une erreur 403 indique souvent un quota de plan atteint (exports ou IA). "
-            "Verifiez votre plan dans Parametres > Abonnement & facturation.",
-            "Quelle action precise declenche l'erreur (export, IA, creation service) ?",
-        )
+        return {
+            "analysis": "Une erreur 403 signifie généralement qu’un quota de plan est atteint.",
+            "watch_items": ["Le quota peut concerner exports, IA ou services.", "Vérifiez votre plan et l’usage actuel."],
+            "actions": [
+                {
+                    "label": "Ouvrir Abonnement & facturation",
+                    "type": "link",
+                    "href": "/app/settings",
+                }
+            ],
+            "question": "Quelle action précise déclenche l’erreur (export, IA, création de service) ?",
+            "message": "Une erreur 403 signifie généralement qu’un quota de plan est atteint.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["assistant", "ia", "ai"]):
         quota_msg = ""
         if ai_limit is not None:
             quota_msg = f" Votre quota hebdomadaire est de {ai_limit} requete(s)."
-        return _msg(
-            "L'assistant IA est disponible sur Duo (mode light) et Multi (mode complet)."
-            f"{quota_msg} Si l'IA repond peu, reessayez ou verifiez votre quota.",
-            "Quel type d'aide attendez-vous (analyse stock, exports, configuration) ?",
-        )
+        return {
+            "analysis": "L’assistant IA est disponible sur Duo (light) et Multi (coach)."
+            f"{quota_msg} Si l’IA ne répond pas, vérifiez le quota.",
+            "watch_items": ["Le quota support est hebdomadaire.", "Le mode Multi fournit des conseils plus approfondis."],
+            "actions": [{"label": "Ouvrir Support", "type": "link", "href": "/app/support"}],
+            "question": "Quel type d’aide attendez-vous (stock, exports, configuration) ?",
+            "message": "L’assistant IA est disponible sur Duo (light) et Multi (coach)."
+            f"{quota_msg} Si l’IA ne répond pas, vérifiez le quota.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["scan", "code-barres", "barcode", "openfoodfacts", "off"]):
-        return _msg(
-            "Scan: sur iOS Safari, la camera peut etre limitee. Utilisez la saisie manuelle si besoin. "
-            "Le pre-remplissage OpenFoodFacts concerne surtout les produits alimentaires.",
-            "Quel navigateur utilisez-vous et quel message d'erreur voyez-vous ?",
-        )
+        return {
+            "analysis": "Sur iOS Safari, la caméra peut être limitée. Utilisez la saisie manuelle si besoin.",
+            "watch_items": ["OpenFoodFacts préremplit surtout les produits alimentaires."],
+            "actions": [{"label": "Ouvrir Inventaire", "type": "link", "href": "/app/inventory"}],
+            "question": "Quel navigateur utilisez-vous et quel message d’erreur voyez-vous ?",
+            "message": "Sur iOS Safari, la caméra peut être limitée. Utilisez la saisie manuelle si besoin.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["service", "services"]):
-        return _msg(
-            "Pour changer de service, utilisez le selecteur en haut de l'app. "
-            "Le nombre de services autorises depend du plan.",
-            "Souhaitez-vous ajouter un service ou simplement en changer ?",
-        )
+        return {
+            "analysis": "Utilisez le sélecteur en haut de l’app pour changer de service.",
+            "watch_items": ["Le nombre de services dépend du plan."],
+            "actions": [{"label": "Ouvrir Services & modules", "type": "link", "href": "/app/settings"}],
+            "question": "Souhaitez-vous ajouter un service ou simplement en changer ?",
+            "message": "Utilisez le sélecteur en haut de l’app pour changer de service.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["paiement", "abonnement", "stripe", "facturation"]):
-        return _msg(
-            "Facturation: allez dans Parametres > Abonnement & facturation pour gerer votre abonnement. "
-            "Si le plan n'est pas active apres paiement, rechargez la page de succes avec session_id.",
-            "Pouvez-vous confirmer le plan achete et la date du paiement ?",
-        )
+        return {
+            "analysis": "Allez dans Paramètres → Abonnement & facturation pour gérer Stripe.",
+            "watch_items": ["Si le plan n’est pas activé après paiement, rechargez la page de succès."],
+            "actions": [{"label": "Ouvrir Abonnement & facturation", "type": "link", "href": "/app/settings"}],
+            "question": "Pouvez-vous confirmer le plan acheté et la date du paiement ?",
+            "message": "Allez dans Paramètres → Abonnement & facturation pour gérer Stripe.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     if any(k in q for k in ["connexion", "login", "mot de passe", "reset"]):
-        return _msg(
-            "Connexion: verifiez vos identifiants. Pour reinitialiser, utilisez 'Mot de passe oublie'. "
-            "Si plusieurs comptes partagent un email, connectez-vous avec le nom d'utilisateur.",
-            "Avez-vous un message d'erreur precis a l'ecran ?",
-        )
+        return {
+            "analysis": "Vérifiez vos identifiants. Pour réinitialiser, utilisez “Mot de passe oublié”.",
+            "watch_items": ["Si plusieurs comptes partagent un email, utilisez le nom d’utilisateur."],
+            "actions": [{"label": "Ouvrir Connexion", "type": "link", "href": "/login"}],
+            "question": "Avez-vous un message d’erreur précis à l’écran ?",
+            "message": "Vérifiez vos identifiants. Pour réinitialiser, utilisez “Mot de passe oublié”.",
+            "insights": [],
+            "suggested_actions": [],
+        }
 
     return _msg(
-        "Je peux aider sur les exports, les services, la facturation, l'IA, le scan, ou les modules. "
+        "Je peux aider sur exports, services, facturation, IA, scan ou modules. "
         f"Si besoin, contactez {support_email}.",
         "Quel est votre besoin principal ?",
     )
 
 
 def _fallback():
+    message = "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes."
     return {
-        "message": "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes.",
+        "analysis": message,
+        "watch_items": [],
+        "actions": [],
+        "message": message,
         "insights": [],
         "suggested_actions": [],
         "question": None,
@@ -407,6 +725,9 @@ def _fallback():
 
 def call_llm(system_prompt, context_json, context=None):
     request_id = str(uuid4())
+    template = maybe_template_response(context or {})
+    if template:
+        return {**template, "request_id": request_id, "mode": "template"}
     if not getattr(settings, "AI_ENABLED", False):
         response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
         return {**response, "request_id": request_id, "mode": "fallback"}
@@ -452,6 +773,20 @@ def validate_llm_json(data, context=None):
     schema = {
         "type": "object",
         "properties": {
+            "analysis": {"type": "string"},
+            "watch_items": {"type": "array", "items": {"type": "string"}},
+            "actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "type": {"type": "string"},
+                        "href": {"type": ["string", "null"]},
+                    },
+                    "required": ["label"],
+                },
+            },
             "message": {"type": "string"},
             "insights": {
                 "type": "array",
@@ -480,7 +815,6 @@ def validate_llm_json(data, context=None):
             },
             "question": {"type": ["string", "null"]},
         },
-        "required": ["message"],
     }
 
     try:
@@ -491,9 +825,12 @@ def validate_llm_json(data, context=None):
             return response, True
         return _fallback(), True
 
-    message = (data.get("message") or "")[:1200]
+    analysis = (data.get("analysis") or data.get("message") or "")[:1400]
+    watch_items = data.get("watch_items") or []
+    actions = data.get("actions") or []
+    message = analysis
     insights = data.get("insights") or []
-    actions = data.get("suggested_actions") or []
+    suggested_actions = data.get("suggested_actions") or []
     question = data.get("question", None)
 
     cleaned_insights = []
@@ -512,11 +849,28 @@ def validate_llm_json(data, context=None):
     for act in actions:
         if not isinstance(act, dict):
             continue
+        label = (act.get("label") or "").strip()
+        if not label:
+            continue
+        action_type = act.get("type") if act.get("type") in ("link", "info") else None
+        href = act.get("href") if isinstance(act.get("href"), str) else None
+        cleaned_actions.append(
+            {
+                "label": label[:160],
+                "type": action_type or ("link" if href else "info"),
+                "href": href[:200] if href else None,
+            }
+        )
+
+    cleaned_suggested_actions = []
+    for act in suggested_actions:
+        if not isinstance(act, dict):
+            continue
         action_key = act.get("action_key")
         if action_key not in ACTION_TEMPLATES:
             continue
         method, endpoint = ACTION_TEMPLATES[action_key]
-        cleaned_actions.append(
+        cleaned_suggested_actions.append(
             {
                 "label": act.get("label", action_key)[:120],
                 "endpoint": endpoint,
@@ -526,10 +880,28 @@ def validate_llm_json(data, context=None):
             }
         )
 
+    if not watch_items and cleaned_insights:
+        watch_items = []
+        for ins in cleaned_insights:
+            title = (ins.get("title") or "").strip()
+            desc = (ins.get("description") or "").strip()
+            if not title and not desc:
+                continue
+            watch_items.append(f"{title} — {desc}".strip(" —"))
+
+    if not analysis:
+        if context:
+            response = _local_support_response(context) if context.get("scope") == "support" else _local_assistant_summary(context)
+            return response, True
+        return _fallback(), True
+
     return {
+        "analysis": message,
+        "watch_items": [item[:240] for item in watch_items if isinstance(item, str)][:4],
+        "actions": cleaned_actions[:4],
         "message": message,
         "insights": cleaned_insights,
-        "suggested_actions": cleaned_actions,
+        "suggested_actions": cleaned_suggested_actions,
         "question": question if question else None,
         "questions": [] if question else [],
     }, False

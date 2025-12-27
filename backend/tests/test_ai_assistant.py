@@ -1,10 +1,12 @@
 import json
 import pytest
+from django.utils import timezone
 from django.urls import reverse
 from rest_framework.test import APIClient
 from accounts.models import Tenant, Service, UserProfile
 from products.models import Product
-from ai_assistant.services.assistant import validate_llm_json, build_context
+from ai_assistant.services.assistant import validate_llm_json, build_context, call_llm, SYSTEM_PROMPT
+from products.models import LossEvent
 
 
 @pytest.mark.django_db
@@ -92,3 +94,86 @@ def test_whitelist_actions_removed():
     )
     assert data["suggested_actions"] == []
     assert invalid is False
+
+
+@pytest.mark.django_db
+def test_template_losses_response_used(django_user_model):
+    tenant = Tenant.objects.create(name="Test", domain="food")
+    user = django_user_model.objects.create_user(username="u3", password="pwd")
+    UserProfile.objects.create(user=user, tenant=tenant)
+    service = Service.objects.create(tenant=tenant, name="Cuisine", service_type="kitchen")
+    product = Product.objects.create(
+        name="P1", tenant=tenant, service=service, quantity=2, inventory_month="2025-12"
+    )
+    LossEvent.objects.create(
+        tenant=tenant,
+        service=service,
+        product=product,
+        occurred_at=timezone.now(),
+        quantity=2,
+        reason="breakage",
+        inventory_month="2025-12",
+    )
+    ctx = build_context(
+        user,
+        scope="inventory",
+        period_start="2025-12",
+        period_end="2025-12",
+        filters={"service": service.id, "month": "2025-12"},
+        user_question="Où sont mes pertes les plus importantes ?",
+        mode="light",
+    )
+    raw = call_llm(SYSTEM_PROMPT, json.dumps(ctx, ensure_ascii=False), ctx)
+    assert raw.get("mode") == "template"
+    assert raw.get("analysis")
+    assert raw.get("watch_items") is not None
+    assert raw.get("actions") is not None
+    assert "Question reçue" not in raw.get("analysis", "")
+
+
+@pytest.mark.django_db
+def test_template_modules_response_used(django_user_model):
+    tenant = Tenant.objects.create(name="Test", domain="general")
+    user = django_user_model.objects.create_user(username="u4", password="pwd")
+    UserProfile.objects.create(user=user, tenant=tenant)
+    service = Service.objects.create(tenant=tenant, name="Boutique", service_type="retail_general")
+    Product.objects.create(name="P1", tenant=tenant, service=service, quantity=5, inventory_month="2025-12")
+    ctx = build_context(
+        user,
+        scope="inventory",
+        period_start="2025-12",
+        period_end="2025-12",
+        filters={"service": service.id, "month": "2025-12"},
+        user_question="Quels modules dois-je activer ?",
+        mode="full",
+    )
+    raw = call_llm(SYSTEM_PROMPT, json.dumps(ctx, ensure_ascii=False), ctx)
+    assert raw.get("mode") == "template"
+    assert raw.get("analysis")
+    assert raw.get("watch_items") is not None
+    assert raw.get("actions") is not None
+    assert "Question reçue" not in raw.get("analysis", "")
+
+
+@pytest.mark.django_db
+def test_template_summary_response_used(django_user_model):
+    tenant = Tenant.objects.create(name="Test", domain="food")
+    user = django_user_model.objects.create_user(username="u5", password="pwd")
+    UserProfile.objects.create(user=user, tenant=tenant)
+    service = Service.objects.create(tenant=tenant, name="Principal", service_type="grocery_food")
+    Product.objects.create(name="P1", tenant=tenant, service=service, quantity=1, inventory_month="2025-12")
+    ctx = build_context(
+        user,
+        scope="inventory",
+        period_start="2025-12",
+        period_end="2025-12",
+        filters={"service": service.id, "month": "2025-12"},
+        user_question="Peux-tu me faire un résumé mensuel ?",
+        mode="light",
+    )
+    raw = call_llm(SYSTEM_PROMPT, json.dumps(ctx, ensure_ascii=False), ctx)
+    assert raw.get("mode") == "template"
+    assert raw.get("analysis")
+    assert raw.get("watch_items") is not None
+    assert raw.get("actions") is not None
+    assert "Question reçue" not in raw.get("analysis", "")

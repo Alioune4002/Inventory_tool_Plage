@@ -243,6 +243,7 @@ export function AuthProvider({ children }) {
       domain,
       service_type,
       service_name,
+      service_features,
       business_type,
       extra_services,
     }) => {
@@ -254,6 +255,7 @@ export function AuthProvider({ children }) {
           domain,
           service_type,
           service_name,
+          service_features,
           business_type,
           extra_services,
         });

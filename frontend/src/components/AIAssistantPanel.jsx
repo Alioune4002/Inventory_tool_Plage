@@ -9,22 +9,13 @@ import useEntitlements from "../app/useEntitlements";
 import { useAuth } from "../app/AuthProvider";
 import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 
-const severityClass = (sev) => {
-  switch (sev) {
-    case "critical":
-      return "bg-[var(--danger-bg)] text-[var(--danger-text)] border border-[var(--danger-border)]";
-    case "warning":
-      return "bg-[var(--warn-bg)] text-[var(--warn-text)] border border-[var(--warn-border)]";
-    default:
-      return "bg-[var(--info-bg)] text-[var(--info-text)] border border-[var(--info-border)]";
-  }
-};
-
 const SUGGESTIONS = [
-  "Quels modules dois-je activer pour mon métier ?",
+  "Peux-tu me résumer mon stock ce mois-ci ?",
   "Où sont mes pertes les plus importantes ?",
-  "Comment améliorer mes catégories et éviter les doublons ?",
-  "Peux-tu résumer mon stock du mois ?",
+  "Quels produits risquent d’être en rupture ?",
+  "Quels modules dois-je activer pour mon métier ?",
+  "Qu’est-ce que je dois prioriser maintenant ?",
+  "Ai-je des données manquantes qui bloquent les analyses ?",
 ];
 
 const SUPPORT_SUGGESTIONS = [
@@ -43,12 +34,16 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
   const [question, setQuestion] = useState("");
   const [notice, setNotice] = useState("");
   const [attempted, setAttempted] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(true);
 
   const initialMessage =
     scope === "support"
-      ? "Posez une question sur l'application pour obtenir de l'aide."
-      : "Posez une question ou lancez une analyse pour obtenir des conseils.";
+      ? "Décrivez votre problème, je vous guide pas à pas."
+      : "Décrivez votre besoin, je vous donne un diagnostic clair et des actions concrètes.";
   const [data, setData] = useState({
+    analysis: initialMessage,
+    watch_items: [],
+    actions: [],
     message: initialMessage,
     insights: [],
     suggested_actions: [],
@@ -60,7 +55,7 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
   const entLoaded = entitlements !== null;
   const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
   const planEffective = entitlements?.plan_effective;
-  const aiModeLabel = planEffective === "BOUTIQUE" ? "IA light" : planEffective === "PRO" ? "IA complet" : null;
+  const aiModeLabel = planEffective === "BOUTIQUE" ? "IA light" : planEffective === "PRO" ? "IA coach" : null;
 
   // UX soft : autorisé tant que les entitlements ne sont pas chargés (évite un flash paywall)
   const canUseAI = !entLoaded || aiAllowed;
@@ -151,15 +146,13 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
         showNotice("Cette fonctionnalité est disponible avec les plans Duo ou Multi.");
         setData((prev) => ({
           ...prev,
-          message: "Plan Duo ou Multi requis pour utiliser l’assistant IA.",
-          insights: [
-            {
-              title: "Accès limité",
-              description:
-                "Passez au plan Duo ou Multi pour activer l’assistant IA et obtenir des conseils basés sur vos données.",
-              severity: "warning",
-            },
+          analysis: "Plan Duo ou Multi requis pour utiliser l’assistant IA.",
+          watch_items: [
+            "Passez à Duo ou Multi pour activer l’assistant IA et obtenir des conseils contextualisés.",
           ],
+          actions: [{ label: "Voir les plans", type: "link", href: "/tarifs" }],
+          message: "Plan Duo ou Multi requis pour utiliser l’assistant IA.",
+          insights: [],
           suggested_actions: [],
           question: null,
         }));
@@ -191,6 +184,7 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
         }
 
         setData(payload);
+        setShowSuggestions(false);
         if (userQuestion) setQuestion("");
       } catch (e) {
         const apiMsg = e?.friendlyMessage || e?.response?.data?.detail || e?.message;
@@ -199,6 +193,7 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
         if (e?.response?.status === 403 && (code === "FEATURE_NOT_INCLUDED" || code?.startsWith?.("LIMIT_"))) {
           const isWeekLimit = code === "LIMIT_AI_REQUESTS_WEEK";
           const isMonthLimit = code === "LIMIT_AI_REQUESTS_MONTH";
+          const isLimit = isWeekLimit || isMonthLimit;
           const message =
             isWeekLimit
               ? "Quota IA hebdomadaire atteint. Passez au plan Multi pour continuer."
@@ -208,18 +203,17 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
           showNotice(message);
           setData((prev) => ({
             ...prev,
-            message,
-            insights: [
-              {
-                title: isLimit ? "Quota atteint" : "Plan requis",
-                description: isWeekLimit
-                  ? "Votre quota IA hebdomadaire est atteint. Passez au plan Multi pour plus de requêtes."
-                  : isMonthLimit
-                  ? "Votre quota IA mensuel est atteint. Passez au plan Multi pour plus de requêtes."
-                  : "Passez au plan Duo ou Multi pour activer l’assistant IA.",
-                severity: "warning",
-              },
+            analysis: message,
+            watch_items: [
+              isWeekLimit
+                ? "Votre quota IA hebdomadaire est atteint."
+                : isMonthLimit
+                ? "Votre quota IA mensuel est atteint."
+                : "Passez à Duo ou Multi pour activer l’assistant.",
             ],
+            actions: [{ label: "Voir les plans", type: "link", href: "/tarifs" }],
+            message,
+            insights: [],
             suggested_actions: [],
             question: null,
           }));
@@ -271,12 +265,42 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
       ? "Posez une question sur l'app (exports, scan, facturation)"
       : "Posez une question précise (ex : quels produits sont à risque ?)";
 
+  const analysisText = data?.analysis || data?.message || initialMessage;
+  const watchItems = Array.isArray(data?.watch_items) && data.watch_items.length
+    ? data.watch_items
+    : (data?.insights || []).map((ins) => `${ins?.title || ""}${ins?.description ? ` — ${ins.description}` : ""}`.trim());
+
+  const mergedActions = useMemo(() => {
+    const list = [];
+    if (Array.isArray(data?.actions)) {
+      list.push(
+        ...data.actions.map((act) => ({
+          label: act?.label || "",
+          type: act?.type || (act?.href ? "link" : "info"),
+          href: act?.href || null,
+        }))
+      );
+    }
+    if (Array.isArray(data?.suggested_actions)) {
+      list.push(
+        ...data.suggested_actions.map((act) => ({
+          label: act?.label || "Action",
+          endpoint: act?.endpoint,
+          method: act?.method,
+          payload: act?.payload,
+          requires_confirmation: act?.requires_confirmation,
+        }))
+      );
+    }
+    return list.filter((act) => act.label).slice(0, 4);
+  }, [data]);
+
   return (
     <Card className="p-5 space-y-4" data-tour="tour-ai">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Assistant IA</div>
-          <div className="text-lg font-bold text-[var(--text)]">Coach d’usage</div>
+          <div className="text-lg font-bold text-[var(--text)]">Coach IA</div>
           <div className="text-xs text-[var(--muted)]">
             {scope === "support"
               ? "Conseils sur l'app, les exports, le scan et la facturation."
@@ -307,37 +331,87 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
         </div>
       </div>
 
-      {/* message principal */}
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm leading-relaxed">
-        <div className="whitespace-pre-wrap text-[var(--text)]">{data?.message}</div>
+      {/* carte IA structurée */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 space-y-4">
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Analyse rapide</div>
+          <div className="text-sm leading-relaxed text-[var(--text)]">{analysisText}</div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Ce qu’il faut surveiller</div>
+          {watchItems?.length ? (
+            <ul className="space-y-1 text-sm text-[var(--text)] list-disc pl-4">
+              {watchItems.map((item, idx) => (
+                <li key={`${item}-${idx}`}>{item}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-sm text-[var(--muted)]">Rien de critique à signaler pour le moment.</div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Actions recommandées</div>
+          {mergedActions.length ? (
+            <ol className="space-y-2 text-sm text-[var(--text)] list-decimal pl-4">
+              {mergedActions.map((act, idx) => (
+                <li key={`${act.label}-${idx}`} className="flex flex-wrap items-center gap-2">
+                  <span>{act.label}</span>
+                  {act.href ? (
+                    <Button as={Link} to={act.href} size="sm" variant="secondary">
+                      Ouvrir
+                    </Button>
+                  ) : act.endpoint ? (
+                    <Button size="sm" variant="secondary" onClick={() => handleAction(act)}>
+                      Appliquer
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <div className="text-sm text-[var(--muted)]">Aucune action urgente pour l’instant.</div>
+          )}
+        </div>
+
+        {data?.question ? (
+          <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-3 py-2 text-sm text-[var(--warn-text)]">
+            Pour affiner : {data.question}
+          </div>
+        ) : null}
       </div>
 
-      {/* question (warning) */}
-      {data?.question ? (
-        <div className="rounded-2xl border border-[var(--warn-border)] bg-[var(--warn-bg)] px-4 py-3 text-sm text-[var(--warn-text)]">
-          Question : {data.question}
-        </div>
-      ) : null}
-
       <div className="space-y-2">
-        <div className="text-sm font-semibold text-[var(--text)]">Questions rapides</div>
-
-        <div className="flex flex-wrap gap-2">
-          {suggestions.map((prompt) => (
-            <Button
-              key={prompt}
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                setQuestion(prompt);
-                runAssistant(prompt);
-              }}
-              disabled={loading || disabledBecauseNoService || disabledBecausePaywall}
-            >
-              {prompt}
-            </Button>
-          ))}
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-[var(--text)]">Questions rapides</div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowSuggestions((prev) => !prev)}
+          >
+            {showSuggestions ? "Masquer" : "Afficher"}
+          </Button>
         </div>
+
+        {showSuggestions ? (
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((prompt) => (
+              <Button
+                key={prompt}
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  setQuestion(prompt);
+                  runAssistant(prompt);
+                }}
+                disabled={loading || disabledBecauseNoService || disabledBecausePaywall}
+              >
+                {prompt}
+              </Button>
+            ))}
+          </div>
+        ) : null}
 
         {/* zone saisie */}
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
@@ -410,44 +484,6 @@ export default function AIAssistantPanel({ month, serviceId, scope = "inventory"
         ) : null}
       </div>
 
-      {/* insights */}
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-[var(--text)]">Insights</div>
-        {data?.insights?.length ? (
-          <div className="grid md:grid-cols-2 gap-3">
-            {data.insights.map((ins, idx) => (
-              <Card key={idx} className="p-4 space-y-1" hover>
-                <Badge className={severityClass(ins.severity || "info")}>{ins.severity || "info"}</Badge>
-                <div className="text-sm font-semibold text-[var(--text)]">{ins.title}</div>
-                <div className="text-sm text-[var(--muted)]">{ins.description}</div>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="text-sm text-[var(--muted)]">Aucun insight pour le moment.</div>
-        )}
-      </div>
-
-      {/* actions */}
-      <div className="space-y-2">
-        <div className="text-sm font-semibold text-[var(--text)]">Actions suggérées</div>
-        {data?.suggested_actions?.length ? (
-          <div className="flex flex-wrap gap-2">
-            {data.suggested_actions.map((act, idx) => (
-              <Button
-                key={idx}
-                variant={act.requires_confirmation ? "secondary" : "primary"}
-                onClick={() => handleAction(act)}
-                disabled={loading}
-              >
-                {act.label || "Action"}
-              </Button>
-            ))}
-          </div>
-        ) : (
-          <div className="text-sm text-[var(--muted)]">Aucune action proposée.</div>
-        )}
-      </div>
     </Card>
   );
 }

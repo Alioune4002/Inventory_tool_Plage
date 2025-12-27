@@ -165,3 +165,26 @@ def test_register_rejects_invalid_extra_service_type():
     }
     res = client.post("/api/auth/register/", payload, format="json")
     assert res.status_code == 400
+
+
+@pytest.mark.django_db
+def test_register_applies_service_features_overrides():
+    client = APIClient()
+    payload = {
+        "username": "lina",
+        "password": "password123",
+        "tenant_name": "Lina Store",
+        "domain": "food",
+        "service_type": "kitchen",
+        "service_name": "Cuisine",
+        "service_features": {
+            "prices": {"purchase_enabled": False, "selling_enabled": False},
+            "tva": {"enabled": False},
+        },
+    }
+    res = client.post("/api/auth/register/", payload, format="json")
+    assert res.status_code == 201
+    tenant = Tenant.objects.get(name="Lina Store")
+    service = Service.objects.get(tenant=tenant, name="Cuisine")
+    assert service.features["prices"]["purchase_enabled"] is False
+    assert service.features["prices"]["selling_enabled"] is False

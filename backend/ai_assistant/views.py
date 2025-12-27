@@ -54,7 +54,14 @@ class AiAssistantView(APIView):
                 {
                     "enabled": False,
                     "code": code,
+                    "analysis": str(detail),
                     "message": str(detail),
+                    "watch_items": [
+                        "Passez à Duo ou Multi pour activer l’assistant IA.",
+                    ],
+                    "actions": [
+                        {"label": "Voir les plans", "type": "link", "href": "/tarifs"},
+                    ],
                     "insights": [
                         {
                             "title": "Plan requis",

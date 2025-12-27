@@ -52,6 +52,7 @@ export async function apiRegister({
   domain,
   service_type,
   service_name,
+  service_features,
   business_type,
   extra_services,
 }) {
@@ -72,6 +73,7 @@ export async function apiRegister({
     business_type: business_type || "other",
     service_type: service_type || "other",
     service_name: service_name || "Principal",
+    service_features: service_features || undefined,
     extra_services: Array.isArray(extra_services) ? extra_services : [],
   };
 

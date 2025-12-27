@@ -22,6 +22,16 @@ const SERVICE_TYPE_OPTIONS = [
   { value: "other", label: "Autre" },
 ];
 
+const DOMAIN_BY_FAMILY = {
+  retail: "food",
+  bar: "food",
+  restauration: "food",
+  boulangerie: "food",
+  mode: "general",
+  pharmacie: "general",
+  camping_multi: "food",
+};
+
 function resolveFamilyFromServiceType(serviceType, tenantDomain = "food") {
   const st = String(serviceType || "other");
 
@@ -116,7 +126,7 @@ const ModuleToggle = ({ moduleId, name, description, active, onToggle }) => (
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, refreshServices } = useAuth();
   const nav = useNavigate();
 
   const [form, setForm] = useState({ storeName: "", email: "", password: "", passwordConfirm: "" });
@@ -187,6 +197,28 @@ export default function Register() {
     setModules((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
   };
 
+  const buildServiceFeatures = (svcType, domain) => {
+    const moduleSet = new Set(modules || []);
+    const identifierEnabled = moduleSet.has("identifier");
+    const pricingEnabled = moduleSet.has("pricing");
+    const familyForSvcId = resolveFamilyFromServiceType(svcType, domain);
+    const familyForSvc = FAMILLES.find((f) => f.id === familyForSvcId) ?? familyMeta;
+    const identifiers = familyForSvc?.identifiers || {};
+
+    return {
+      barcode: { enabled: identifierEnabled ? Boolean(identifiers.barcode) : false },
+      sku: { enabled: identifierEnabled ? Boolean(identifiers.sku) : false },
+      dlc: { enabled: moduleSet.has("expiry") },
+      lot: { enabled: moduleSet.has("lot") },
+      variants: { enabled: moduleSet.has("variants") },
+      multi_unit: { enabled: moduleSet.has("multiUnit") },
+      open_container_tracking: { enabled: moduleSet.has("opened") },
+      item_type: { enabled: moduleSet.has("itemType") },
+      prices: { purchase_enabled: pricingEnabled, selling_enabled: pricingEnabled },
+      tva: { enabled: pricingEnabled },
+    };
+  };
+
   const handleServiceNameChange = (idx, value) => {
     setServiceList((prev) => prev.map((svc, i) => (i === idx ? { ...svc, service_name: value } : svc)));
   };
@@ -204,8 +236,6 @@ export default function Register() {
   };
 
   const applyModuleDefaults = async () => {
-    if (!modules?.length) return;
-
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const res = await api.get("/api/auth/services/");
@@ -220,7 +250,7 @@ export default function Register() {
           services.map(async (svc) => {
             const nextFeatures = { ...(svc.features || {}) };
 
-            const familyForSvcId = resolveFamilyFromServiceType(svc.service_type, "food");
+            const familyForSvcId = resolveFamilyFromServiceType(svc.service_type, DOMAIN_BY_FAMILY[familyId] || "food");
             const familyForSvc = FAMILLES.find((f) => f.id === familyForSvcId) ?? familyMeta;
             const identifiers = familyForSvc?.identifiers || {};
 
@@ -286,27 +316,20 @@ export default function Register() {
         camping_multi: "camping_multi",
       };
 
-      const domainByFamily = {
-        retail: "food",
-        bar: "food",
-        restauration: "food",
-        boulangerie: "food",
-        mode: "general",
-        pharmacie: "general",
-        camping_multi: "food",
-      };
-
+      const domain = DOMAIN_BY_FAMILY[familyId] || "food";
       const data = await register({
         password: form.password,
         email: form.email,
         tenant_name: form.storeName,
-        domain: domainByFamily[familyId] || "food",
+        domain,
         business_type: businessTypeByFamily[familyId] || "other",
         service_type: primaryService?.service_type || "other",
         service_name: primaryService?.service_name || "Principal",
+        service_features: buildServiceFeatures(primaryService?.service_type || "other", domain),
         extra_services: extraServices.map((svc) => ({
           service_type: svc.service_type || "other",
           name: svc.service_name || "Secondaire",
+          features: buildServiceFeatures(svc.service_type || "other", domain),
         })),
       });
 
@@ -316,6 +339,7 @@ export default function Register() {
       }
 
       await applyModuleDefaults();
+      await refreshServices();
       nav("/app/dashboard");
     } catch (err) {
       setError(formatApiError(err, { context: "register" }));

@@ -22,6 +22,7 @@ class RegisterSerializer(serializers.Serializer):
     business_type = serializers.ChoiceField(choices=Tenant.BUSINESS_CHOICES, default="other")
     service_type = serializers.ChoiceField(choices=Service.SERVICE_TYPES, required=False, allow_blank=True)
     service_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    service_features = serializers.JSONField(required=False)
     extra_services = serializers.JSONField(required=False)
 
     def _resolve_services(self, attrs):
@@ -29,18 +30,33 @@ class RegisterSerializer(serializers.Serializer):
         business_type = attrs.get("business_type", "other")
         service_type = attrs.get("service_type") or "other"
         service_name = attrs.get("service_name") or "Principal"
+        service_features = attrs.get("service_features") or None
         extra_services = attrs.get("extra_services") or []
 
-        user_defined_services = [(service_name, service_type)]
+        user_defined_services = [
+            {
+                "name": service_name,
+                "service_type": service_type,
+                "features": service_features if isinstance(service_features, dict) else None,
+            }
+        ]
         for item in extra_services:
             if isinstance(item, dict):
                 name = (item.get("name") or item.get("service_name") or "").strip()
                 stype = (item.get("service_type") or "other").strip() or "other"
+                features = item.get("features") or item.get("service_features")
             else:
                 name = str(item or "").strip()
                 stype = "other"
+                features = None
             if name:
-                user_defined_services.append((name, stype))
+                user_defined_services.append(
+                    {
+                        "name": name,
+                        "service_type": stype,
+                        "features": features if isinstance(features, dict) else None,
+                    }
+                )
 
         defaults_by_business = {
             "restaurant": [("Cuisine", "kitchen"), ("Salle", "restaurant_dining")],
@@ -51,8 +67,11 @@ class RegisterSerializer(serializers.Serializer):
         }
         chosen_services = (
             user_defined_services
-            if any(n for n, _ in user_defined_services)
-            else defaults_by_business.get(business_type, [("Principal", "other")])
+            if any(s.get("name") for s in user_defined_services)
+            else [
+                {"name": name, "service_type": stype, "features": None}
+                for name, stype in defaults_by_business.get(business_type, [("Principal", "other")])
+            ]
         )
         return tenant_name, business_type, chosen_services
 
@@ -116,7 +135,7 @@ class RegisterSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        from .utils import apply_service_preset
+        from .utils import apply_service_preset, _merge_features
 
         tenant_name, business_type, chosen_services = self._resolve_services(validated_data)
 
@@ -126,26 +145,31 @@ class RegisterSerializer(serializers.Serializer):
             domain = domain_from_request
         else:
             food_types = {"grocery_food", "bulk_food", "bar", "kitchen", "restaurant_dining"}
-            has_food_service = any(stype in food_types for _, stype in chosen_services)
+            has_food_service = any((svc.get("service_type") or "other") in food_types for svc in chosen_services)
             domain = "food" if has_food_service else "general"
 
         tenant = Tenant.objects.create(name=tenant_name, domain=domain, business_type=business_type)
 
-        def create_service(name, stype):
-            preset = apply_service_preset(stype)
+        def create_service(name, stype, features_override=None):
+            preset = apply_service_preset(stype, domain=domain)
+            features = preset.get("features", {})
+            if isinstance(features_override, dict) and features_override:
+                features = _merge_features(features, features_override)
             return Service.objects.create(
                 tenant=tenant,
                 name=name,
                 service_type=stype,
                 counting_mode=preset.get("counting_mode", "unit"),
-                features=preset.get("features", {}),
+                features=features,
             )
 
         created_names = set()
-        for name, stype in chosen_services:
+        for svc in chosen_services:
+            name = (svc.get("name") or "").strip()
+            stype = (svc.get("service_type") or "other").strip() or "other"
             if not name or name in created_names:
                 continue
-            create_service(name, stype)
+            create_service(name, stype, svc.get("features"))
             created_names.add(name)
 
         user = User.objects.create_user(
