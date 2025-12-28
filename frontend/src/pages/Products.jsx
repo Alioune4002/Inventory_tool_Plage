@@ -131,6 +131,7 @@ export default function Products() {
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // Scanner modal state
   const [scanOpen, setScanOpen] = useState(false);
@@ -571,6 +572,27 @@ export default function Products() {
       pushToast?.({ message: apiMsg, type: "error" });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const deleteProduct = async () => {
+    if (!editId) return;
+    const confirmDelete = window.confirm(
+      "Supprimer ce produit ? Il sera archivé et pourra être restauré par support si besoin."
+    );
+    if (!confirmDelete) return;
+
+    setDeleteLoading(true);
+    try {
+      await api.delete(`/api/products/${editId}/`);
+      pushToast?.({ message: `${itemLabel} archivé.`, type: "success" });
+      setDrawerOpen(false);
+      resetForm();
+      await load();
+    } catch (error) {
+      pushToast?.({ message: "Suppression impossible. Vérifiez vos droits.", type: "error" });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -1331,23 +1353,32 @@ export default function Products() {
           onClose={() => setDrawerOpen(false)}
           title={isEditing ? `Modifier ${itemLabelLower}` : `Nouveau ${itemLabelLower}`}
           footer={
-            <div className="flex flex-wrap gap-2 justify-end">
-              <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>
-                Annuler
-              </Button>
-              {!isEditing && (
-                <Button
-                  variant="secondary"
-                  type="button"
-                  onClick={() => submit(null, { keepOpen: true })}
-                  disabled={isAllServices}
-                >
-                  Enregistrer + nouveau
+            <div className="flex flex-wrap gap-2 justify-between w-full">
+              {isEditing ? (
+                <Button variant="danger" type="button" onClick={deleteProduct} loading={deleteLoading}>
+                  Supprimer
                 </Button>
+              ) : (
+                <span />
               )}
-              <Button type="button" onClick={() => submit(null)} loading={loading} disabled={isAllServices}>
-                Enregistrer
-              </Button>
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>
+                  Annuler
+                </Button>
+                {!isEditing && (
+                  <Button
+                    variant="secondary"
+                    type="button"
+                    onClick={() => submit(null, { keepOpen: true })}
+                    disabled={isAllServices}
+                  >
+                    Enregistrer + nouveau
+                  </Button>
+                )}
+                <Button type="button" onClick={() => submit(null)} loading={loading} disabled={isAllServices}>
+                  Enregistrer
+                </Button>
+              </div>
             </div>
           }
         >

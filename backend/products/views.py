@@ -1,4 +1,6 @@
 from datetime import timedelta
+import difflib
+import unicodedata
 
 from rest_framework import status, viewsets, permissions, exceptions
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
@@ -10,16 +12,19 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.chart import BarChart, Reference
 import numbers
+import re
 import logging
 import csv
 import io
 import json
-from django.db.models import Q, F
+from django.db import transaction
+from django.db.models import Q, F, Count
 from django.core.cache import cache
 from django.utils import timezone
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
+from reportlab.graphics.barcode import code128
 
 from accounts.mixins import TenantQuerySetMixin
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
@@ -37,8 +42,21 @@ from utils.sendgrid_email import send_email_with_sendgrid
 from utils.renderers import XLSXRenderer, CSVRenderer
 from inventory.metrics import track_export_event, track_off_lookup_failure
 
-from .models import Product, Category, LossEvent, ExportEvent, CatalogPdfEvent
+from .models import (
+    Product,
+    Category,
+    LossEvent,
+    ExportEvent,
+    CatalogPdfEvent,
+    LabelPdfEvent,
+    Supplier,
+    Receipt,
+    ReceiptLine,
+    ReceiptImportEvent,
+    ProductMergeLog,
+)
 from .serializers import ProductSerializer, CategorySerializer, LossEventSerializer
+from .sku import generate_auto_sku
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +73,17 @@ OFF_TIMEOUT_SECONDS = 3
 OFF_LOG_CODE = "OFF_LOOKUP_FAILED"
 OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 CATALOG_PDF_MAX_PRODUCTS = 500
+LABELS_PDF_MAX_PRODUCTS = 400
+RECEIPT_IMPORT_MAX_LINES = 500
+DUPLICATE_NAME_SIMILARITY = 0.88
+LABEL_ALLOWED_FIELDS = {
+    "price",
+    "price_unit",
+    "tva",
+    "supplier",
+    "brand",
+    "unit",
+}
 CATALOG_ALLOWED_FIELDS = {
     "barcode",
     "sku",
@@ -200,6 +229,58 @@ def _log_catalog_pdf_event(tenant, user, params=None):
         logger.exception("CatalogPdfEvent log failed")
 
 
+def _labels_pdf_limit(tenant):
+    limits = get_limits(tenant)
+    return limits.get("labels_pdf_monthly_limit")
+
+
+def _enforce_labels_pdf_quota(tenant):
+    limit = _labels_pdf_limit(tenant)
+    if limit is None:
+        return
+    start = _month_start(timezone.now())
+    used = LabelPdfEvent.objects.filter(tenant=tenant, created_at__gte=start).count()
+    if used >= int(limit):
+        raise LimitExceeded(code="LIMIT_LABELS_PDF_MONTH", detail="Limite mensuelle d’étiquettes PDF atteinte.")
+
+
+def _log_labels_pdf_event(tenant, user, params=None):
+    try:
+        LabelPdfEvent.objects.create(
+            tenant=tenant,
+            user=user if user and getattr(user, "is_authenticated", False) else None,
+            params=params or {},
+        )
+    except Exception:
+        logger.exception("LabelPdfEvent log failed")
+
+
+def _receipts_import_limit(tenant):
+    limits = get_limits(tenant)
+    return limits.get("receipts_import_monthly_limit")
+
+
+def _enforce_receipts_import_quota(tenant):
+    limit = _receipts_import_limit(tenant)
+    if limit is None:
+        return
+    start = _month_start(timezone.now())
+    used = ReceiptImportEvent.objects.filter(tenant=tenant, created_at__gte=start).count()
+    if used >= int(limit):
+        raise LimitExceeded(code="LIMIT_RECEIPTS_IMPORT_MONTH", detail="Limite mensuelle d’imports atteinte.")
+
+
+def _log_receipt_import_event(tenant, user, params=None):
+    try:
+        ReceiptImportEvent.objects.create(
+            tenant=tenant,
+            user=user if user and getattr(user, "is_authenticated", False) else None,
+            params=params or {},
+        )
+    except Exception:
+        logger.exception("ReceiptImportEvent log failed")
+
+
 def _parse_pdf_fields(raw_fields):
     if not raw_fields:
         return list(CATALOG_DEFAULT_FIELDS)
@@ -251,6 +332,35 @@ def _format_catalog_line(product, fields, include_service=False):
         values.append(_format_catalog_field(CATALOG_FIELD_LABELS["notes"], product.notes))
 
     return " · ".join([v for v in values if v])
+
+
+def _format_price(value):
+    if value is None:
+        return None
+    try:
+        return f"{float(value):.2f} €"
+    except (TypeError, ValueError):
+        return None
+
+
+def _price_per_unit(product):
+    price = product.selling_price if product.selling_price is not None else product.purchase_price
+    if price is None:
+        return None, None
+    unit = (product.unit or "").lower()
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        return None, None
+    if unit == "kg":
+        return price, "€/kg"
+    if unit == "g":
+        return price * 1000, "€/kg"
+    if unit == "l":
+        return price, "€/L"
+    if unit == "ml":
+        return price * 1000, "€/L"
+    return None, None
 
 
 class NumberedCanvas(canvas.Canvas):
@@ -384,6 +494,21 @@ def _format_variant(product):
     return value or name or ""
 
 
+def _normalize_name(value):
+    if not value:
+        return ""
+    text = unicodedata.normalize("NFKD", str(value))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    return text
+
+
+def _similarity(a, b):
+    if not a or not b:
+        return 0.0
+    return difflib.SequenceMatcher(a=a, b=b).ratio()
+
+
 def _history_month_cutoff(months):
     if months is None:
         return None
@@ -502,7 +627,9 @@ class ProductViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         role = get_user_role(self.request)
         if role not in ["owner", "manager"]:
             raise exceptions.PermissionDenied("Rôle insuffisant pour supprimer un produit.")
-        return super().perform_destroy(instance)
+        instance.is_archived = True
+        instance.archived_at = timezone.now()
+        instance.save(update_fields=["is_archived", "archived_at"])
 
 
 @api_view(["GET"])
@@ -1509,3 +1636,621 @@ def alerts(request):
     paginated = alerts_list[offset : offset + limit]
 
     return Response({"count": total, "limit": limit, "offset": offset, "results": paginated})
+
+
+def _product_brief(product):
+    return {
+        "id": product.id,
+        "name": product.name,
+        "barcode": product.barcode,
+        "internal_sku": product.internal_sku,
+        "category": product.category,
+        "quantity": float(product.quantity or 0),
+        "inventory_month": product.inventory_month,
+        "created_at": product.created_at.isoformat() if product.created_at else None,
+    }
+
+
+def _pick_master(candidates):
+    if not candidates:
+        return None
+    scored = []
+    for p in candidates:
+        score = 0
+        score += 3 if p.barcode else 0
+        score += 3 if p.internal_sku else 0
+        score += 1 if p.category else 0
+        score += 1 if p.purchase_price is not None else 0
+        score += 1 if p.selling_price is not None else 0
+        score += float(p.quantity or 0)
+        scored.append((score, p))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[0][1]
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def product_duplicates(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "anti_duplicates")
+    service = get_service_from_request(request)
+    month = request.query_params.get("month")
+
+    qs = Product.objects.filter(tenant=tenant, service=service)
+    if month:
+        qs = qs.filter(inventory_month=month)
+
+    duplicates = []
+
+    for field, label in (("barcode", "barcode"), ("internal_sku", "sku")):
+        agg = (
+            qs.exclude(**{f"{field}__isnull": True})
+            .exclude(**{field: ""})
+            .values(field)
+            .annotate(cnt=Count("id"))
+            .filter(cnt__gt=1)
+        )
+        for row in agg:
+            value = row.get(field)
+            group = list(qs.filter(**{field: value}))
+            master = _pick_master(group)
+            duplicates.append(
+                {
+                    "type": label,
+                    "key": value,
+                    "master_id": master.id if master else None,
+                    "products": [_product_brief(p) for p in group],
+                }
+            )
+
+    name_groups = {}
+    for p in qs:
+        norm = _normalize_name(p.name)
+        if not norm:
+            continue
+        name_groups.setdefault(norm, []).append(p)
+
+    for norm, group in name_groups.items():
+        if len(group) < 2:
+            continue
+        master = _pick_master(group)
+        duplicates.append(
+            {
+                "type": "name",
+                "key": norm,
+                "master_id": master.id if master else None,
+                "products": [_product_brief(p) for p in group],
+            }
+        )
+
+    # fuzzy pass (lightweight) on groups of similar normalized names
+    if len(name_groups) <= 120:
+        norms = list(name_groups.keys())
+        seen_pairs = set()
+        for i, base in enumerate(norms):
+            for other in norms[i + 1 :]:
+                if (base, other) in seen_pairs or (other, base) in seen_pairs:
+                    continue
+                if _similarity(base, other) < DUPLICATE_NAME_SIMILARITY:
+                    continue
+                merged = list({*name_groups.get(base, []), *name_groups.get(other, [])})
+                if len(merged) < 2:
+                    continue
+                master = _pick_master(merged)
+                duplicates.append(
+                    {
+                        "type": "name_fuzzy",
+                        "key": f"{base} ~ {other}",
+                        "master_id": master.id if master else None,
+                        "products": [_product_brief(p) for p in merged],
+                    }
+                )
+                seen_pairs.add((base, other))
+
+    return Response({"count": len(duplicates), "groups": duplicates})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def merge_products(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "anti_duplicates")
+    master_id = request.data.get("master_id")
+    merge_ids = request.data.get("merge_ids") or []
+    if not master_id or not merge_ids:
+        return Response({"detail": "master_id et merge_ids requis."}, status=400)
+
+    master = Product.all_objects.filter(id=master_id, tenant=tenant).select_related("service").first()
+    if not master:
+        return Response({"detail": "Produit maître introuvable."}, status=404)
+
+    others = list(
+        Product.all_objects.filter(id__in=merge_ids, tenant=tenant, service=master.service).exclude(id=master.id)
+    )
+    if not others:
+        return Response({"detail": "Aucun doublon valide à fusionner."}, status=400)
+
+    months = {master.inventory_month, *[p.inventory_month for p in others]}
+    if len(months) > 1:
+        return Response({"detail": "Fusion limitée à un même mois d’inventaire."}, status=400)
+
+    with transaction.atomic():
+        summary = {
+            "before": _product_brief(master),
+            "merged_ids": [p.id for p in others],
+        }
+
+        master.quantity = sum(float(p.quantity or 0) for p in [master, *others])
+        for field in [
+            "category",
+            "barcode",
+            "internal_sku",
+            "variant_name",
+            "variant_value",
+            "purchase_price",
+            "selling_price",
+            "tva",
+            "dlc",
+            "lot_number",
+            "min_qty",
+            "conversion_unit",
+            "conversion_factor",
+            "brand",
+            "supplier",
+            "notes",
+        ]:
+            current = getattr(master, field, None)
+            if current:
+                continue
+            for p in others:
+                value = getattr(p, field, None)
+                if value:
+                    setattr(master, field, value)
+                    break
+
+        master.save()
+
+        LossEvent.objects.filter(product_id__in=[p.id for p in others]).update(product=master)
+
+        for dup in others:
+            dup.is_archived = True
+            dup.archived_at = timezone.now()
+            dup.save(update_fields=["is_archived", "archived_at"])
+            ProductMergeLog.objects.create(
+                tenant=tenant,
+                service=master.service,
+                master_product=master,
+                merged_product=dup,
+                created_by=request.user if request.user.is_authenticated else None,
+                summary=summary,
+            )
+
+        summary["after"] = _product_brief(master)
+
+    return Response({"detail": "Fusion effectuée.", "master_id": master.id, "summary": summary})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ProductPermission])
+def rituals(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "rituals")
+    service = get_service_from_request(request)
+    month = request.query_params.get("month")
+
+    qs = Product.objects.filter(tenant=tenant, service=service)
+    if month:
+        qs = qs.filter(inventory_month=month)
+    qs = _apply_retention(qs, tenant)
+
+    losses_qs = LossEvent.objects.filter(tenant=tenant, service=service)
+    if month:
+        losses_qs = losses_qs.filter(inventory_month=month)
+    losses_qs = _apply_retention(losses_qs, tenant)
+
+    total_products = qs.count()
+    low_stock = qs.filter(min_qty__isnull=False, quantity__lte=F("min_qty")).count()
+    losses_count = losses_qs.count()
+
+    now = timezone.now().date()
+    dlc_30 = qs.filter(dlc__isnull=False, dlc__lte=now + timedelta(days=30)).count()
+    dlc_90 = qs.filter(dlc__isnull=False, dlc__lte=now + timedelta(days=90)).count()
+
+    service_type = getattr(service, "service_type", "other")
+
+    ritual_map = {
+        "grocery_food": {
+            "title": "Rituel épicerie",
+            "items": [
+                {"label": "DLC < 30j", "value": dlc_30},
+                {"label": "Stocks bas", "value": low_stock},
+                {"label": "Pertes enregistrées", "value": losses_count},
+            ],
+            "actions": [
+                {"label": "Vérifier les stocks", "href": "/app/inventory"},
+                {"label": "Analyser les pertes", "href": "/app/losses"},
+            ],
+        },
+        "bakery": {
+            "title": "Rituel boulangerie",
+            "items": [
+                {"label": "Pertes matières premières", "value": losses_count},
+                {"label": "DLC < 30j", "value": dlc_30},
+                {"label": "Stocks bas", "value": low_stock},
+            ],
+            "actions": [
+                {"label": "Voir les pertes", "href": "/app/losses"},
+                {"label": "Ajuster les stocks", "href": "/app/inventory"},
+            ],
+        },
+        "pharmacy_parapharmacy": {
+            "title": "Rituel pharmacie",
+            "items": [
+                {"label": "DLC < 30j", "value": dlc_30},
+                {"label": "DLC < 90j", "value": dlc_90},
+                {"label": "Lots à vérifier", "value": qs.filter(lot_number__isnull=True).count()},
+            ],
+            "actions": [
+                {"label": "Revoir les fiches produits", "href": "/app/products"},
+                {"label": "Contrôler les dates", "href": "/app/inventory"},
+            ],
+        },
+    }
+    ritual = ritual_map.get(service_type, ritual_map["grocery_food"]).copy()
+
+    rituals_payload = [
+        {
+            "id": service_type,
+            "title": ritual["title"],
+            "summary": f"{total_products} produit(s) suivis ce mois.",
+            "items": ritual["items"],
+            "actions": ritual["actions"],
+        }
+    ]
+
+    return Response({"month": month, "rituals": rituals_payload})
+
+
+def _parse_receipt_rows(file_obj, file_name):
+    file_name = file_name or "import"
+    if file_name.lower().endswith(".csv"):
+        raw = file_obj.read().decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(raw))
+        return list(reader), "csv"
+
+    if file_name.lower().endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+        except Exception as exc:
+            raise exceptions.ValidationError("PDF non supporté sur ce déploiement.") from exc
+        reader = PdfReader(file_obj)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            return [], "pdf"
+        header = lines[0]
+        delimiter = ";" if ";" in header else "," if "," in header else "\t"
+        reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=delimiter)
+        return list(reader), "pdf"
+
+    raise exceptions.ValidationError("Format non supporté (CSV ou PDF).")
+
+
+def _normalize_receipt_row(row):
+    def pick(*keys):
+        for key in keys:
+            value = row.get(key)
+            if value not in (None, ""):
+                return value
+        return ""
+
+    return {
+        "name": pick("name", "product", "designation", "libelle", "article"),
+        "quantity": pick("quantity", "qty", "quantite", "qte"),
+        "unit": pick("unit", "uom", "unite"),
+        "purchase_price": pick("purchase_price", "prix_achat", "price", "prix"),
+        "barcode": pick("barcode", "ean", "code_barres"),
+        "internal_sku": pick("internal_sku", "sku", "ref", "reference"),
+    }
+
+
+def _match_product_from_line(tenant, service, line, month):
+    code = (line.get("barcode") or "").strip()
+    sku = (line.get("internal_sku") or "").strip()
+    name = (line.get("name") or "").strip()
+
+    if code:
+        found = Product.objects.filter(tenant=tenant, service=service, inventory_month=month, barcode=code).first()
+        if found:
+            return found
+    if sku:
+        found = Product.objects.filter(tenant=tenant, service=service, inventory_month=month, internal_sku=sku).first()
+        if found:
+            return found
+    if name:
+        return Product.objects.filter(tenant=tenant, service=service, inventory_month=month, name__iexact=name).first()
+    return None
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def import_receipt(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "receipts_import")
+    _enforce_receipts_import_quota(tenant)
+
+    file_obj = request.FILES.get("file")
+    if not file_obj:
+        return Response({"detail": "Fichier requis."}, status=400)
+
+    service = get_service_from_request(request)
+    supplier_name = (request.data.get("supplier_name") or "").strip()
+    received_at = request.data.get("received_at") or timezone.now().date().isoformat()
+
+    rows, source = _parse_receipt_rows(file_obj, file_obj.name)
+    if len(rows) > RECEIPT_IMPORT_MAX_LINES:
+        rows = rows[:RECEIPT_IMPORT_MAX_LINES]
+
+    supplier = None
+    if supplier_name:
+        supplier = Supplier.objects.filter(tenant=tenant, name__iexact=supplier_name).first()
+        if not supplier:
+            for candidate in Supplier.objects.filter(tenant=tenant):
+                if supplier_name in (candidate.aliases or []):
+                    supplier = candidate
+                    break
+        if not supplier:
+            supplier = Supplier.objects.create(tenant=tenant, name=supplier_name)
+        elif supplier.name.strip().lower() != supplier_name.lower():
+            supplier.add_alias(supplier_name)
+
+    receipt = Receipt.objects.create(
+        tenant=tenant,
+        service=service,
+        supplier=supplier,
+        supplier_name=supplier_name,
+        source=source,
+        file_name=file_obj.name or "",
+        received_at=received_at,
+        created_by=request.user if request.user.is_authenticated else None,
+    )
+
+    month = timezone.now().strftime("%Y-%m")
+    lines_payload = []
+    for idx, row in enumerate(rows, start=1):
+        cleaned = _normalize_receipt_row(row)
+        if not cleaned["name"]:
+            continue
+        try:
+            qty = float(cleaned["quantity"] or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        try:
+            price = float(cleaned["purchase_price"]) if cleaned["purchase_price"] not in ("", None) else None
+        except (TypeError, ValueError):
+            price = None
+
+        matched = _match_product_from_line(tenant, service, cleaned, month)
+
+        line = ReceiptLine.objects.create(
+            receipt=receipt,
+            line_number=idx,
+            raw_name=cleaned["name"],
+            quantity=qty,
+            unit=cleaned["unit"] or "pcs",
+            purchase_price=price,
+            barcode=cleaned["barcode"] or "",
+            internal_sku=cleaned["internal_sku"] or "",
+            matched_product=matched,
+            status="MATCHED" if matched else "PENDING",
+        )
+        lines_payload.append(
+            {
+                "id": line.id,
+                "name": line.raw_name,
+                "quantity": float(line.quantity or 0),
+                "unit": line.unit,
+                "purchase_price": line.purchase_price,
+                "barcode": line.barcode,
+                "internal_sku": line.internal_sku,
+                "matched_product_id": matched.id if matched else None,
+            }
+        )
+
+    _log_receipt_import_event(
+        tenant=tenant,
+        user=request.user,
+        params={"lines": len(lines_payload), "supplier": supplier_name, "source": source},
+    )
+
+    return Response(
+        {
+            "receipt_id": receipt.id,
+            "supplier": supplier_name,
+            "lines": lines_payload,
+        },
+        status=201,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def apply_receipt(request, receipt_id):
+    tenant = get_tenant_for_request(request)
+    receipt = Receipt.objects.filter(id=receipt_id, tenant=tenant).select_related("service").first()
+    if not receipt:
+        return Response({"detail": "Réception introuvable."}, status=404)
+
+    decisions = request.data.get("decisions") or []
+    decisions_map = {str(d.get("line_id")): d for d in decisions if d.get("line_id")}
+    month = timezone.now().strftime("%Y-%m")
+
+    applied = 0
+    with transaction.atomic():
+        for line in receipt.lines.select_for_update():
+            decision = decisions_map.get(str(line.id), {}) if decisions_map else {}
+            action = decision.get("action") or ("match" if line.matched_product else "create")
+
+            if action == "ignore":
+                line.status = "IGNORED"
+                line.save(update_fields=["status"])
+                continue
+
+            product = None
+            if action == "match":
+                product_id = decision.get("product_id") or (line.matched_product_id if line.matched_product_id else None)
+                if product_id:
+                    product = Product.objects.filter(id=product_id, tenant=tenant, service=receipt.service, inventory_month=month).first()
+                if not product:
+                    product = _match_product_from_line(tenant, receipt.service, {
+                        "barcode": line.barcode,
+                        "internal_sku": line.internal_sku,
+                        "name": line.raw_name,
+                    }, month)
+
+            if action == "create" or product is None:
+                product = Product.objects.create(
+                    tenant=tenant,
+                    service=receipt.service,
+                    name=line.raw_name,
+                    inventory_month=month,
+                    quantity=0,
+                    unit=line.unit or "pcs",
+                    barcode=line.barcode or "",
+                    internal_sku=line.internal_sku or "",
+                    purchase_price=line.purchase_price,
+                )
+
+            product.quantity = float(product.quantity or 0) + float(line.quantity or 0)
+            product.save(update_fields=["quantity"])
+            line.matched_product = product
+            line.status = "MATCHED" if action == "match" else "CREATED"
+            line.save(update_fields=["matched_product", "status"])
+            applied += 1
+
+        receipt.status = "APPLIED"
+        receipt.save(update_fields=["status"])
+
+    return Response({"detail": "Réception appliquée.", "applied": applied})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+@renderer_classes([PDFRenderer])
+def labels_pdf(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "labels_pdf")
+    _enforce_labels_pdf_quota(tenant)
+
+    service_param = request.query_params.get("service")
+    company_name = (request.query_params.get("company_name") or "").strip() or tenant.name
+    fields_raw = request.query_params.get("fields") or ""
+    fields = [f.strip() for f in fields_raw.split(",") if f.strip() in LABEL_ALLOWED_FIELDS]
+
+    ids = request.query_params.get("ids") or ""
+    ids_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
+    if not ids_list:
+        return Response({"detail": "Sélectionnez au moins un produit."}, status=400)
+
+    qs = Product.objects.filter(tenant=tenant, id__in=ids_list)
+    if service_param and service_param != "all":
+        try:
+            qs = qs.filter(service_id=int(service_param))
+        except (ValueError, TypeError):
+            pass
+
+    products = list(qs[:LABELS_PDF_MAX_PRODUCTS])
+    if not products:
+        return Response({"detail": "Aucun produit disponible."}, status=404)
+
+    for product in products:
+        if product.barcode or product.internal_sku:
+            continue
+        try:
+            product.internal_sku = generate_auto_sku(tenant, product.service)
+            product.save(update_fields=["internal_sku"])
+        except exceptions.ValidationError as exc:
+            return Response(exc.detail, status=400)
+
+    width, height = A4
+    margin_x = 1.2 * cm
+    margin_y = 1.2 * cm
+    cols = 3
+    rows = 8
+    label_w = (width - (margin_x * 2)) / cols
+    label_h = (height - (margin_y * 2)) / rows
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setTitle("StockScan Labels")
+
+    def draw_label(x, y, product):
+        code = product.barcode or product.internal_sku or ""
+        if not code:
+            return False
+
+        c.setFont("Helvetica", 7)
+        c.setFillColorRGB(0.15, 0.15, 0.15)
+        c.drawString(x + 4, y + label_h - 12, product.name[:30])
+
+        extra_lines = []
+        if "price" in fields:
+            price = _format_price(product.selling_price if product.selling_price is not None else product.purchase_price)
+            if price:
+                extra_lines.append(f"Prix: {price}")
+        if "price_unit" in fields:
+            per_unit, suffix = _price_per_unit(product)
+            if per_unit is not None and suffix:
+                extra_lines.append(f"{suffix}: {per_unit:.2f} €")
+        if "tva" in fields and product.tva is not None:
+            extra_lines.append(f"TVA: {product.tva}%")
+        if "supplier" in fields and product.supplier:
+            extra_lines.append(f"Fournisseur: {product.supplier}")
+        if "brand" in fields and product.brand:
+            extra_lines.append(f"Marque: {product.brand}")
+        if "unit" in fields and product.unit:
+            extra_lines.append(f"Unité: {product.unit}")
+
+        extra_lines = extra_lines[:2]
+        if extra_lines:
+            c.setFont("Helvetica", 6)
+            y_line = y + label_h - 22
+            for line in extra_lines:
+                c.drawString(x + 4, y_line, line[:36])
+                y_line -= 8
+
+        barcode_obj = code128.Code128(code, barHeight=18, barWidth=0.6)
+        barcode_obj.drawOn(c, x + 6, y + 12)
+
+        c.setFont("Helvetica", 6)
+        c.drawString(x + 4, y + 4, f"{company_name}")
+        c.drawRightString(x + label_w - 4, y + 4, code)
+        return True
+
+    index = 0
+    for product in products:
+        col = index % cols
+        row = (index // cols) % rows
+        x = margin_x + col * label_w
+        y = height - margin_y - (row + 1) * label_h
+
+        if not draw_label(x, y, product):
+            index += 1
+            continue
+
+        index += 1
+        if index % (cols * rows) == 0:
+            c.showPage()
+
+    c.save()
+    pdf_bytes = buffer.getvalue()
+
+    _log_labels_pdf_event(
+        tenant=tenant,
+        user=request.user,
+        params={"count": len(products), "service": service_param},
+    )
+
+    resp = Response(pdf_bytes, content_type="application/pdf")
+    resp["Content-Disposition"] = 'attachment; filename="stockscan_labels.pdf"'
+    return resp

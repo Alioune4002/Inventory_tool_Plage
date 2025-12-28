@@ -1,6 +1,19 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, Boxes, Package, Tag, Download, Settings, HelpCircle, MinusCircle } from "lucide-react";
+import {
+  LayoutDashboard,
+  Boxes,
+  Package,
+  Tag,
+  Download,
+  Settings,
+  HelpCircle,
+  MinusCircle,
+  Copy,
+  ListChecks,
+  FileUp,
+  QrCode,
+} from "lucide-react";
 import { cn } from "../lib/cn";
 import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
@@ -13,6 +26,10 @@ const items = [
   { to: "/app/categories", label: "Catégories", icon: Tag },
   { to: "/app/losses", label: "Pertes", icon: MinusCircle },
   { to: "/app/exports", label: "Exports", icon: Download },
+  { to: "/app/duplicates", label: "Doublons", icon: Copy },
+  { to: "/app/rituals", label: "Rituels", icon: ListChecks },
+  { to: "/app/receipts", label: "Réceptions", icon: FileUp },
+  { to: "/app/labels", label: "Étiquettes", icon: QrCode },
   { to: "/app/settings", label: "Settings", icon: Settings },
   { to: "/app/support", label: "Support", icon: HelpCircle },
 ];

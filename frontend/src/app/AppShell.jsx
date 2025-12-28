@@ -1,7 +1,20 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { LayoutDashboard, Boxes, Package, Tag, Download, Settings, HelpCircle, MinusCircle } from "lucide-react";
+import {
+  LayoutDashboard,
+  Boxes,
+  Package,
+  Tag,
+  Download,
+  Settings,
+  HelpCircle,
+  MinusCircle,
+  Copy,
+  ListChecks,
+  FileUp,
+  QrCode,
+} from "lucide-react";
 import AppRoutes from "./routes";
 import { useAuth } from "./AuthProvider";
 import { ToastProvider, useToast } from "./ToastContext";
@@ -56,6 +69,10 @@ export default function AppShell() {
       { to: "/app/categories", label: "Catégories", icon: Tag },
       { to: "/app/losses", label: "Pertes", icon: MinusCircle, tour: "tour-losses" },
       { to: "/app/exports", label: "Exports", icon: Download, tour: "tour-exports" },
+      { to: "/app/duplicates", label: "Doublons", icon: Copy },
+      { to: "/app/rituals", label: "Rituels", icon: ListChecks },
+      { to: "/app/receipts", label: "Réceptions", icon: FileUp },
+      { to: "/app/labels", label: "Étiquettes", icon: QrCode },
       { to: "/app/settings", label: "Settings", icon: Settings, tour: "tour-settings" },
       { to: "/app/support", label: "Support", icon: HelpCircle },
     ],

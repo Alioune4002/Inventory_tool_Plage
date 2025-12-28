@@ -40,6 +40,14 @@ curl -sS -X POST https://<api-host>/api/auth/login/ \
 # export (token required)
 curl -sS -X GET "https://<api-host>/api/exports/?from=2025-01&to=2025-01&service=all&format=csv" \
   -H "Authorization: Bearer <token>"
+
+# catalogue PDF (token required)
+curl -sS -X GET "https://<api-host>/api/catalog/pdf/?service=all&fields=barcode,sku,unit" \
+  -H "Authorization: Bearer <token>" -o /tmp/catalogue.pdf
+
+# etiquettes PDF (token required)
+curl -sS -X GET "https://<api-host>/api/labels/pdf/?service=all&ids=1,2&fields=price,unit" \
+  -H "Authorization: Bearer <token>" -o /tmp/labels.pdf
 ```
 
 ## Metrics (/metrics)
@@ -100,11 +108,22 @@ print(ExportEvent.objects.filter(created_at__gte=start).count())"
 
 LIMIT_AI_*:
 - Verifier entitlements (endpoint ci-dessus).
-- Compter l'usage IA du mois (shell):
+  - Compter l'usage IA du mois (shell):
 ```bash
 python manage.py shell -c "from ai_assistant.models import AIRequestEvent; from django.utils import timezone; \
 start=timezone.now().replace(day=1,hour=0,minute=0,second=0,microsecond=0); \
 print(AIRequestEvent.objects.filter(created_at__gte=start).count())"
+```
+
+LIMIT_PDF_CATALOG_MONTH / LIMIT_LABELS_PDF_MONTH / LIMIT_RECEIPTS_IMPORT_MONTH:
+- Verifier entitlements (endpoint entitlements).
+- Compter l'usage du mois (shell):
+```bash
+python manage.py shell -c "from products.models import CatalogPdfEvent, LabelPdfEvent, ReceiptImportEvent; from django.utils import timezone; \
+start=timezone.now().replace(day=1,hour=0,minute=0,second=0,microsecond=0); \
+print('catalog', CatalogPdfEvent.objects.filter(created_at__gte=start).count()); \
+print('labels', LabelPdfEvent.objects.filter(created_at__gte=start).count()); \
+print('imports', ReceiptImportEvent.objects.filter(created_at__gte=start).count())"
 ```
 
 ## Quick triage

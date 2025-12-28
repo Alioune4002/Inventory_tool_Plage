@@ -1,18 +1,12 @@
-import re
-
 from rest_framework import serializers
 from django.utils.text import slugify
 from django.utils import timezone
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError
 
 from .models import Product, Category, LossEvent
-from accounts.models import Service
 from accounts.utils import get_service_from_request, get_tenant_for_request
+from .sku import generate_auto_sku
 
-SKU_PREFIX = "SKU-"
-SKU_PADDING = 6
-SKU_MAX_ATTEMPTS = 20
-SKU_RE = re.compile(r"^SKU-(\d+)$")
 
 
 class ProductSerializer(serializers.ModelSerializer):
@@ -23,6 +17,8 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = "__all__"
         extra_kwargs = {
             "tenant": {"read_only": True},
+            "is_archived": {"read_only": True},
+            "archived_at": {"read_only": True},
             "warnings": {"read_only": True},
         }
 
@@ -98,50 +94,6 @@ class ProductSerializer(serializers.ModelSerializer):
                 warnings.append("Produit 24h : ajoutez une date pour suivre les invendus.")
 
         return warnings
-
-    def _max_existing_sku_sequence(self, tenant, service):
-        max_seq = 0
-        skus = (
-            Product.objects.filter(
-                tenant=tenant,
-                service=service,
-                internal_sku__startswith=SKU_PREFIX,
-            )
-            .values_list("internal_sku", flat=True)
-            .iterator()
-        )
-        for sku in skus:
-            match = SKU_RE.match(str(sku))
-            if not match:
-                continue
-            try:
-                max_seq = max(max_seq, int(match.group(1)))
-            except ValueError:
-                continue
-        return max_seq
-
-    def _generate_auto_sku(self, tenant, service):
-        with transaction.atomic():
-            locked = Service.objects.select_for_update().get(id=service.id)
-            seq = int(locked.sku_sequence or 0)
-            if seq < 1:
-                seq = max(seq, self._max_existing_sku_sequence(tenant, locked))
-
-            for _ in range(SKU_MAX_ATTEMPTS):
-                seq += 1
-                candidate = f"{SKU_PREFIX}{seq:0{SKU_PADDING}d}"
-                exists = Product.objects.filter(tenant=tenant, service=locked, internal_sku=candidate).exists()
-                if exists:
-                    continue
-                locked.sku_sequence = seq
-                locked.save(update_fields=["sku_sequence"])
-                return candidate
-
-            locked.sku_sequence = seq
-            locked.save(update_fields=["sku_sequence"])
-        raise serializers.ValidationError(
-            {"internal_sku": "Impossible de générer un SKU unique pour ce service. Réessayez."}
-        )
 
     def validate(self, attrs):
         request = self.context.get("request")
@@ -224,7 +176,7 @@ class ProductSerializer(serializers.ModelSerializer):
         if getattr(self, "_auto_generate_sku", False):
             tenant = validated_data.get("tenant") or get_tenant_for_request(self.context.get("request"))
             service = validated_data.get("service") or get_service_from_request(self.context.get("request"))
-            validated_data["internal_sku"] = self._generate_auto_sku(tenant, service)
+            validated_data["internal_sku"] = generate_auto_sku(tenant, service)
         try:
             instance = super().create(validated_data)
             instance._warnings = getattr(self, "_warnings", [])

@@ -42,6 +42,12 @@ export default function Inventory() {
   const [search, setSearch] = useState("");
 
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [showNext, setShowNext] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [chronoEnabled, setChronoEnabled] = useState(false);
+  const [chronoRunning, setChronoRunning] = useState(false);
+  const [chronoSeconds, setChronoSeconds] = useState(0);
+  const [chronoTarget, setChronoTarget] = useState(50);
 
   const [highlightCode, setHighlightCode] = useState("");
   const highlightTimeoutRef = useRef(null);
@@ -49,6 +55,7 @@ export default function Inventory() {
   const tableWrapRef = useRef(null);
 
   const nameInputRef = useRef(null);
+  const quantityInputRef = useRef(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [qtyEdits, setQtyEdits] = useState({});
@@ -208,6 +215,14 @@ export default function Inventory() {
   }, [lossReasons]);
 
   useEffect(() => {
+    if (!chronoRunning) return;
+    const id = window.setInterval(() => {
+      setChronoSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [chronoRunning]);
+
+  useEffect(() => {
     const loadCategories = async () => {
       if (!serviceId || isAllServices) {
         setCategories([]);
@@ -359,6 +374,8 @@ export default function Inventory() {
     setLastFound(null);
     setEditItem(null);
     setDrawerOpen(false);
+    setShowNext(false);
+    setShowAdvanced(false);
     setSuggestions([]);
     setSuggestionsOpen(false);
   };
@@ -372,7 +389,13 @@ export default function Inventory() {
     });
   };
 
-  const fillQuickFromProduct = (product, { includeQuantity = false } = {}) => {
+  const focusQuantityInput = () => {
+    window.setTimeout(() => {
+      quantityInputRef.current?.focus?.();
+    }, 120);
+  };
+
+  const fillQuickFromProduct = (product, { includeQuantity = false, focusQuantity = false } = {}) => {
     if (!product) return;
     setQuick((prev) => ({
       ...prev,
@@ -402,6 +425,7 @@ export default function Inventory() {
       loss_quantity: "",
       loss_note: "",
     }));
+    if (focusQuantity) focusQuantityInput();
   };
 
   const startEdit = (product) => {
@@ -415,7 +439,7 @@ export default function Inventory() {
   };
 
   const handleSuggestionSelect = (product) => {
-    fillQuickFromProduct(product);
+    fillQuickFromProduct(product, { includeQuantity: true, focusQuantity: true });
     setSuggestionsOpen(false);
   };
 
@@ -626,6 +650,7 @@ export default function Inventory() {
           barcode: code,
           name: p.name || prev.name,
           category: p.category || prev.category,
+          quantity: String(p.quantity ?? prev.quantity ?? ""),
           internal_sku: p.internal_sku || prev.internal_sku,
           variant_name: p.variant_name || prev.variant_name,
           variant_value: p.variant_value || prev.variant_value,
@@ -640,6 +665,7 @@ export default function Inventory() {
           unit: p.unit || prev.unit,
           lotNumber: p.lot_number || prev.lotNumber,
         }));
+        focusQuantityInput();
         setLastFound({
           type: "local",
           product: res.data.product,
@@ -767,6 +793,29 @@ export default function Inventory() {
 
   const renderIdentifier = (p) => p.barcode || p.internal_sku || "—";
 
+  const chronoCount = items.length;
+  const chronoRemaining = Math.max(0, chronoTarget - chronoCount);
+  const chronoProgress = chronoTarget ? Math.min(1, chronoCount / chronoTarget) : 0;
+
+  const formatChrono = (totalSeconds) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
+
+  const toggleChrono = () => {
+    if (chronoEnabled) {
+      setChronoRunning(false);
+      setChronoSeconds(0);
+    }
+    setChronoEnabled((prev) => !prev);
+  };
+
+  const resetChrono = () => {
+    setChronoRunning(false);
+    setChronoSeconds(0);
+  };
+
   return (
     <PageTransition>
       <Helmet>
@@ -814,7 +863,7 @@ export default function Inventory() {
               <div>
                 <div className="text-sm font-semibold text-[var(--text)]">{ux.quickAddTitle}</div>
                 <div className="text-xs text-[var(--muted)]">
-                  Comptage rapide : ajoutez une ligne, les options avancées restent dans “Options”.
+                  Comptage rapide : faites l’essentiel, puis ajoutez les infos utiles si besoin.
                 </div>
               </div>
               {isEditing && (
@@ -829,40 +878,53 @@ export default function Inventory() {
                 Sélectionnez un service pour ajouter. En mode “Tous les services”, l’ajout est désactivé.
               </div>
             ) : (
-              <form className="mt-4 space-y-3" onSubmit={addQuick}>
-                <fieldset disabled={loading || authLoading} className="space-y-3">
-                  <div className="grid md:grid-cols-[1.1fr_1.4fr_0.8fr_auto] gap-3 items-end min-w-0">
+              <form className="mt-4 space-y-4" onSubmit={addQuick}>
+                <fieldset disabled={loading || authLoading} className="space-y-4">
+                  <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Essentiel</div>
+                  <div className="grid gap-3 items-end md:grid-cols-2 lg:grid-cols-6">
                     {barcodeEnabled && (
+                      <div className="lg:col-span-2">
+                        <Input
+                          label={wording.barcodeLabel}
+                          placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
+                          value={quick.barcode}
+                          onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
+                          helper={helpers.barcode}
+                          rightSlot={
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
+                                onClick={() => setScannerOpen(true)}
+                                title="Scanner"
+                              >
+                                <ScanLine className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10"
+                                onClick={() => lookupBarcode()}
+                                disabled={!String(quick.barcode || "").trim()}
+                              >
+                                Chercher
+                              </button>
+                            </div>
+                          }
+                        />
+                      </div>
+                    )}
+
+                    {skuEnabled && (
                       <Input
-                        label={wording.barcodeLabel}
-                        placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
-                        value={quick.barcode}
-                        onChange={(e) => setQuick((p) => ({ ...p, barcode: e.target.value }))}
-                        helper={helpers.barcode}
-                        rightSlot={
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
-                              onClick={() => setScannerOpen(true)}
-                              title="Scanner"
-                            >
-                              <ScanLine className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10"
-                              onClick={() => lookupBarcode()}
-                              disabled={!String(quick.barcode || "").trim()}
-                            >
-                              Chercher
-                            </button>
-                          </div>
-                        }
+                        label={wording.skuLabel}
+                        placeholder={placeholders.sku}
+                        value={quick.internal_sku}
+                        onChange={(e) => setQuick((p) => ({ ...p, internal_sku: e.target.value }))}
+                        helper={showIdentifierWarning ? helpers.sku : "Optionnel"}
                       />
                     )}
 
-                    <div className="relative min-w-0" ref={suggestionsRef}>
+                    <div className="relative min-w-0 lg:col-span-2" ref={suggestionsRef}>
                       <Input
                         label={wording.itemLabel}
                         placeholder={placeholders.name}
@@ -905,6 +967,7 @@ export default function Inventory() {
                           −
                         </button>
                         <input
+                          ref={quantityInputRef}
                           type="number"
                           min={0}
                           step={quantityStep}
@@ -921,16 +984,30 @@ export default function Inventory() {
                           +
                         </button>
                       </div>
-                      <div className="text-xs text-[var(--muted)]">Unité : {quick.unit || "pcs"}</div>
+                      {lastFound?.type === "local" && lastFound?.product?.quantity !== undefined && (
+                        <div className="text-xs text-[var(--muted)]">
+                          Dernier comptage ({lastFound.product.inventory_month || "—"}) : {lastFound.product.quantity}{" "}
+                          {lastFound.product.unit || ""}
+                        </div>
+                      )}
                     </div>
+
+                    <Select
+                      label={unitLabel}
+                      value={quick.unit}
+                      onChange={(value) => setQuick((p) => ({ ...p, unit: value }))}
+                      options={unitSelectOptions}
+                    />
 
                     <div className="flex flex-col gap-2 min-w-0">
                       <Button type="submit" loading={loading}>
-                        {isEditing ? "Mettre à jour" : "Ajouter"}
+                        {isEditing ? "Mettre à jour" : "Ajouter / Suivant"}
                       </Button>
-                      <Button variant="secondary" type="button" onClick={() => setDrawerOpen(true)}>
-                        Options
-                      </Button>
+                      {isEditing && (
+                        <Button variant="secondary" type="button" onClick={resetQuick}>
+                          Annuler l’édition
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -945,20 +1022,312 @@ export default function Inventory() {
                         DLC recommandée pour ce service.
                       </span>
                     )}
-                    {isEditing && (
-                      <button
-                        type="button"
-                        className="rounded-full border border-[var(--border)] px-3 py-1 hover:bg-[var(--accent)]/10"
-                        onClick={resetQuick}
-                      >
-                        Annuler l’édition
-                      </button>
-                    )}
                   </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      type="button"
+                      onClick={() => setShowNext((prev) => !prev)}
+                    >
+                      {showNext ? "Masquer les infos utiles" : "Ajouter des infos utiles (+ prix, TVA, DLC…)"}
+                    </Button>
+                    <span>Optionnel mais recommandé pour des stats plus fiables.</span>
+                  </div>
+
+                  {showNext && (
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/40 p-4 space-y-3">
+                      <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Étape suivante</div>
+                      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                        {categories.length > 0 ? (
+                          <Select
+                            label={wording.categoryLabel}
+                            value={quick.category}
+                            onChange={(value) => setQuick((p) => ({ ...p, category: value }))}
+                            options={categoryOptions}
+                            helper="Catégories du service sélectionné."
+                          />
+                        ) : (
+                          <Input
+                            label={wording.categoryLabel}
+                            placeholder={categoryPlaceholder}
+                            value={quick.category}
+                            onChange={(e) => setQuick((p) => ({ ...p, category: e.target.value }))}
+                            helper={helpers.category}
+                          />
+                        )}
+
+                        {dlcEnabled && (
+                          <Input
+                            label="DLC"
+                            type="date"
+                            value={quick.dlc}
+                            onChange={(e) => setQuick((p) => ({ ...p, dlc: e.target.value }))}
+                            helper={showDlcWarning ? "Recommandée pour limiter les pertes." : "Optionnel"}
+                          />
+                        )}
+
+                        {purchaseEnabled && (
+                          <Input
+                            label="Prix d’achat HT (€)"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={quick.purchase_price}
+                            onChange={(e) => setQuick((p) => ({ ...p, purchase_price: e.target.value }))}
+                          />
+                        )}
+
+                        {sellingEnabled && (
+                          <Input
+                            label="Prix de vente HT (€)"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={quick.selling_price}
+                            onChange={(e) => setQuick((p) => ({ ...p, selling_price: e.target.value }))}
+                          />
+                        )}
+
+                        {tvaEnabled && (purchaseEnabled || sellingEnabled) && (
+                          <Select
+                            label="TVA"
+                            value={quick.tva}
+                            onChange={(value) => setQuick((p) => ({ ...p, tva: value }))}
+                            options={tvaOptions}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <details
+                    className="rounded-2xl border border-[var(--border)] px-4 py-3"
+                    open={showAdvanced}
+                    onToggle={(e) => setShowAdvanced(e.currentTarget.open)}
+                  >
+                    <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
+                      Avancé (variantes, conversions, alertes, pertes…)
+                    </summary>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <div className="md:col-span-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                        Modules & stock
+                      </div>
+                      {canStockAlerts && (
+                        <Input
+                          label="Stock minimum (alerte)"
+                          type="number"
+                          min={0}
+                          value={quick.min_qty}
+                          onChange={(e) => setQuick((p) => ({ ...p, min_qty: e.target.value }))}
+                          helper="Optionnel : seuil pour alerte stock."
+                        />
+                      )}
+                      {itemTypeEnabled && (
+                        <Select
+                          label="Type d’article"
+                          value={quick.product_role}
+                          onChange={(value) => setQuick((p) => ({ ...p, product_role: value }))}
+                          options={productRoleSelectOptions}
+                          helper={helpers.productRole || "Classez pour distinguer coûts matière et valeur de vente."}
+                        />
+                      )}
+                      {variantsEnabled && (
+                        <>
+                          <Input
+                            label="Variante (libellé)"
+                            placeholder="Ex. Taille ou Couleur"
+                            value={quick.variant_name}
+                            onChange={(e) => setQuick((p) => ({ ...p, variant_name: e.target.value }))}
+                          />
+                          <Input
+                            label="Variante (valeur)"
+                            placeholder="Ex. M, Bleu, 75cl"
+                            value={quick.variant_value}
+                            onChange={(e) => setQuick((p) => ({ ...p, variant_value: e.target.value }))}
+                          />
+                        </>
+                      )}
+                      {multiUnitEnabled && (
+                        <>
+                          <Input
+                            label="Conversion (facteur)"
+                            type="number"
+                            min={0}
+                            step="0.0001"
+                            placeholder="Ex. 0.75"
+                            value={quick.conversion_factor}
+                            onChange={(e) => setQuick((p) => ({ ...p, conversion_factor: e.target.value }))}
+                          />
+                          <Select
+                            label="Unité convertie"
+                            value={quick.conversion_unit}
+                            onChange={(value) => setQuick((p) => ({ ...p, conversion_unit: value }))}
+                            options={conversionSelectOptions}
+                          />
+                        </>
+                      )}
+                      {lotEnabled && (
+                        <Input
+                          label="Lot / Batch"
+                          placeholder="Ex. LOT-2025-12"
+                          value={quick.lotNumber}
+                          onChange={(e) => setQuick((p) => ({ ...p, lotNumber: e.target.value }))}
+                        />
+                      )}
+                      {showOpenFields && (
+                        <>
+                          <Select
+                            label="Statut"
+                            value={quick.container_status}
+                            onChange={(value) => setQuick((p) => ({ ...p, container_status: value }))}
+                            options={containerStatusOptions}
+                          />
+                          {quick.container_status === "OPENED" && (
+                            <>
+                              <Input
+                                label="Pack (taille)"
+                                type="number"
+                                step="0.01"
+                                placeholder="Ex. 0.75"
+                                value={quick.pack_size}
+                                onChange={(e) => setQuick((p) => ({ ...p, pack_size: e.target.value }))}
+                              />
+                              <Input
+                                label="Unité pack"
+                                placeholder="Ex. l, kg"
+                                value={quick.pack_uom}
+                                onChange={(e) => setQuick((p) => ({ ...p, pack_uom: e.target.value }))}
+                              />
+                              <Input
+                                label="Reste (quantité)"
+                                type="number"
+                                step="0.01"
+                                placeholder="Ex. 0.25"
+                                value={quick.remaining_qty}
+                                onChange={(e) => setQuick((p) => ({ ...p, remaining_qty: e.target.value }))}
+                              />
+                              <Input
+                                label="Reste (fraction 0-1)"
+                                type="number"
+                                step="0.1"
+                                min={0}
+                                max={1}
+                                placeholder="Ex. 0.5"
+                                value={quick.remaining_fraction}
+                                onChange={(e) => setQuick((p) => ({ ...p, remaining_fraction: e.target.value }))}
+                              />
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      <div className="md:col-span-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                        Pertes & notes
+                      </div>
+                      <Input
+                        label="Pertes (quantité)"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={quick.loss_quantity}
+                        onChange={(e) => setQuick((p) => ({ ...p, loss_quantity: e.target.value }))}
+                      />
+                      <Select
+                        label="Raison"
+                        value={quick.loss_reason}
+                        onChange={(value) => setQuick((p) => ({ ...p, loss_reason: value }))}
+                        options={lossReasonOptions}
+                      />
+                      <Input
+                        label="Note perte"
+                        placeholder="Ex. casse en livraison"
+                        value={quick.loss_note}
+                        onChange={(e) => setQuick((p) => ({ ...p, loss_note: e.target.value }))}
+                      />
+                      <Input
+                        label="Commentaire (optionnel)"
+                        placeholder={placeholders.notes}
+                        value={quick.comment}
+                        onChange={(e) => setQuick((p) => ({ ...p, comment: e.target.value }))}
+                      />
+                    </div>
+                  </details>
 
                   {barcodeEnabled && <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>}
                 </fieldset>
               </form>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-[var(--border)] p-4 bg-[var(--surface)] shadow-soft min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text)]">Mode Chrono</div>
+                <div className="text-xs text-[var(--muted)]">
+                  Objectif, timer et progression pour un inventaire rapide.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant={chronoEnabled ? "secondary" : "primary"} onClick={toggleChrono}>
+                  {chronoEnabled ? "Désactiver" : "Activer"}
+                </Button>
+                {chronoEnabled && (
+                  <Button size="sm" variant="ghost" onClick={resetChrono}>
+                    Réinitialiser
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {chronoEnabled && (
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 space-y-2">
+                  <div className="text-xs text-[var(--muted)]">Timer</div>
+                  <div className="text-2xl font-semibold text-[var(--text)]">
+                    {formatChrono(chronoSeconds)}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setChronoRunning((prev) => !prev)}
+                  >
+                    {chronoRunning ? "Pause" : "Démarrer"}
+                  </Button>
+                </div>
+
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 space-y-2">
+                  <div className="text-xs text-[var(--muted)]">Objectif</div>
+                  <Input
+                    label="Produits à compter"
+                    type="number"
+                    min={1}
+                    value={chronoTarget}
+                    onChange={(e) => {
+                      const nextValue = Number(e.target.value);
+                      setChronoTarget(Number.isFinite(nextValue) && nextValue > 0 ? nextValue : 1);
+                    }}
+                  />
+                  <div className="text-xs text-[var(--muted)]">Reste : {chronoRemaining} produit(s)</div>
+                </div>
+
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 space-y-2">
+                  <div className="text-xs text-[var(--muted)]">Progression</div>
+                  <div className="text-2xl font-semibold text-[var(--text)]">
+                    {Math.round(chronoProgress * 100)}%
+                  </div>
+                  <div className="h-2 w-full rounded-full bg-[var(--accent)]/20 overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--primary)] transition-all"
+                      style={{ width: `${Math.round(chronoProgress * 100)}%` }}
+                    />
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {chronoCount} compté(s) / {chronoTarget}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </Card>
@@ -975,7 +1344,7 @@ export default function Inventory() {
                   <span className="font-semibold">{lastFound.product?.name}</span> —{" "}
                   {wording.categoryLabel.toLowerCase()} {lastFound.product?.category || "—"} — dernier comptage (
                   {lastFound.product?.inventory_month || "—"})
-                  <span className="text-xs text-[var(--muted)]"> · info non reprise automatiquement</span>
+                  <span className="text-xs text-[var(--muted)]"> · quantité pré-remplie, ajustez si besoin</span>
                 </div>
               </div>
             ) : (
@@ -1237,7 +1606,7 @@ export default function Inventory() {
       <Drawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title={isEditing ? "Détails du comptage" : "Options avancées"}
+        title="Détails du comptage"
         footer={
           <div className="flex flex-wrap gap-2 justify-end">
             <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>

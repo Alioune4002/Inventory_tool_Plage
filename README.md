@@ -16,10 +16,16 @@ SaaS léger pour gérer des inventaires multi-enseignes et multi-services, avec 
 - Pertes : déclaration de pertes (casse/DLC/vol/offert/erreur), impact dans les stats mensuelles, option de désactiver entamé/non entamé pour les services retail/pharma.
 - Exports : `/api/exports/` CSV/XLSX (from/to, service/all, mode sealed/opened/all) + envoi par email (param `email` + `message`).
 - Inventaire : filtre mois/service, ajout produit rapide, search, empty state premium.
+- Inventaire Chrono : timer + objectif + progression (mode optionnel).
 - Lookup / Scan : `/api/products/lookup/?barcode=` cherche d’abord dans le tenant/service, renvoie historique + derniers produits; fallback OpenFoodFacts (alimentaire) pour préremplir.
 - Alertes : stock minimum + DLC/DDM (seuils 30/90j) via `/api/alerts/` (plan Duo/Multi).
 - Variantes & conversions : variantes simples + conversions d’unités par produit (affichées dans exports/stats).
 - Rétention Solo : 14 jours (filtrage created_at) pour inventaires, pertes, stats, exports, lookup.
+- Anti-doublons : détection barcode/SKU/nom (fuzzy), fusion sécurisée avec logs.
+- Rituels métier : checklist + actions par métier (épicerie, boulangerie, pharmacie…).
+- Import fournisseur : CSV/PDF structuré, mapping lignes → produits, création auto fournisseur + alias.
+- Catalogue PDF : A4 paginé, champs sélectionnables + branding (logo si dispo).
+- Étiquettes PDF : génération A4 avec codes-barres/SKU et champs optionnels.
 - Settings : services, (à compléter : email/password, invitations).
 - Suppression de compte avec confirmations.
 
@@ -73,6 +79,14 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:
   - `POST /api/products/` (champs optionnels barcode/SKU/prix/DLC + entamé : container_status, pack_size, remaining_qty/fraction)  
   - `GET /api/inventory-stats/?month=YYYY-MM&service=<id>`
   - `GET /api/products/lookup/?barcode=CODE` (local + historique limité + suggestion OpenFoodFacts, options `history_limit`, `history_months`)
+- Doublons :  
+  - `GET /api/products/duplicates/?month=YYYY-MM&service=<id>`
+  - `POST /api/products/merge/` (master_id, merge_ids)
+- Rituels :  
+  - `GET /api/rituals/?month=YYYY-MM&service=<id>`
+- Réceptions (import fournisseur) :  
+  - `POST /api/receipts/import/?service=<id>` (CSV/PDF structuré)
+  - `POST /api/receipts/<id>/apply/` (decisions mapping)
 - Pertes :  
   - `GET /api/losses/?month=YYYY-MM&service=<id>`  
   - `POST /api/losses/` (reason, qty, unit, product)  
@@ -86,6 +100,9 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:
   - `GET /api/alerts/` : stock bas + DLC/DDM proches (seuils 30/90j), pagination `limit`/`offset`.
 - Export :  
   - `GET /api/exports/?from=YYYY-MM&to=YYYY-MM&service=<id|all>&mode=sealed|opened|all&format=csv|xlsx&email=<dest>&message=<txt>`
+- PDF :  
+  - `GET /api/catalog/pdf/?service=<id|all>&fields=...&q=...&category=...`
+  - `GET /api/labels/pdf/?service=<id|all>&ids=1,2,3&fields=...`
 - Divers :  
   - `GET /health/`
 
@@ -96,11 +113,13 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:
 - Pertes : `LossEvent` (tenant, service, product, occurred_at, inventory_month, qty+unit, reason, note, created_by). Sont intégrées aux stats (losses_total_qty/cost et breakdown par reason).
 
 ## Frontend (Vite)
-- Pages : Landing, Login/Register, Dashboard, Inventory, Products, Categories, Exports, Settings, Support, Terms/Privacy.
+- Pages : Landing, Login/Register, Dashboard, Inventory, Products, Categories, Exports, Doublons, Rituels, Réceptions, Étiquettes, Settings, Support, Terms/Privacy.
 - UI : composants réutilisables (Button/Card/Input/Badge/Toast), transitions Framer Motion, thèmes premium.
-- Inventory : champs dynamiques selon domaine/service, warnings non bloquants, DLC caché si non-food, toggle entamé désactivé pour retail/pharma.
+- Inventory : champs dynamiques selon domaine/service, warnings non bloquants, DLC caché si non-food, toggle entamé désactivé pour retail/pharma, mode Chrono optionnel.
 - Pertes : page dédiée pour déclarer et lister les pertes mensuelles.
 - Exports : déclenchement CSV/XLSX via `/api/exports` avec envoi email optionnel.
+- Catalogue PDF : génération A4 paginée avec choix des champs + branding.
+- Étiquettes PDF : génération A4 avec codes-barres/SKU (quota par plan).
 - Assistant IA : panneau d’analyse dans le Dashboard (message, insights, actions).
 - Entitlements front : hook `useEntitlements()` + bannières Essai/Fin d’essai/Limites/Impayés visibles dans AppShell/Dashboard/Settings. Les actions bloquées affichent des toasts clairs (codes LIMIT_*).
 

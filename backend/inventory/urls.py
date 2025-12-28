@@ -15,10 +15,16 @@ from products.views import (
     export_advanced,
     export_generic,
     catalog_pdf,
+    labels_pdf,
     home,
     alerts,
     search_products,
     lookup_product,
+    product_duplicates,
+    merge_products,
+    rituals,
+    import_receipt,
+    apply_receipt,
 )
 
 router = DefaultRouter()
@@ -55,10 +61,16 @@ urlpatterns = [
     path("api/export-advanced/", export_advanced),
     path("api/exports/", export_generic),
     path("api/catalog/pdf/", catalog_pdf),
+    path("api/labels/pdf/", labels_pdf),
     path("api/alerts/", alerts),
 
     path("api/products/lookup/", lookup_product),
     path("api/products/search/", search_products),
+    path("api/products/duplicates/", product_duplicates),
+    path("api/products/merge/", merge_products),
+    path("api/rituals/", rituals),
+    path("api/receipts/import/", import_receipt),
+    path("api/receipts/<int:receipt_id>/apply/", apply_receipt),
 
     path("api/auth/", include("accounts.urls")),
     path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),

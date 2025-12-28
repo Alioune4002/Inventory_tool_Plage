@@ -1,33 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { HelmetProvider } from "react-helmet-async";
 import Products from "../../pages/Products";
 
 const apiGet = vi.fn();
 
+const authServices = [
+  { id: 1, name: "Cuisine", service_type: "kitchen" },
+  { id: 2, name: "Bar", service_type: "bar" },
+];
+const authSelectService = vi.fn();
+const authServiceFeatures = {
+  prices: { purchase_enabled: true, selling_enabled: true },
+  tva: { enabled: true },
+  barcode: { enabled: true },
+  sku: { enabled: true },
+  variants: { enabled: true },
+  lot: { enabled: true },
+  dlc: { enabled: true },
+  multi_unit: { enabled: true },
+  open_container_tracking: { enabled: true },
+};
+const authTenant = { name: "StockScan Demo", domain: "food" };
+const authProfile = { service_type: "kitchen" };
+
 vi.mock("../../app/AuthProvider", () => ({
   useAuth: () => ({
     serviceId: "1",
-    services: [
-      { id: 1, name: "Cuisine", service_type: "kitchen" },
-      { id: 2, name: "Bar", service_type: "bar" },
-    ],
-    selectService: vi.fn(),
-    serviceFeatures: {
-      prices: { purchase_enabled: true, selling_enabled: true },
-      tva: { enabled: true },
-      barcode: { enabled: true },
-      sku: { enabled: true },
-      variants: { enabled: true },
-      lot: { enabled: true },
-      dlc: { enabled: true },
-      multi_unit: { enabled: true },
-      open_container_tracking: { enabled: true },
-    },
+    services: authServices,
+    selectService: authSelectService,
+    serviceFeatures: authServiceFeatures,
     countingMode: "unit",
-    tenant: { name: "StockScan Demo", domain: "food" },
-    serviceProfile: { service_type: "kitchen" },
+    tenant: authTenant,
+    serviceProfile: authProfile,
   }),
 }));
 
@@ -48,6 +53,10 @@ vi.mock("../../lib/api", () => ({
   api: {
     get: (...args) => apiGet(...args),
   },
+}));
+
+vi.mock("../../components/PageTransition", () => ({
+  default: ({ children }) => children,
 }));
 
 describe("Products page (catalogue PDF)", () => {
@@ -81,10 +90,7 @@ describe("Products page (catalogue PDF)", () => {
         return Promise.reject({
           response: {
             status: 403,
-            data: new Blob(
-              [JSON.stringify({ code: "LIMIT_PDF_CATALOG_MONTH", detail: "Limite mensuelle du catalogue PDF atteinte." })],
-              { type: "application/json" }
-            ),
+            data: { code: "LIMIT_PDF_CATALOG_MONTH", detail: "Limite mensuelle du catalogue PDF atteinte." },
           },
         });
       }
@@ -97,15 +103,13 @@ describe("Products page (catalogue PDF)", () => {
       return Promise.resolve({ data: [] });
     });
 
-    const user = userEvent.setup();
-
     render(
       <HelmetProvider>
         <Products />
       </HelmetProvider>
     );
 
-    await user.click(screen.getByRole("button", { name: /générer le pdf/i }));
+    fireEvent.click(screen.getByRole("button", { name: /générer le pdf/i }));
 
     expect(
       await screen.findByText(/limite mensuelle du catalogue pdf atteinte/i)
