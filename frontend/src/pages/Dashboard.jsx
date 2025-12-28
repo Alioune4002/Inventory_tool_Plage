@@ -15,9 +15,8 @@ import { useToast } from "../app/ToastContext";
 import AIAssistantPanel from "../components/AIAssistantPanel";
 import AlertsPanel from "../components/AlertsPanel";
 import { getWording, getUxCopy } from "../lib/labels";
+import { formatCurrency } from "../lib/currency";
 
-const fmtCurrency = (n) =>
-  typeof n === "number" ? n.toLocaleString("fr-FR", { style: "currency", currency: "EUR" }) : "—";
 const fmtNumber = (n) => (typeof n === "number" ? n.toLocaleString("fr-FR") : "—");
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 const fmtDateTime = (v) => {
@@ -112,6 +111,7 @@ export default function Dashboard() {
     serviceFeatures,
   } = useAuth();
   const pushToast = useToast();
+  const currencyCode = tenant?.currency_code || "EUR";
 
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [loading, setLoading] = useState(false);
@@ -333,19 +333,19 @@ export default function Dashboard() {
   const kpis = [
     {
       label: copy.stockLabel,
-      value: fmtCurrency(purchaseValue),
+      value: formatCurrency(purchaseValue, currencyCode),
       helper: isAllServices ? "Somme sur tous les services" : "Mois et service sélectionnés",
     },
     {
       label: copy.sellingLabel,
-      value: sellingEnabled ? fmtCurrency(sellingValue) : "—",
+      value: sellingEnabled ? formatCurrency(sellingValue, currencyCode) : "—",
       helper: itemTypeEnabled
         ? "Peut exclure les matières premières si le type d’article est activé."
         : "Projection basée sur vos prix de vente (si renseignés).",
     },
     {
       label: "Marge potentielle",
-      value: sellingEnabled ? fmtCurrency(marginValue) : "—",
+      value: sellingEnabled ? formatCurrency(marginValue, currencyCode) : "—",
       helper: sellingEnabled
         ? copy.marginHelper
         : "Astuce : activez “Prix de vente” dans Settings → Modules pour estimer la marge.",
@@ -357,7 +357,7 @@ export default function Dashboard() {
     },
     {
       label: "Pertes du mois",
-      value: lossesCost > 0 ? fmtCurrency(lossesCost) : `${fmtNumber(lossesQty)} u.`,
+      value: lossesCost > 0 ? formatCurrency(lossesCost, currencyCode) : `${fmtNumber(lossesQty)} u.`,
       helper: copy.lossHelper,
     },
   ];
@@ -493,7 +493,8 @@ export default function Dashboard() {
                       </div>
 
                       <div className="text-xs text-[var(--muted)] break-anywhere">
-                        Achat : {fmtCurrency(c.total_purchase_value || 0)} · Vente : {fmtCurrency(c.total_selling_value || 0)}
+                        Achat : {formatCurrency(c.total_purchase_value || 0, currencyCode)} · Vente :{" "}
+                        {formatCurrency(c.total_selling_value || 0, currencyCode)}
                       </div>
 
                       <div className="text-xs text-rose-500 dark:text-rose-300">
@@ -532,7 +533,7 @@ export default function Dashboard() {
                       <div className="flex justify-between gap-3 text-xs font-semibold text-[var(--muted)] min-w-0">
                         <span className="min-w-0 break-anywhere">{l.reason}</span>
                         <span className="shrink-0">
-                          {fmtCurrency(l.total_cost || 0)} — {fmtNumber(l.total_qty || 0)} u.
+                          {formatCurrency(l.total_cost || 0, currencyCode)} — {fmtNumber(l.total_qty || 0)} u.
                         </span>
                       </div>
                       <div className="h-2.5 rounded-full bg-[var(--accent)]/25 overflow-hidden">
@@ -584,8 +585,12 @@ export default function Dashboard() {
                     Stock : {fmtNumber(p.stock_final || 0)} {p.unit || ""}
                   </div>
 
-                  <div className="text-xs text-[var(--muted)]">Valeur achat : {fmtCurrency(p.purchase_value_current || 0)}</div>
-                  <div className="text-xs text-[var(--muted)]">Valeur vente : {fmtCurrency(p.selling_value_current || 0)}</div>
+                  <div className="text-xs text-[var(--muted)]">
+                    Valeur achat : {formatCurrency(p.purchase_value_current || 0, currencyCode)}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    Valeur vente : {formatCurrency(p.selling_value_current || 0, currencyCode)}
+                  </div>
 
                   <div className="text-xs text-rose-500 dark:text-rose-300">Pertes : {fmtNumber(p.losses_qty || 0)} u.</div>
 

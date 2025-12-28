@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional, Tuple
 
 from django.conf import settings
@@ -49,6 +50,15 @@ User = get_user_model()
 EMAIL_VERIFICATION_REQUIRED = getattr(settings, "EMAIL_VERIFICATION_REQUIRED", True)
 EMAIL_HARD_FAIL = getattr(settings, "EMAIL_HARD_FAIL", False)
 EMAIL_CHANGE_SIGNER = TimestampSigner(salt="stockscan.email.change")
+
+CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+
+
+def _normalize_currency_code(raw: str) -> str:
+    code = (raw or "").strip().upper()
+    if not code or not CURRENCY_RE.match(code):
+        raise exceptions.ValidationError("Devise invalide (format ISO 4217 attendu).")
+    return code
 
 
 # Stripe (backend only)
@@ -348,6 +358,7 @@ class RegisterView(APIView):
                     "id": tenant.id if tenant else None,
                     "name": tenant.name if tenant else None,
                     "domain": tenant.domain if tenant else None,
+                    "currency_code": getattr(tenant, "currency_code", "EUR") if tenant else "EUR",
                 },
             },
             status=status.HTTP_201_CREATED,
@@ -383,6 +394,7 @@ class MeView(APIView):
             "id": tenant.id,
             "name": tenant.name,
             "domain": tenant.domain,
+            "currency_code": getattr(tenant, "currency_code", "EUR"),
         }
 
         try:
@@ -399,6 +411,24 @@ class MeView(APIView):
 
         return Response(data)
 
+
+# --------------------------------
+# Tenant settings
+# --------------------------------
+
+class TenantCurrencyView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request):
+        tenant = get_tenant_for_request(request)
+        role = get_user_role(request)
+        if role not in ["owner", "manager"]:
+            raise exceptions.PermissionDenied("Rôle insuffisant pour modifier la devise.")
+
+        currency_code = _normalize_currency_code(request.data.get("currency_code"))
+        tenant.currency_code = currency_code
+        tenant.save(update_fields=["currency_code"])
+        return Response({"currency_code": tenant.currency_code})
 
 # --------------------------------
 # Services / Memberships
@@ -861,6 +891,7 @@ class EntitlementsView(APIView):
                 "limits": limits,
                 "usage": usage,
                 "over_limit": over_limit,
+                "currency_code": getattr(tenant, "currency_code", "EUR"),
                 "last_plan_was_trial": False,
             }
         )

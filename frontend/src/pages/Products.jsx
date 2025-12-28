@@ -1,11 +1,12 @@
 // frontend/src/pages/Products.jsx
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Input from "../ui/Input";
 import Button from "../ui/Button";
 import Skeleton from "../ui/Skeleton";
+import CatalogPdfSection from "../components/products/CatalogPdfSection";
 import Select from "../ui/Select";
 import Drawer from "../ui/Drawer";
 import { api } from "../lib/api";
@@ -13,10 +14,9 @@ import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
+import { currencyLabel, formatCurrency } from "../lib/currency";
 import { ScanLine, X } from "lucide-react";
 import { useEntitlements } from "../app/useEntitlements";
-
-const CatalogPdfSection = React.lazy(() => import("../components/products/CatalogPdfSection"));
 
 function isBarcodeDetectorSupported() {
   return typeof window !== "undefined" && "BarcodeDetector" in window;
@@ -89,6 +89,8 @@ function getPdfErrorMessage(error) {
 
 export default function Products() {
   const { serviceId, services, selectService, serviceFeatures, countingMode, tenant, serviceProfile } = useAuth();
+  const currencyCode = tenant?.currency_code || "EUR";
+  const currencyText = currencyLabel(currencyCode);
   const pushToast = useToast();
   const { data: entitlements } = useEntitlements();
 
@@ -285,8 +287,8 @@ export default function Products() {
     if (skuEnabled) options.push({ key: "sku", label: "SKU" });
     options.push({ key: "unit", label: "Unité" });
     if (variantsEnabled) options.push({ key: "variants", label: "Variantes" });
-    if (purchaseEnabled) options.push({ key: "purchase_price", label: "Prix d’achat" });
-    if (sellingEnabled) options.push({ key: "selling_price", label: "Prix de vente" });
+    if (purchaseEnabled) options.push({ key: "purchase_price", label: `Prix d’achat (${currencyText})` });
+    if (sellingEnabled) options.push({ key: "selling_price", label: `Prix de vente (${currencyText})` });
     if (tvaEnabled && (purchaseEnabled || sellingEnabled)) options.push({ key: "tva", label: "TVA" });
     if (dlcEnabled) options.push({ key: "dlc", label: "DLC / DDM" });
     if (lotEnabled) options.push({ key: "lot", label: "Lot" });
@@ -307,6 +309,7 @@ export default function Products() {
     canStockAlerts,
     brandLabel,
     supplierLabel,
+    currencyText,
   ]);
   const pdfDefaultFields = useMemo(() => {
     const base = [];
@@ -1137,10 +1140,14 @@ export default function Products() {
                         {(purchaseEnabled || sellingEnabled) && (
                           <td className="px-4 py-3 text-[var(--muted)]">
                             <div className="space-y-1">
-                              {purchaseEnabled && <div>Achat: {p.purchase_price ? `${p.purchase_price} €` : "—"}</div>}
+                              {purchaseEnabled && (
+                                <div>
+                                  Achat: {formatCurrency(p.purchase_price, currencyCode)}
+                                </div>
+                              )}
                               {sellingEnabled && (
                                 <div className="text-xs text-[var(--muted)]">
-                                  Vente: {p.selling_price ? `${p.selling_price} €` : "—"}
+                                  Vente: {formatCurrency(p.selling_price, currencyCode)}
                                   {tvaEnabled ? ` · TVA ${p.tva ?? "—"}%` : ""}
                                 </div>
                               )}
@@ -1187,36 +1194,34 @@ export default function Products() {
           )}
         </Card>
 
-        <Suspense fallback={<Skeleton className="h-48 w-full" />}>
-          <CatalogPdfSection
-            canPdfCatalog={canPdfCatalog}
-            pdfLimit={pdfLimit}
-            services={services}
-            pdfService={pdfService}
-            setPdfService={setPdfService}
-            pdfServiceOptions={pdfServiceOptions}
-            pdfQuery={pdfQuery}
-            setPdfQuery={setPdfQuery}
-            categories={categories}
-            pdfCategory={pdfCategory}
-            setPdfCategory={setPdfCategory}
-            categoryOptions={categoryOptions}
-            wording={wording}
-            pdfFieldOptions={pdfFieldOptions}
-            pdfFields={pdfFields}
-            togglePdfField={togglePdfField}
-            pdfBranding={pdfBranding}
-            setPdfBranding={setPdfBranding}
-            generateCatalogPdf={generateCatalogPdf}
-            pdfLoading={pdfLoading}
-            pdfError={pdfError}
-            pdfErrorCode={pdfErrorCode}
-            clearPdfError={() => {
-              setPdfError("");
-              setPdfErrorCode("");
-            }}
-          />
-        </Suspense>
+        <CatalogPdfSection
+          canPdfCatalog={canPdfCatalog}
+          pdfLimit={pdfLimit}
+          services={services}
+          pdfService={pdfService}
+          setPdfService={setPdfService}
+          pdfServiceOptions={pdfServiceOptions}
+          pdfQuery={pdfQuery}
+          setPdfQuery={setPdfQuery}
+          categories={categories}
+          pdfCategory={pdfCategory}
+          setPdfCategory={setPdfCategory}
+          categoryOptions={categoryOptions}
+          wording={wording}
+          pdfFieldOptions={pdfFieldOptions}
+          pdfFields={pdfFields}
+          togglePdfField={togglePdfField}
+          pdfBranding={pdfBranding}
+          setPdfBranding={setPdfBranding}
+          generateCatalogPdf={generateCatalogPdf}
+          pdfLoading={pdfLoading}
+          pdfError={pdfError}
+          pdfErrorCode={pdfErrorCode}
+          clearPdfError={() => {
+            setPdfError("");
+            setPdfErrorCode("");
+          }}
+        />
 
         <Drawer
           open={drawerOpen}
@@ -1456,7 +1461,7 @@ export default function Products() {
                 <div className="mt-3 grid gap-3">
                   {purchaseEnabled && (
                     <Input
-                      label="Prix d’achat HT (€)"
+                      label={`Prix d’achat HT (${currencyText})`}
                       type="number"
                       min={0}
                       step="0.01"
@@ -1467,7 +1472,7 @@ export default function Products() {
                   )}
                   {sellingEnabled && (
                     <Input
-                      label="Prix de vente HT (€)"
+                      label={`Prix de vente HT (${currencyText})`}
                       type="number"
                       min={0}
                       step="0.01"

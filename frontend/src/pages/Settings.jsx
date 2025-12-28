@@ -22,6 +22,7 @@ import { FAMILLES, MODULES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
 import { formatPlanLabel } from "../lib/planLabels";
 import { getTourKey, getTourPendingKey } from "../lib/tour";
+import { currencyLabel, getCurrencyOptions } from "../lib/currency";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -103,6 +104,8 @@ export default function Settings() {
 
   const userId = me?.id || me?.user?.id || me?.user_id || "";
   const currentEmail = me?.email || "";
+  const userRole = (me?.role || me?.profile?.role || "operator").toLowerCase();
+  const canEditTenant = userRole === "owner" || userRole === "manager";
 
   const [newService, setNewService] = useState("");
   const [newServiceType, setNewServiceType] = useState("other"); // ✅ NEW
@@ -116,6 +119,8 @@ export default function Settings() {
   const [scanMode, setScanMode] = useState(() => localStorage.getItem("scanMode") || "scan");
   const [coachEnabled, setCoachEnabled] = useState(() => localStorage.getItem("coach") !== "off");
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
+  const [currencyCode, setCurrencyCode] = useState(() => tenant?.currency_code || "EUR");
+  const [currencyBusy, setCurrencyBusy] = useState(false);
 
   const [billingBusy, setBillingBusy] = useState(false);
 
@@ -141,6 +146,13 @@ export default function Settings() {
 
   const serviceOptions = useMemo(() => safeArray(services), [services]);
   const hasMultiServices = serviceOptions.length > 1;
+  const currencyOptions = useMemo(() => getCurrencyOptions(), []);
+
+  useEffect(() => {
+    if (tenant?.currency_code) {
+      setCurrencyCode(tenant.currency_code);
+    }
+  }, [tenant?.currency_code]);
 
   const defaultServiceId = useMemo(() => {
     if (serviceId && serviceId !== "all") return String(serviceId);
@@ -895,6 +907,41 @@ export default function Settings() {
                 <option value="dark">Sombre</option>
               </select>
               <span className="text-xs text-[var(--muted)]">Mémorisé sur cet appareil.</span>
+            </label>
+
+            <label className="space-y-1.5">
+              <span className="text-sm font-medium text-[var(--text)]">Devise (tenant)</span>
+              <select
+                className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm font-semibold text-[var(--text)]"
+                value={currencyCode}
+                onChange={async (e) => {
+                  const next = e.target.value;
+                  setCurrencyCode(next);
+                  setCurrencyBusy(true);
+                  try {
+                    await api.patch("/api/auth/tenant/currency/", { currency_code: next });
+                    await refreshMe?.();
+                    pushToast?.({ message: `Devise mise à jour : ${currencyLabel(next)}`, type: "success" });
+                  } catch (err) {
+                    pushToast?.({ message: "Impossible de mettre à jour la devise.", type: "error" });
+                    setCurrencyCode(tenant?.currency_code || "EUR");
+                  } finally {
+                    setCurrencyBusy(false);
+                  }
+                }}
+                disabled={currencyBusy || !canEditTenant}
+              >
+                {currencyOptions.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs text-[var(--muted)]">
+                {canEditTenant
+                  ? "Définit la devise de référence pour tout le commerce."
+                  : "Seuls les propriétaires/gestionnaires peuvent modifier la devise."}
+              </span>
             </label>
           </div>
 

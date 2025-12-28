@@ -12,6 +12,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { useEntitlements } from "../app/useEntitlements";
+import { currencyLabel } from "../lib/currency";
 
 const BarcodeScannerModal = React.lazy(() => import("../components/BarcodeScannerModal"));
 
@@ -56,12 +57,16 @@ export default function Labels() {
   const { serviceId, services, selectService, tenant } = useAuth();
   const { data: entitlements } = useEntitlements();
   const pushToast = useToast();
+  const currencyText = currencyLabel(tenant?.currency_code || "EUR");
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState([]);
   const [fields, setFields] = useState(["price", "price_unit"]);
   const [companyName, setCompanyName] = useState(tenant?.name || "");
+  const [promoEnabled, setPromoEnabled] = useState(false);
+  const [promoType, setPromoType] = useState("percent");
+  const [promoValue, setPromoValue] = useState(10);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -83,6 +88,12 @@ export default function Labels() {
     if (services?.length > 1) base.push({ value: "all", label: "Tous les services" });
     return base;
   }, [services]);
+
+  useEffect(() => {
+    if (promoEnabled && !fields.includes("price")) {
+      setFields((prev) => [...prev, "price"]);
+    }
+  }, [promoEnabled, fields]);
 
   const toggleField = (key) => {
     setFields((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
@@ -190,6 +201,10 @@ export default function Labels() {
       if (fields.length) params.set("fields", fields.join(","));
       const counts = selected.map((p) => `${p.id}:${p.count || 1}`).join(",");
       params.set("counts", counts);
+      if (promoEnabled) {
+        params.set("promo_type", promoType);
+        params.set("promo_value", promoValue);
+      }
 
       const res = await api.get(`/api/labels/pdf/?${params.toString()}`, {
         responseType: "blob",
@@ -397,8 +412,8 @@ export default function Labels() {
                   <div className="text-sm font-semibold text-[var(--text)]">Champs à inclure</div>
                   <div className="grid sm:grid-cols-2 gap-2">
                     {[
-                      { key: "price", label: "Prix" },
-                      { key: "price_unit", label: "Prix / kg ou L" },
+                      { key: "price", label: `Prix (${currencyText})` },
+                      { key: "price_unit", label: `Prix / kg ou L (${currencyText})` },
                       { key: "tva", label: "TVA" },
                       { key: "supplier", label: "Fournisseur" },
                       { key: "brand", label: "Marque" },
@@ -418,6 +433,44 @@ export default function Labels() {
                         <span>{field.label}</span>
                       </label>
                     ))}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-sm font-semibold text-[var(--text)]">Étiquettes promo</div>
+                  <label className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--text)]">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 accent-[var(--primary)]"
+                      checked={promoEnabled}
+                      onChange={(e) => setPromoEnabled(e.target.checked)}
+                    />
+                    <span>Afficher l’ancien prix + le prix remisé</span>
+                  </label>
+                  {promoEnabled && (
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <Select
+                        label="Type de remise"
+                        value={promoType}
+                        onChange={(value) => setPromoType(value)}
+                        options={[
+                          { value: "percent", label: "Pourcentage" },
+                          { value: "amount", label: `Montant (${currencyText})` },
+                        ]}
+                      />
+                      <Input
+                        label={promoType === "percent" ? "Remise (%)" : `Remise (${currencyText})`}
+                        type="number"
+                        min={promoType === "percent" ? 1 : 0.01}
+                        max={promoType === "percent" ? 100 : undefined}
+                        step={promoType === "percent" ? "1" : "0.01"}
+                        value={promoValue}
+                        onChange={(e) => setPromoValue(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <div className="text-xs text-[var(--muted)]">
+                    Les remises s’appliquent sur le prix de vente (ou le prix d’achat si absent).
                   </div>
                 </div>
               </div>

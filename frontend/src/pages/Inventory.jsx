@@ -16,6 +16,7 @@ const BarcodeScannerModal = React.lazy(() => import("../components/BarcodeScanne
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 import { useEntitlements } from "../app/useEntitlements";
+import { currencyLabel } from "../lib/currency";
 
 export default function Inventory() {
   const {
@@ -31,6 +32,7 @@ export default function Inventory() {
 
   const pushToast = useToast();
   const { data: entitlements } = useEntitlements();
+  const currencyText = currencyLabel(tenant?.currency_code || "EUR");
 
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [items, setItems] = useState([]);
@@ -1078,7 +1080,7 @@ export default function Inventory() {
 
                         {purchaseEnabled && (
                           <Input
-                            label="Prix d’achat HT (€)"
+                            label={`Prix d’achat HT (${currencyText})`}
                             type="number"
                             min={0}
                             step="0.01"
@@ -1089,7 +1091,7 @@ export default function Inventory() {
 
                         {sellingEnabled && (
                           <Input
-                            label="Prix de vente HT (€)"
+                            label={`Prix de vente HT (${currencyText})`}
                             type="number"
                             min={0}
                             step="0.01"
@@ -1822,7 +1824,7 @@ export default function Inventory() {
               <div className="mt-3 grid gap-3">
                 {purchaseEnabled && (
                   <Input
-                    label="Prix d’achat HT (€)"
+                    label={`Prix d’achat HT (${currencyText})`}
                     type="number"
                     min={0}
                     step="0.01"
@@ -1832,7 +1834,7 @@ export default function Inventory() {
                 )}
                 {sellingEnabled && (
                   <Input
-                    label="Prix de vente HT (€)"
+                    label={`Prix de vente HT (${currencyText})`}
                     type="number"
                     min={0}
                     step="0.01"

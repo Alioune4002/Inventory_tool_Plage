@@ -75,7 +75,7 @@ OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 CATALOG_PDF_MAX_PRODUCTS = 500
 LABELS_PDF_MAX_PRODUCTS = 400
 RECEIPT_IMPORT_MAX_LINES = 500
-DUPLICATE_NAME_SIMILARITY = 0.92
+DUPLICATE_NAME_SIMILARITY = 0.95
 NAME_STOPWORDS = {
     "produit",
     "article",
@@ -315,7 +315,7 @@ def _format_catalog_field(label, value):
     return f"{label}: {value}"
 
 
-def _format_catalog_line(product, fields, include_service=False):
+def _format_catalog_line(product, fields, include_service=False, currency_code="EUR"):
     values = []
     if include_service and getattr(product, "service", None):
         values.append(_format_catalog_field("Service", product.service.name))
@@ -330,10 +330,10 @@ def _format_catalog_line(product, fields, include_service=False):
         variant = _format_variant(product)
         values.append(_format_catalog_field(CATALOG_FIELD_LABELS["variants"], variant))
     if "purchase_price" in fields:
-        val = f"{product.purchase_price} €" if product.purchase_price is not None else None
+        val = _format_price(product.purchase_price, currency_code)
         values.append(_format_catalog_field(CATALOG_FIELD_LABELS["purchase_price"], val))
     if "selling_price" in fields:
-        val = f"{product.selling_price} €" if product.selling_price is not None else None
+        val = _format_price(product.selling_price, currency_code)
         values.append(_format_catalog_field(CATALOG_FIELD_LABELS["selling_price"], val))
     if "tva" in fields:
         val = f"{product.tva}%" if product.tva is not None else None
@@ -354,16 +354,36 @@ def _format_catalog_line(product, fields, include_service=False):
     return " · ".join([v for v in values if v])
 
 
-def _format_price(value):
+def _currency_symbol(code: str) -> str:
+    code = (code or "EUR").upper()
+    symbols = {
+        "EUR": "€",
+        "USD": "$",
+        "GBP": "£",
+        "CHF": "CHF",
+        "CAD": "CA$",
+        "AUD": "A$",
+        "JPY": "¥",
+        "CNY": "¥",
+        "BRL": "R$",
+        "MAD": "MAD",
+        "XOF": "F CFA",
+        "XAF": "F CFA",
+    }
+    return symbols.get(code, code)
+
+
+def _format_price(value, currency_code="EUR"):
     if value is None:
         return None
     try:
-        return f"{float(value):.2f} €"
+        symbol = _currency_symbol(currency_code)
+        return f"{float(value):.2f} {symbol}"
     except (TypeError, ValueError):
         return None
 
 
-def _price_per_unit(product):
+def _price_per_unit(product, currency_code="EUR"):
     price = product.selling_price if product.selling_price is not None else product.purchase_price
     if price is None:
         return None, None
@@ -372,15 +392,45 @@ def _price_per_unit(product):
         price = float(price)
     except (TypeError, ValueError):
         return None, None
+    symbol = _currency_symbol(currency_code)
     if unit == "kg":
-        return price, "€/kg"
+        return price, f"{symbol}/kg"
     if unit == "g":
-        return price * 1000, "€/kg"
+        return price * 1000, f"{symbol}/kg"
     if unit == "l":
-        return price, "€/L"
+        return price, f"{symbol}/L"
     if unit == "ml":
-        return price * 1000, "€/L"
+        return price * 1000, f"{symbol}/L"
     return None, None
+
+
+def _parse_promo(raw_type, raw_value):
+    promo_type = (raw_type or "").strip().lower()
+    if promo_type not in ("percent", "amount"):
+        return None
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if promo_type == "percent" and not (0 < value <= 100):
+        return None
+    if promo_type == "amount" and value <= 0:
+        return None
+    return {"type": promo_type, "value": value}
+
+
+def _apply_promo(price, promo):
+    if price is None or not promo:
+        return None
+    try:
+        base = float(price)
+    except (TypeError, ValueError):
+        return None
+    if promo["type"] == "percent":
+        new_price = base * (1 - promo["value"] / 100.0)
+    else:
+        new_price = base - promo["value"]
+    return max(new_price, 0)
 
 
 def _format_label_date(product):
@@ -524,7 +574,7 @@ def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, co
             if y < 2.5 * cm:
                 c.showPage()
                 y = height - 2.5 * cm
-            line = _format_catalog_line(p, fields, include_service=include_service)
+            line = _format_catalog_line(p, fields, include_service=include_service, currency_code=tenant.currency_code)
             c.setFillColorRGB(0.1, 0.1, 0.1)
             c.drawString(2 * cm, y, f"• {p.name}")
             y -= 0.45 * cm
@@ -1836,6 +1886,9 @@ def product_duplicates(request):
                     continue
                 tokens_a = name_tokens.get(base, [])
                 tokens_b = name_tokens.get(other, [])
+                shared = set(tokens_a) & set(tokens_b)
+                if len(shared) < 2:
+                    continue
                 if _token_similarity(tokens_a, tokens_b) < 0.8:
                     continue
                 if _similarity(base, other) < DUPLICATE_NAME_SIMILARITY:
@@ -2105,15 +2158,124 @@ def _parse_receipt_rows(file_obj, file_name):
             raise exceptions.ValidationError("PDF non supporté sur ce déploiement.") from exc
         reader = PdfReader(file_obj)
         text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        lines = [line for line in text.splitlines() if line.strip()]
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             return [], "pdf"
-        header = lines[0]
-        delimiter = ";" if ";" in header else "," if "," in header else "\t"
-        reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=delimiter)
-        return list(reader), "pdf"
+        header = lines[0].lower()
+        has_delim = ";" in header or "," in header or "\t" in header
+        if has_delim and any(k in header for k in ("produit", "designation", "libelle", "qty", "quantite", "qte", "prix")):
+            delimiter = ";" if ";" in header else "," if "," in header else "\t"
+            reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=delimiter)
+            rows = list(reader)
+            if rows:
+                return rows, "pdf"
+
+        rows = []
+        for line in lines:
+            parsed = _parse_receipt_line(line)
+            if parsed:
+                rows.append(parsed)
+        return rows, "pdf"
 
     raise exceptions.ValidationError("Format non supporté (CSV ou PDF).")
+
+
+RECEIPT_IGNORE_TOKENS = (
+    "facture",
+    "total",
+    "tva",
+    "ht",
+    "ttc",
+    "montant",
+    "reglement",
+    "iban",
+    "date",
+    "client",
+    "adresse",
+    "num",
+    "numero",
+    "référence",
+    "reference",
+)
+RECEIPT_UNITS = {"kg", "g", "l", "ml", "pcs", "pc", "un", "u", "unite", "unité"}
+
+
+def _parse_receipt_line(line: str):
+    if not line:
+        return None
+    lower = line.lower()
+    if any(token in lower for token in RECEIPT_IGNORE_TOKENS):
+        return None
+
+    tokens = [t for t in re.split(r"\\s+", line) if t]
+    if len(tokens) < 2:
+        return None
+
+    barcode = ""
+    for t in tokens:
+        if re.fullmatch(r"\\d{8,14}", t):
+            barcode = t
+            break
+
+    def to_number(token):
+        cleaned = re.sub(r"[^0-9,\\.]", "", token)
+        if not cleaned:
+            return None
+        cleaned = cleaned.replace(",", ".")
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+
+    number_positions = []
+    for idx, t in enumerate(tokens):
+        num = to_number(t)
+        if num is not None:
+            number_positions.append((idx, num))
+
+    if not number_positions:
+        return None
+
+    price_idx, price_val = number_positions[-1]
+    qty_val = None
+    if len(number_positions) >= 2:
+        qty_idx, qty_val = number_positions[-2]
+        if qty_val > 10000:
+            qty_val = None
+    else:
+        qty_idx = None
+
+    unit = ""
+    for t in tokens:
+        t_clean = t.lower().strip(".,;")
+        if t_clean in RECEIPT_UNITS:
+            unit = t_clean
+            break
+
+    name_tokens = []
+    for idx, t in enumerate(tokens):
+        if barcode and t == barcode:
+            continue
+        if idx == price_idx or (qty_idx is not None and idx == qty_idx):
+            continue
+        if t.lower().strip(".,;") in RECEIPT_UNITS:
+            continue
+        if re.fullmatch(r"\\d+[.,]?\\d*", t):
+            continue
+        name_tokens.append(t)
+
+    name = " ".join(name_tokens).strip()
+    if not name:
+        return None
+
+    return {
+        "name": name,
+        "quantity": qty_val if qty_val is not None else "",
+        "unit": unit,
+        "purchase_price": price_val,
+        "barcode": barcode,
+        "internal_sku": "",
+    }
 
 
 def _normalize_receipt_row(row):
@@ -2346,8 +2508,12 @@ def labels_pdf(request):
 
     service_param = request.query_params.get("service")
     company_name = (request.query_params.get("company_name") or "").strip() or tenant.name
+    currency_code = getattr(tenant, "currency_code", "EUR")
+    promo = _parse_promo(request.query_params.get("promo_type"), request.query_params.get("promo_value"))
     fields_raw = request.query_params.get("fields") or ""
     fields = [f.strip() for f in fields_raw.split(",") if f.strip() in LABEL_ALLOWED_FIELDS]
+    if promo and "price" not in fields:
+        fields.append("price")
 
     ids = request.query_params.get("ids") or ""
     ids_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
@@ -2391,10 +2557,10 @@ def labels_pdf(request):
             return Response(exc.detail, status=400)
 
     width, height = A4
-    margin_x = 0.8 * cm
-    margin_y = 0.8 * cm
+    margin_x = 0.5 * cm
+    margin_y = 0.6 * cm
     cols = 3
-    rows = 6
+    rows = 8
     label_w = (width - (margin_x * 2)) / cols
     label_h = (height - (margin_y * 2)) / rows
 
@@ -2425,34 +2591,70 @@ def labels_pdf(request):
         if not code:
             return False
 
-        pad = 6
+        pad = 5
         name = (product.name or "").strip().upper()
-        name_lines = wrap_label_text(name, max_len=28, max_lines=2)
+        name_lines = wrap_label_text(name, max_len=30, max_lines=2)
         c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.setFont("Helvetica-Bold", 8.5)
-        y_name = y + label_h - 14
+        c.setFont("Helvetica-Bold", 8.4)
+        y_name = y + label_h - 10
         for line in name_lines:
             c.drawString(x + pad, y_name, line)
-            y_name -= 10
+            y_name -= 9
 
-        price = None
-        if "price" in fields:
-            price = _format_price(product.selling_price if product.selling_price is not None else product.purchase_price)
-        price_line_y = y + label_h - (42 if price else 30)
-        if price:
-            c.setFont("Helvetica-Bold", 18)
+        base_price = product.selling_price if product.selling_price is not None else product.purchase_price
+        price = _format_price(base_price, currency_code) if "price" in fields else None
+        promo_price = _apply_promo(base_price, promo) if promo else None
+        promo_active = promo_price is not None and price
+        price_line_y = y + label_h - 28
+
+        if promo_active:
+            old_price = _format_price(base_price, currency_code)
+            new_price = _format_price(promo_price, currency_code)
+            badge = (
+                f"-{int(promo['value'])}%"
+                if promo["type"] == "percent"
+                else f"-{_format_price(promo['value'], currency_code)}"
+            )
+            c.setFont("Helvetica", 8.5)
+            c.drawString(x + pad, price_line_y + 10, old_price or "")
+            old_width = c.stringWidth(old_price or "", "Helvetica", 8.5)
+            c.line(x + pad, price_line_y + 8, x + pad + old_width, price_line_y + 8)
+            c.setFont("Helvetica-Bold", 16.5)
+            c.drawCentredString(x + label_w / 2, price_line_y - 2, new_price or "")
+            c.setFont("Helvetica-Bold", 9)
+            c.drawRightString(x + label_w - pad, price_line_y + 10, badge)
+        elif price:
+            c.setFont("Helvetica-Bold", 15.5)
             c.drawCentredString(x + label_w / 2, price_line_y, price)
 
         if "price_unit" in fields:
-            per_unit, suffix = _price_per_unit(product)
+            unit = (product.unit or "").lower()
+            per_unit = None
+            suffix = None
+            price_for_unit = promo_price if promo_active else base_price
+            if price_for_unit is not None:
+                try:
+                    price_val = float(price_for_unit)
+                except (TypeError, ValueError):
+                    price_val = None
+                if price_val is not None:
+                    symbol = _currency_symbol(currency_code)
+                    if unit == "kg":
+                        per_unit, suffix = price_val, f"{symbol}/kg"
+                    elif unit == "g":
+                        per_unit, suffix = price_val * 1000, f"{symbol}/kg"
+                    elif unit == "l":
+                        per_unit, suffix = price_val, f"{symbol}/L"
+                    elif unit == "ml":
+                        per_unit, suffix = price_val * 1000, f"{symbol}/L"
             if per_unit is not None and suffix:
                 c.setFont("Helvetica", 7)
-                c.drawRightString(x + label_w - pad, price_line_y + 2, f"{per_unit:.2f} {suffix}")
+                c.drawRightString(x + label_w - pad, price_line_y - 6, f"{per_unit:.2f} {suffix}")
 
         pack_info = _format_pack_info(product)
         if pack_info:
             c.setFont("Helvetica", 7)
-            c.drawRightString(x + label_w - pad, price_line_y - 10, pack_info)
+            c.drawRightString(x + label_w - pad, price_line_y - 16, pack_info)
 
         extra_lines = []
         if "unit" in fields and product.unit:
@@ -2471,18 +2673,18 @@ def labels_pdf(request):
         extra_lines = extra_lines[:2]
         if extra_lines:
             c.setFont("Helvetica", 7)
-            y_line = price_line_y - 16
+            y_line = price_line_y - 22
             for line in extra_lines:
                 c.drawString(x + pad, y_line, line[:40])
                 y_line -= 9
 
-        barcode_obj = code128.Code128(code, barHeight=26, barWidth=0.85)
+        barcode_obj = code128.Code128(code, barHeight=18, barWidth=0.8)
         barcode_x = x + (label_w - barcode_obj.width) / 2
-        barcode_y = y + 16
+        barcode_y = y + 9
         barcode_obj.drawOn(c, barcode_x, barcode_y)
 
         c.setFont("Helvetica", 6)
-        c.drawString(x + pad, y + 4, f"{company_name}"[:30])
+        c.drawString(x + pad, y + 3, f"{company_name}"[:30])
         c.drawCentredString(x + label_w / 2, barcode_y - 6, code)
         return True
 

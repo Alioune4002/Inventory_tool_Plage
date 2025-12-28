@@ -226,7 +226,12 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
         data.update(
             {
                 "user": {"id": self.user.id, "username": self.user.username, "email": self.user.email},
-                "tenant": {"id": profile.tenant.id, "name": profile.tenant.name, "domain": profile.tenant.domain},
+                "tenant": {
+                    "id": profile.tenant.id,
+                    "name": profile.tenant.name,
+                    "domain": profile.tenant.domain,
+                    "currency_code": getattr(profile.tenant, "currency_code", "EUR"),
+                },
             }
         )
         return data

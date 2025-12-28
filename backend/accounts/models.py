@@ -53,6 +53,8 @@ class Tenant(models.Model):
     business_type = models.CharField(max_length=30, choices=BUSINESS_CHOICES, default="other")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    currency_code = models.CharField(max_length=3, default="EUR")
+
     plan = models.ForeignKey(Plan, on_delete=models.SET_NULL, null=True, blank=True)
     plan_source = models.CharField(max_length=20, choices=PLAN_SOURCES, default="FREE")
     license_expires_at = models.DateTimeField(null=True, blank=True)

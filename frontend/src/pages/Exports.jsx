@@ -10,6 +10,7 @@ import { useToast } from "../app/ToastContext";
 import { useEntitlements } from "../app/useEntitlements";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 import { getWording } from "../lib/labels";
+import { currencyLabel } from "../lib/currency";
 
 function parseFilenameFromContentDisposition(contentDisposition, fallback) {
   try {
@@ -61,6 +62,7 @@ export default function Exports() {
   const { serviceId, services, serviceFeatures, tenant, serviceProfile } = useAuth();
   const pushToast = useToast();
   const { data: entitlements } = useEntitlements();
+  const currencyText = currencyLabel(tenant?.currency_code || "EUR");
 
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
@@ -119,8 +121,8 @@ export default function Exports() {
       { key: "inventory_month", label: "Mois", helper: "Mois d’inventaire." },
       { key: "service", label: "Service", helper: "Service concerné." },
       { key: "min_qty", label: "Stock min", helper: "Seuil d’alerte stock." },
-      { key: "purchase_price", label: "Prix achat (€)", helper: "Prix d’achat HT." },
-      { key: "selling_price", label: "Prix vente (€)", helper: "Prix de vente HT." },
+      { key: "purchase_price", label: `Prix achat (${currencyText})`, helper: "Prix d’achat HT." },
+      { key: "selling_price", label: `Prix vente (${currencyText})`, helper: "Prix de vente HT." },
       { key: "tva", label: "TVA (%)", helper: "Taux de TVA." },
       { key: "dlc", label: "DLC / DDM", helper: "Dates limites." },
       { key: "brand", label: "Marque", helper: "Marque optionnelle." },

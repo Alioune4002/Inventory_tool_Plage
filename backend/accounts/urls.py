@@ -25,6 +25,7 @@ from .views import (
 
     # Members summary
     MembersSummaryView,
+    TenantCurrencyView,
 )
 
 from .views_delete import DeleteAccountView
@@ -58,6 +59,7 @@ urlpatterns = [
 
     # Members summary (owner)
     path("members/summary/", MembersSummaryView.as_view(), name="members-summary"),
+    path("tenant/currency/", TenantCurrencyView.as_view(), name="tenant-currency"),
 
     # Invitations
     path("invitations/", InvitationCreateView.as_view(), name="invite-create"),
