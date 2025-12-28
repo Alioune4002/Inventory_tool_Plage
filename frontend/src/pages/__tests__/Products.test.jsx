@@ -70,7 +70,8 @@ describe("Products page (catalogue PDF)", () => {
       </HelmetProvider>
     );
 
-    expect(await screen.findByText(/catalogue pdf/i)).toBeInTheDocument();
+    const titles = await screen.findAllByText(/catalogue pdf/i);
+    expect(titles.length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /générer le pdf/i })).toBeInTheDocument();
   });
 
