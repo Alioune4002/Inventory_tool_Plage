@@ -18,7 +18,7 @@ import csv
 import io
 import json
 from django.db import transaction
-from django.db.models import Q, F, Count
+from django.db.models import Q, F, Count, Case, When, IntegerField
 from django.core.cache import cache
 from django.utils import timezone
 from reportlab.pdfgen import canvas
@@ -75,7 +75,26 @@ OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 CATALOG_PDF_MAX_PRODUCTS = 500
 LABELS_PDF_MAX_PRODUCTS = 400
 RECEIPT_IMPORT_MAX_LINES = 500
-DUPLICATE_NAME_SIMILARITY = 0.88
+DUPLICATE_NAME_SIMILARITY = 0.92
+NAME_STOPWORDS = {
+    "produit",
+    "article",
+    "test",
+    "item",
+    "lot",
+    "pack",
+    "piece",
+    "pieces",
+    "pcs",
+    "kg",
+    "g",
+    "gr",
+    "l",
+    "ml",
+    "cl",
+    "x",
+    "packaging",
+}
 LABEL_ALLOWED_FIELDS = {
     "price",
     "price_unit",
@@ -83,6 +102,7 @@ LABEL_ALLOWED_FIELDS = {
     "supplier",
     "brand",
     "unit",
+    "dlc",
 }
 CATALOG_ALLOWED_FIELDS = {
     "barcode",
@@ -363,6 +383,49 @@ def _price_per_unit(product):
     return None, None
 
 
+def _format_label_date(product):
+    if not product.dlc:
+        return None, None
+    label = "DLC"
+    if product.expiry_type and product.expiry_type != "none":
+        label = str(product.expiry_type)
+    return label, product.dlc.strftime("%d/%m/%Y")
+
+
+def _format_pack_info(product):
+    if product.pack_size and product.pack_uom:
+        try:
+            return f"{float(product.pack_size):.3f} {product.pack_uom}"
+        except (TypeError, ValueError):
+            return f"{product.pack_size} {product.pack_uom}"
+    if product.conversion_factor and product.conversion_unit:
+        try:
+            return f"{float(product.conversion_factor):.3f} {product.conversion_unit}"
+        except (TypeError, ValueError):
+            return f"{product.conversion_factor} {product.conversion_unit}"
+    return None
+
+
+def _parse_label_counts(raw):
+    if not raw:
+        return {}
+    counts = {}
+    for part in str(raw).split(","):
+        if ":" not in part:
+            continue
+        pid, count = part.split(":", 1)
+        if not pid.strip().isdigit():
+            continue
+        try:
+            count_val = int(count)
+        except (TypeError, ValueError):
+            continue
+        if count_val < 1:
+            continue
+        counts[int(pid)] = min(count_val, 50)
+    return counts
+
+
 class NumberedCanvas(canvas.Canvas):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -494,19 +557,50 @@ def _format_variant(product):
     return value or name or ""
 
 
-def _normalize_name(value):
+def _tokenize_name(value):
     if not value:
-        return ""
+        return []
     text = unicodedata.normalize("NFKD", str(value))
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
-    return text
+    tokens = [t for t in text.split() if t and t not in NAME_STOPWORDS]
+    return tokens
+
+
+def _normalize_name(value):
+    tokens = _tokenize_name(value)
+    return " ".join(tokens)
 
 
 def _similarity(a, b):
     if not a or not b:
         return 0.0
     return difflib.SequenceMatcher(a=a, b=b).ratio()
+
+
+def _token_similarity(tokens_a, tokens_b):
+    if not tokens_a or not tokens_b:
+        return 0.0
+    set_a, set_b = set(tokens_a), set(tokens_b)
+    if not set_a or not set_b:
+        return 0.0
+    return len(set_a & set_b) / len(set_a | set_b)
+
+
+def _name_is_generic(tokens):
+    if len(tokens) < 2:
+        return True
+    text = " ".join(tokens)
+    return len(text) < 6
+
+
+def _has_supporting_signal(a, b):
+    def same_field(field):
+        av = (getattr(a, field, None) or "").strip().lower()
+        bv = (getattr(b, field, None) or "").strip().lower()
+        return bool(av and bv and av == bv)
+
+    return same_field("category") or same_field("brand") or same_field("unit")
 
 
 def _history_month_cutoff(months):
@@ -1699,16 +1793,23 @@ def product_duplicates(request):
                     "type": label,
                     "key": value,
                     "master_id": master.id if master else None,
+                    "confidence": 0.98 if label == "barcode" else 0.96,
+                    "reason": "Même code-barres" if label == "barcode" else "Même SKU",
                     "products": [_product_brief(p) for p in group],
                 }
             )
 
     name_groups = {}
+    name_tokens = {}
     for p in qs:
-        norm = _normalize_name(p.name)
+        tokens = _tokenize_name(p.name)
+        if _name_is_generic(tokens):
+            continue
+        norm = " ".join(tokens)
         if not norm:
             continue
         name_groups.setdefault(norm, []).append(p)
+        name_tokens[norm] = tokens
 
     for norm, group in name_groups.items():
         if len(group) < 2:
@@ -1719,6 +1820,8 @@ def product_duplicates(request):
                 "type": "name",
                 "key": norm,
                 "master_id": master.id if master else None,
+                "confidence": 0.9,
+                "reason": "Nom identique (normalisé)",
                 "products": [_product_brief(p) for p in group],
             }
         )
@@ -1731,9 +1834,24 @@ def product_duplicates(request):
             for other in norms[i + 1 :]:
                 if (base, other) in seen_pairs or (other, base) in seen_pairs:
                     continue
+                tokens_a = name_tokens.get(base, [])
+                tokens_b = name_tokens.get(other, [])
+                if _token_similarity(tokens_a, tokens_b) < 0.8:
+                    continue
                 if _similarity(base, other) < DUPLICATE_NAME_SIMILARITY:
                     continue
                 merged = list({*name_groups.get(base, []), *name_groups.get(other, [])})
+                has_signal = False
+                for idx, p in enumerate(merged):
+                    for q in merged[idx + 1 :]:
+                        if _has_supporting_signal(p, q):
+                            has_signal = True
+                            break
+                    if has_signal:
+                        break
+
+                if not has_signal:
+                    continue
                 if len(merged) < 2:
                     continue
                 master = _pick_master(merged)
@@ -1742,6 +1860,8 @@ def product_duplicates(request):
                         "type": "name_fuzzy",
                         "key": f"{base} ~ {other}",
                         "master_id": master.id if master else None,
+                        "confidence": 0.82,
+                        "reason": "Nom très proche + signal commun",
                         "products": [_product_brief(p) for p in merged],
                     }
                 )
@@ -1851,12 +1971,39 @@ def rituals(request):
     total_products = qs.count()
     low_stock = qs.filter(min_qty__isnull=False, quantity__lte=F("min_qty")).count()
     losses_count = losses_qs.count()
+    missing_identifiers = qs.filter(
+        (Q(barcode__isnull=True) | Q(barcode="")) & (Q(internal_sku__isnull=True) | Q(internal_sku=""))
+    ).count()
+    missing_prices = qs.filter(purchase_price__isnull=True, selling_price__isnull=True).count()
+    missing_categories = qs.filter(Q(category__isnull=True) | Q(category="")).count()
 
     now = timezone.now().date()
     dlc_30 = qs.filter(dlc__isnull=False, dlc__lte=now + timedelta(days=30)).count()
     dlc_90 = qs.filter(dlc__isnull=False, dlc__lte=now + timedelta(days=90)).count()
 
     service_type = getattr(service, "service_type", "other")
+
+    missing_lots = qs.filter(lot_number__isnull=True).count()
+
+    def add_priority(acc, label, value, tone, hint):
+        if value:
+            acc.append({"label": label, "value": value, "tone": tone, "hint": hint})
+
+    insights = []
+    if total_products == 0:
+        insights.append("Aucun produit suivi ce mois-ci : importez un catalogue pour démarrer le rituel.")
+    if missing_identifiers:
+        insights.append(f"{missing_identifiers} produit(s) sans code-barres ni SKU : risque de doublons.")
+    if missing_prices:
+        insights.append(f"{missing_prices} produit(s) sans prix : analyses financières limitées.")
+    if missing_categories:
+        insights.append(f"{missing_categories} produit(s) sans catégorie : pilotage moins précis.")
+    if dlc_30:
+        insights.append(f"{dlc_30} produit(s) à moins de 30 jours d’échéance.")
+    if low_stock:
+        insights.append(f"{low_stock} produit(s) sous stock minimum.")
+    if losses_count:
+        insights.append(f"{losses_count} perte(s) enregistrée(s) ce mois.")
 
     ritual_map = {
         "grocery_food": {
@@ -1865,6 +2012,16 @@ def rituals(request):
                 {"label": "DLC < 30j", "value": dlc_30},
                 {"label": "Stocks bas", "value": low_stock},
                 {"label": "Pertes enregistrées", "value": losses_count},
+            ],
+            "priorities": [
+                *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "danger", "hint": "Rotation rapide"}]),
+                *([] if low_stock == 0 else [{"label": "Stocks sous seuil", "value": low_stock, "tone": "warning", "hint": "Risque de rupture"}]),
+                *([] if losses_count == 0 else [{"label": "Pertes du mois", "value": losses_count, "tone": "info", "hint": "À expliquer"}]),
+            ],
+            "checklist": [
+                {"label": "Contrôler les DLC < 30j", "href": "/app/inventory"},
+                {"label": "Ajuster les stocks bas", "href": "/app/inventory"},
+                {"label": "Analyser les pertes", "href": "/app/losses"},
             ],
             "actions": [
                 {"label": "Vérifier les stocks", "href": "/app/inventory"},
@@ -1878,6 +2035,16 @@ def rituals(request):
                 {"label": "DLC < 30j", "value": dlc_30},
                 {"label": "Stocks bas", "value": low_stock},
             ],
+            "priorities": [
+                *([] if losses_count == 0 else [{"label": "Pertes matières premières", "value": losses_count, "tone": "danger", "hint": "Causes ciblées"}]),
+                *([] if low_stock == 0 else [{"label": "Stocks bas", "value": low_stock, "tone": "warning", "hint": "Risque de rupture"}]),
+                *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "info", "hint": "Rotation"}]),
+            ],
+            "checklist": [
+                {"label": "Revoir les pertes sur matières premières", "href": "/app/losses"},
+                {"label": "Planifier les achats pour les stocks bas", "href": "/app/inventory"},
+                {"label": "Contrôler les DLC à venir", "href": "/app/inventory"},
+            ],
             "actions": [
                 {"label": "Voir les pertes", "href": "/app/losses"},
                 {"label": "Ajuster les stocks", "href": "/app/inventory"},
@@ -1888,7 +2055,17 @@ def rituals(request):
             "items": [
                 {"label": "DLC < 30j", "value": dlc_30},
                 {"label": "DLC < 90j", "value": dlc_90},
-                {"label": "Lots à vérifier", "value": qs.filter(lot_number__isnull=True).count()},
+                {"label": "Lots à vérifier", "value": missing_lots},
+            ],
+            "priorities": [
+                *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "danger", "hint": "Contrôle immédiat"}]),
+                *([] if dlc_90 == 0 else [{"label": "DLC à 90j", "value": dlc_90, "tone": "warning", "hint": "Anticiper"}]),
+                *([] if missing_lots == 0 else [{"label": "Lots manquants", "value": missing_lots, "tone": "info", "hint": "Traçabilité"}]),
+            ],
+            "checklist": [
+                {"label": "Contrôler les dates proches", "href": "/app/inventory"},
+                {"label": "Compléter les lots manquants", "href": "/app/products"},
+                {"label": "Revoir les stocks sensibles", "href": "/app/inventory"},
             ],
             "actions": [
                 {"label": "Revoir les fiches produits", "href": "/app/products"},
@@ -1904,6 +2081,9 @@ def rituals(request):
             "title": ritual["title"],
             "summary": f"{total_products} produit(s) suivis ce mois.",
             "items": ritual["items"],
+            "priorities": ritual.get("priorities", []),
+            "checklist": ritual.get("checklist", []),
+            "insights": insights[:3],
             "actions": ritual["actions"],
         }
     ]
@@ -2017,9 +2197,11 @@ def import_receipt(request):
 
     month = timezone.now().strftime("%Y-%m")
     lines_payload = []
+    skipped = 0
     for idx, row in enumerate(rows, start=1):
         cleaned = _normalize_receipt_row(row)
         if not cleaned["name"]:
+            skipped += 1
             continue
         try:
             qty = float(cleaned["quantity"] or 0)
@@ -2078,6 +2260,7 @@ def import_receipt(request):
             "receipt_id": receipt.id,
             "supplier": supplier_name,
             "lines": lines_payload,
+            "skipped_lines": skipped,
         },
         status=201,
     )
@@ -2171,16 +2354,32 @@ def labels_pdf(request):
     if not ids_list:
         return Response({"detail": "Sélectionnez au moins un produit."}, status=400)
 
+    count_map = _parse_label_counts(request.query_params.get("counts"))
+
     qs = Product.objects.filter(tenant=tenant, id__in=ids_list)
     if service_param and service_param != "all":
         try:
             qs = qs.filter(service_id=int(service_param))
         except (ValueError, TypeError):
             pass
+    if ids_list:
+        ordering = Case(
+            *[When(id=pid, then=pos) for pos, pid in enumerate(ids_list)],
+            output_field=IntegerField(),
+        )
+        qs = qs.annotate(_order=ordering).order_by("_order", "name")
 
     products = list(qs[:LABELS_PDF_MAX_PRODUCTS])
     if not products:
         return Response({"detail": "Aucun produit disponible."}, status=404)
+
+    label_entries = []
+    for product in products:
+        count = count_map.get(product.id, 1)
+        label_entries.extend([product] * count)
+
+    if len(label_entries) > LABELS_PDF_MAX_PRODUCTS:
+        label_entries = label_entries[:LABELS_PDF_MAX_PRODUCTS]
 
     for product in products:
         if product.barcode or product.internal_sku:
@@ -2192,10 +2391,10 @@ def labels_pdf(request):
             return Response(exc.detail, status=400)
 
     width, height = A4
-    margin_x = 1.2 * cm
-    margin_y = 1.2 * cm
+    margin_x = 0.8 * cm
+    margin_y = 0.8 * cm
     cols = 3
-    rows = 8
+    rows = 6
     label_w = (width - (margin_x * 2)) / cols
     label_h = (height - (margin_y * 2)) / rows
 
@@ -2203,51 +2402,92 @@ def labels_pdf(request):
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle("StockScan Labels")
 
+    def wrap_label_text(text, max_len=26, max_lines=2):
+        if not text:
+            return []
+        words = text.split()
+        lines = []
+        current = ""
+        for word in words:
+            next_val = f"{current} {word}".strip()
+            if len(next_val) > max_len:
+                if current:
+                    lines.append(current)
+                current = word
+            else:
+                current = next_val
+        if current:
+            lines.append(current)
+        return lines[:max_lines]
+
     def draw_label(x, y, product):
         code = product.barcode or product.internal_sku or ""
         if not code:
             return False
 
-        c.setFont("Helvetica", 7)
-        c.setFillColorRGB(0.15, 0.15, 0.15)
-        c.drawString(x + 4, y + label_h - 12, product.name[:30])
+        pad = 6
+        name = (product.name or "").strip().upper()
+        name_lines = wrap_label_text(name, max_len=28, max_lines=2)
+        c.setFillColorRGB(0.1, 0.1, 0.1)
+        c.setFont("Helvetica-Bold", 8.5)
+        y_name = y + label_h - 14
+        for line in name_lines:
+            c.drawString(x + pad, y_name, line)
+            y_name -= 10
 
-        extra_lines = []
+        price = None
         if "price" in fields:
             price = _format_price(product.selling_price if product.selling_price is not None else product.purchase_price)
-            if price:
-                extra_lines.append(f"Prix: {price}")
+        price_line_y = y + label_h - (42 if price else 30)
+        if price:
+            c.setFont("Helvetica-Bold", 18)
+            c.drawCentredString(x + label_w / 2, price_line_y, price)
+
         if "price_unit" in fields:
             per_unit, suffix = _price_per_unit(product)
             if per_unit is not None and suffix:
-                extra_lines.append(f"{suffix}: {per_unit:.2f} €")
+                c.setFont("Helvetica", 7)
+                c.drawRightString(x + label_w - pad, price_line_y + 2, f"{per_unit:.2f} {suffix}")
+
+        pack_info = _format_pack_info(product)
+        if pack_info:
+            c.setFont("Helvetica", 7)
+            c.drawRightString(x + label_w - pad, price_line_y - 10, pack_info)
+
+        extra_lines = []
+        if "unit" in fields and product.unit:
+            extra_lines.append(f"Unité: {product.unit}")
         if "tva" in fields and product.tva is not None:
             extra_lines.append(f"TVA: {product.tva}%")
         if "supplier" in fields and product.supplier:
             extra_lines.append(f"Fournisseur: {product.supplier}")
         if "brand" in fields and product.brand:
             extra_lines.append(f"Marque: {product.brand}")
-        if "unit" in fields and product.unit:
-            extra_lines.append(f"Unité: {product.unit}")
+        if "dlc" in fields:
+            label, date = _format_label_date(product)
+            if label and date:
+                extra_lines.append(f"{label}: {date}")
 
         extra_lines = extra_lines[:2]
         if extra_lines:
-            c.setFont("Helvetica", 6)
-            y_line = y + label_h - 22
+            c.setFont("Helvetica", 7)
+            y_line = price_line_y - 16
             for line in extra_lines:
-                c.drawString(x + 4, y_line, line[:36])
-                y_line -= 8
+                c.drawString(x + pad, y_line, line[:40])
+                y_line -= 9
 
-        barcode_obj = code128.Code128(code, barHeight=18, barWidth=0.6)
-        barcode_obj.drawOn(c, x + 6, y + 12)
+        barcode_obj = code128.Code128(code, barHeight=26, barWidth=0.85)
+        barcode_x = x + (label_w - barcode_obj.width) / 2
+        barcode_y = y + 16
+        barcode_obj.drawOn(c, barcode_x, barcode_y)
 
         c.setFont("Helvetica", 6)
-        c.drawString(x + 4, y + 4, f"{company_name}")
-        c.drawRightString(x + label_w - 4, y + 4, code)
+        c.drawString(x + pad, y + 4, f"{company_name}"[:30])
+        c.drawCentredString(x + label_w / 2, barcode_y - 6, code)
         return True
 
     index = 0
-    for product in products:
+    for product in label_entries:
         col = index % cols
         row = (index // cols) % rows
         x = margin_x + col * label_w
@@ -2267,14 +2507,14 @@ def labels_pdf(request):
     _log_labels_pdf_event(
         tenant=tenant,
         user=request.user,
-        params={"count": len(products), "service": service_param},
+        params={"count": len(label_entries), "service": service_param},
     )
     logger.info(
         "labels_pdf_generated",
         extra={
             "tenant_id": tenant.id,
             "service": service_param,
-            "count": len(products),
+            "count": len(label_entries),
         },
     )
 

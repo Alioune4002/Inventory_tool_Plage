@@ -25,6 +25,12 @@ export default function Rituals() {
     () => (services || []).map((s) => ({ value: s.id, label: s.name })),
     [services]
   );
+  const toneClasses = {
+    danger: "border-rose-400/40 bg-rose-500/10 text-rose-900 dark:text-rose-100",
+    warning: "border-amber-400/40 bg-amber-500/10 text-amber-900 dark:text-amber-100",
+    info: "border-blue-400/40 bg-blue-500/10 text-blue-900 dark:text-blue-100",
+    neutral: "border-white/10 bg-white/5 text-[var(--text)]",
+  };
 
   const load = async () => {
     if (!serviceId || !canUse) return;
@@ -104,16 +110,71 @@ export default function Rituals() {
                       <div className="text-lg font-semibold text-[var(--text)]">{ritual.title}</div>
                     </div>
 
-                    <div className="grid sm:grid-cols-3 gap-3">
-                      {(ritual.items || []).map((item) => (
-                        <div
-                          key={item.label}
-                          className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3"
-                        >
-                          <div className="text-xs text-[var(--muted)]">{item.label}</div>
-                          <div className="text-lg font-semibold text-[var(--text)]">{item.value ?? 0}</div>
+                    <div className="grid lg:grid-cols-[1.4fr_1fr] gap-4">
+                      <div className="space-y-3">
+                        <div className="grid sm:grid-cols-3 gap-3">
+                          {(ritual.items || []).map((item) => (
+                            <div
+                              key={item.label}
+                              className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3"
+                            >
+                              <div className="text-xs text-[var(--muted)]">{item.label}</div>
+                              <div className="text-lg font-semibold text-[var(--text)]">{item.value ?? 0}</div>
+                            </div>
+                          ))}
                         </div>
-                      ))}
+
+                        {ritual.insights?.length > 0 && (
+                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+                            <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
+                              Lecture métier
+                            </div>
+                            <ul className="mt-2 space-y-1 text-sm text-[var(--text)]">
+                              {ritual.insights.map((line) => (
+                                <li key={line}>• {line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        {ritual.priorities?.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
+                              À surveiller
+                            </div>
+                            {ritual.priorities.map((priority) => (
+                              <div
+                                key={priority.label}
+                                className={`rounded-2xl border px-3 py-2 ${toneClasses[priority.tone] || toneClasses.neutral}`}
+                              >
+                                <div className="text-xs uppercase tracking-wide opacity-80">{priority.label}</div>
+                                <div className="text-lg font-semibold">{priority.value}</div>
+                                {priority.hint && <div className="text-xs opacity-80">{priority.hint}</div>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {ritual.checklist?.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Checklist</div>
+                            <div className="space-y-2">
+                              {ritual.checklist.map((item) => (
+                                <Button
+                                  key={item.label}
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => (window.location.href = item.href)}
+                                >
+                                  {item.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="flex flex-wrap gap-2">

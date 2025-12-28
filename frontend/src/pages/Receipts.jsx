@@ -35,6 +35,7 @@ export default function Receipts() {
   const [loading, setLoading] = useState(false);
   const [lines, setLines] = useState([]);
   const [receiptId, setReceiptId] = useState(null);
+  const [skippedLines, setSkippedLines] = useState(0);
   const [decisions, setDecisions] = useState({});
   const [lineOptions, setLineOptions] = useState({});
   const [loadingLine, setLoadingLine] = useState({});
@@ -71,6 +72,7 @@ export default function Receipts() {
       });
       setReceiptId(res.data?.receipt_id || null);
       const newLines = res.data?.lines || [];
+      setSkippedLines(res.data?.skipped_lines || 0);
       setLines(newLines);
       setDrawerOpen(false);
       const initial = {};
@@ -81,7 +83,7 @@ export default function Receipts() {
         };
       });
       setDecisions(initial);
-      pushToast?.({ message: "Fichier importé. Validez le mapping.", type: "success" });
+      pushToast?.({ message: "Fichier importé. Validez les correspondances.", type: "success" });
     } catch (error) {
       pushToast?.({ message: getReceiptErrorMessage(error?.response?.data || error), type: "error" });
     } finally {
@@ -147,7 +149,7 @@ export default function Receipts() {
           <div className="text-sm text-[var(--muted)]">Réceptions</div>
           <h1 className="text-2xl font-black text-[var(--text)]">Import fournisseur</h1>
           <p className="text-sm text-[var(--muted)]">
-            Importez un CSV ou PDF structuré, puis mappez chaque ligne.
+            Importez un CSV ou PDF structuré, puis faites correspondre chaque ligne.
           </p>
         </Card>
 
@@ -180,7 +182,10 @@ export default function Receipts() {
             {lines.length > 0 && (
               <Card className="p-6 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-sm text-[var(--muted)]">Mapping ({lines.length} lignes)</div>
+                  <div className="text-sm text-[var(--muted)]">
+                    Correspondances ({lines.length} ligne{lines.length > 1 ? "s" : ""})
+                    {skippedLines ? ` · ${skippedLines} ignorée(s)` : ""}
+                  </div>
                   <Button onClick={applyReceipt} loading={applyLoading} disabled={applyLoading}>
                     Appliquer la réception
                   </Button>
@@ -237,6 +242,13 @@ export default function Receipts() {
                     );
                   })}
                 </div>
+              </Card>
+            )}
+
+            {receiptId && lines.length === 0 && (
+              <Card className="p-6 text-sm text-[var(--muted)]">
+                Aucune ligne exploitable n’a été trouvée dans ce fichier. Vérifie le format (CSV/PDF structuré) et
+                réessaie l’import.
               </Card>
             )}
 

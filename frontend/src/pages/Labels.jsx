@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import { ScanLine } from "lucide-react";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Badge from "../ui/Badge";
@@ -11,6 +12,8 @@ import { api } from "../lib/api";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { useEntitlements } from "../app/useEntitlements";
+
+const BarcodeScannerModal = React.lazy(() => import("../components/BarcodeScannerModal"));
 
 function downloadBlob({ blob, filename }) {
   const url = window.URL.createObjectURL(blob);
@@ -62,9 +65,18 @@ export default function Labels() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [lastAddedId, setLastAddedId] = useState(null);
+
+  const searchRef = useRef(0);
+  const searchTimeoutRef = useRef(null);
 
   const canUse = Boolean(entitlements?.entitlements?.labels_pdf);
   const limit = entitlements?.limits?.labels_pdf_monthly_limit ?? null;
+  const totalLabels = useMemo(
+    () => selected.reduce((sum, p) => sum + (p.count || 1), 0),
+    [selected]
+  );
 
   const serviceOptions = useMemo(() => {
     const base = (services || []).map((s) => ({ value: s.id, label: s.name }));
@@ -76,37 +88,91 @@ export default function Labels() {
     setFields((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
   };
 
-  const searchProducts = async () => {
-    if (!query.trim()) return;
+  const searchProducts = async (value) => {
+    const searchValue = (value ?? query).trim();
+    if (!searchValue) {
+      setResults([]);
+      return;
+    }
+    const seq = ++searchRef.current;
     setSearchLoading(true);
     try {
       if (serviceId === "all") {
         const responses = await Promise.all(
           (services || []).map((s) =>
-            api.get(`/api/products/search/?service=${s.id}&q=${encodeURIComponent(query)}`)
+            api.get(`/api/products/search/?service=${s.id}&q=${encodeURIComponent(searchValue)}`)
           )
         );
+        if (seq !== searchRef.current) return;
         const merged = responses.flatMap((res) => res.data || []);
         setResults(merged);
       } else {
-        const res = await api.get(`/api/products/search/?service=${serviceId}&q=${encodeURIComponent(query)}`);
+        const res = await api.get(
+          `/api/products/search/?service=${serviceId}&q=${encodeURIComponent(searchValue)}`
+        );
+        if (seq !== searchRef.current) return;
         setResults(res.data || []);
       }
     } catch {
+      if (seq !== searchRef.current) return;
       setResults([]);
       pushToast?.({ message: "Recherche impossible.", type: "error" });
     } finally {
-      setSearchLoading(false);
+      if (seq === searchRef.current) {
+        setSearchLoading(false);
+      }
     }
   };
 
+  useEffect(() => {
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    searchTimeoutRef.current = window.setTimeout(() => {
+      searchProducts(trimmed);
+    }, 300);
+    return () => clearTimeout(searchTimeoutRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, serviceId]);
+
+  useEffect(() => {
+    if (!lastAddedId) return;
+    const timer = window.setTimeout(() => setLastAddedId(null), 1200);
+    return () => window.clearTimeout(timer);
+  }, [lastAddedId]);
+
   const addSelected = (product) => {
-    if (selected.some((p) => p.id === product.id)) return;
-    setSelected((prev) => [...prev, product]);
+    setSelected((prev) => {
+      const existing = prev.find((p) => p.id === product.id);
+      if (existing) {
+        return prev.map((p) =>
+          p.id === product.id ? { ...p, count: Math.min((p.count || 1) + 1, 50) } : p
+        );
+      }
+      return [...prev, { ...product, count: 1 }];
+    });
+    setLastAddedId(product.id);
+    pushToast?.({ message: `Ajouté : ${product.name}`, type: "success" });
   };
 
   const removeSelected = (id) => {
     setSelected((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const updateCount = (id, nextCount) => {
+    const parsed = Number(nextCount);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed <= 0) {
+      removeSelected(id);
+      return;
+    }
+    setSelected((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, count: Math.min(parsed, 50) } : p))
+    );
   };
 
   const generateLabels = async () => {
@@ -122,6 +188,8 @@ export default function Labels() {
       params.set("service", serviceId || "");
       params.set("company_name", companyName || "");
       if (fields.length) params.set("fields", fields.join(","));
+      const counts = selected.map((p) => `${p.id}:${p.count || 1}`).join(",");
+      params.set("counts", counts);
 
       const res = await api.get(`/api/labels/pdf/?${params.toString()}`, {
         responseType: "blob",
@@ -173,14 +241,19 @@ export default function Labels() {
             <Card className="p-6 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[var(--text)]">Sélection actuelle</div>
-                {selected.length > 0 && <Badge variant="info">{selected.length} sélectionné(s)</Badge>}
+                {selected.length > 0 && (
+                  <Badge variant="info">
+                    {selected.length} produit{selected.length > 1 ? "s" : ""} ·{" "}
+                    {totalLabels} étiquette{totalLabels > 1 ? "s" : ""}
+                  </Badge>
+                )}
               </div>
               {selected.length === 0 ? (
                 <div className="text-sm text-[var(--muted)]">Aucun produit sélectionné.</div>
               ) : (
                 <div className="text-sm text-[var(--muted)]">
-                  {selected.length} produit{selected.length > 1 ? "s" : ""} prêt
-                  {selected.length > 1 ? "s" : ""} pour le PDF.
+                  {totalLabels} étiquette{totalLabels > 1 ? "s" : ""} prête
+                  {totalLabels > 1 ? "s" : ""} pour le PDF.
                 </div>
               )}
             </Card>
@@ -217,10 +290,25 @@ export default function Labels() {
                       placeholder="Nom, code-barres, SKU…"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
+                      rightSlot={
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
+                          onClick={() => setScannerOpen(true)}
+                          title="Scanner un code-barres"
+                          aria-label="Scanner un code-barres"
+                        >
+                          <ScanLine className="h-3.5 w-3.5" />
+                          Scanner
+                        </button>
+                      }
                     />
-                    <Button onClick={searchProducts} loading={searchLoading}>
+                    <Button onClick={() => searchProducts()} loading={searchLoading}>
                       Rechercher
                     </Button>
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    Les suggestions apparaissent dès que vous tapez.
                   </div>
                 </div>
 
@@ -237,12 +325,20 @@ export default function Labels() {
                             {p.barcode || p.internal_sku || "—"} · {p.inventory_month}
                           </div>
                         </div>
-                        <Button size="sm" variant="secondary" onClick={() => addSelected(p)}>
-                          Ajouter
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => addSelected(p)}
+                          disabled={selected.some((item) => item.id === p.id)}
+                        >
+                          {selected.some((item) => item.id === p.id) ? "Ajouté" : "Ajouter"}
                         </Button>
                       </div>
                     ))}
                   </div>
+                )}
+                {query.trim() && !searchLoading && results.length === 0 && (
+                  <div className="text-sm text-[var(--muted)]">Aucun résultat pour cette recherche.</div>
                 )}
 
                 <div className="space-y-2">
@@ -254,12 +350,31 @@ export default function Labels() {
                       {selected.map((p) => (
                         <div
                           key={p.id}
-                          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                          className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 ${
+                            lastAddedId === p.id ? "ring-2 ring-emerald-400/40" : ""
+                          }`}
                         >
                           <div className="text-sm text-[var(--text)]">{p.name}</div>
-                          <Button size="sm" variant="secondary" onClick={() => removeSelected(p.id)}>
-                            Retirer
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => updateCount(p.id, (p.count || 1) - 1)}>
+                              −
+                            </Button>
+                            <input
+                              type="number"
+                              min="1"
+                              max="50"
+                              value={p.count || 1}
+                              onChange={(e) => updateCount(p.id, Number(e.target.value || 1))}
+                              className="w-14 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-center text-sm text-[var(--text)]"
+                              aria-label={`Nombre d'étiquettes pour ${p.name}`}
+                            />
+                            <Button size="sm" variant="secondary" onClick={() => updateCount(p.id, (p.count || 1) + 1)}>
+                              +
+                            </Button>
+                            <Button size="sm" variant="secondary" onClick={() => removeSelected(p.id)}>
+                              Retirer
+                            </Button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -288,6 +403,7 @@ export default function Labels() {
                       { key: "supplier", label: "Fournisseur" },
                       { key: "brand", label: "Marque" },
                       { key: "unit", label: "Unité" },
+                      { key: "dlc", label: "DLC / DDM" },
                     ].map((field) => (
                       <label
                         key={field.key}
@@ -309,6 +425,18 @@ export default function Labels() {
           </>
         )}
       </div>
+
+      <Suspense fallback={null}>
+        <BarcodeScannerModal
+          open={scannerOpen}
+          onClose={() => setScannerOpen(false)}
+          onDetected={(code) => {
+            setScannerOpen(false);
+            setQuery(code);
+            searchProducts(code);
+          }}
+        />
+      </Suspense>
     </PageTransition>
   );
 }

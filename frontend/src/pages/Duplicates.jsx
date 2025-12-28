@@ -137,6 +137,19 @@ export default function Duplicates() {
           </Card>
         ) : (
           <>
+            <Card className="p-6 space-y-2">
+              <div className="text-sm font-semibold text-[var(--text)]">À quoi ça sert ?</div>
+              <p className="text-sm text-[var(--muted)]">
+                StockScan repère les doublons probables pour garder un catalogue propre.
+                Les suggestions sont graduées (code-barres/SKU fiables, noms proches à confirmer).
+              </p>
+              <ul className="text-xs text-[var(--muted)] space-y-1">
+                <li>1) Choisis un produit maître</li>
+                <li>2) Coche les doublons à fusionner</li>
+                <li>3) La fusion déplace l’historique et archive les doublons</li>
+              </ul>
+            </Card>
+
             <Card className="p-6 space-y-4">
               <div className="grid md:grid-cols-3 gap-3">
                 <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
@@ -182,6 +195,12 @@ export default function Duplicates() {
                                 : "Doublon de code-barres"}
                             </div>
                             <div className="text-xs text-[var(--muted)] break-anywhere">{group.key}</div>
+                            {group.reason && (
+                              <div className="text-xs text-[var(--muted)]">
+                                {group.reason}
+                                {group.confidence ? ` · Confiance ${(group.confidence * 100).toFixed(0)}%` : ""}
+                              </div>
+                            )}
                           </div>
                           <Button size="sm" onClick={() => mergeGroup(index)} disabled={loading}>
                             Fusionner
