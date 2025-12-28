@@ -2,6 +2,7 @@
 import React from "react";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
+import { captureException } from "../lib/monitoring";
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -14,7 +15,7 @@ export default class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, info) {
-   
+    captureException(error, { info });
     console.error("UI crash:", error, info);
   }
 

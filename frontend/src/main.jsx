@@ -7,6 +7,9 @@ import AppShell from "./app/AppShell.jsx";
 import { AuthProvider } from "./app/AuthProvider.jsx";
 import { HelmetProvider } from "react-helmet-async";
 import ErrorBoundary from "./app/ErrorBoundary.jsx";
+import { initMonitoring } from "./lib/monitoring";
+
+initMonitoring();
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

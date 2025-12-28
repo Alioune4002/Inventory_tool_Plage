@@ -2062,6 +2062,16 @@ def import_receipt(request):
         user=request.user,
         params={"lines": len(lines_payload), "supplier": supplier_name, "source": source},
     )
+    logger.info(
+        "receipts_imported",
+        extra={
+            "tenant_id": tenant.id,
+            "service_id": getattr(service, "id", None),
+            "lines": len(lines_payload),
+            "supplier": supplier_name,
+            "source": source,
+        },
+    )
 
     return Response(
         {
@@ -2130,6 +2140,15 @@ def apply_receipt(request, receipt_id):
 
         receipt.status = "APPLIED"
         receipt.save(update_fields=["status"])
+    logger.info(
+        "receipt_applied",
+        extra={
+            "tenant_id": tenant.id,
+            "receipt_id": receipt.id,
+            "service_id": getattr(receipt.service, "id", None),
+            "applied": applied,
+        },
+    )
 
     return Response({"detail": "Réception appliquée.", "applied": applied})
 
@@ -2249,6 +2268,14 @@ def labels_pdf(request):
         tenant=tenant,
         user=request.user,
         params={"count": len(products), "service": service_param},
+    )
+    logger.info(
+        "labels_pdf_generated",
+        extra={
+            "tenant_id": tenant.id,
+            "service": service_param,
+            "count": len(products),
+        },
     )
 
     resp = Response(pdf_bytes, content_type="application/pdf")

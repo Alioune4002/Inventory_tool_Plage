@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
+import Badge from "../ui/Badge";
 import Button from "../ui/Button";
 import Drawer from "../ui/Drawer";
 import Input from "../ui/Input";
@@ -170,7 +171,10 @@ export default function Labels() {
             </Card>
 
             <Card className="p-6 space-y-2">
-              <div className="text-sm font-semibold text-[var(--text)]">Sélection actuelle</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-[var(--text)]">Sélection actuelle</div>
+                {selected.length > 0 && <Badge variant="info">{selected.length} sélectionné(s)</Badge>}
+              </div>
               {selected.length === 0 ? (
                 <div className="text-sm text-[var(--muted)]">Aucun produit sélectionné.</div>
               ) : (

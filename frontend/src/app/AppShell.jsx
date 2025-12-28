@@ -1,26 +1,13 @@
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Boxes,
-  Package,
-  Tag,
-  Download,
-  Settings,
-  HelpCircle,
-  MinusCircle,
-  Copy,
-  ListChecks,
-  FileUp,
-  QrCode,
-} from "lucide-react";
 import AppRoutes from "./routes";
 import { useAuth } from "./AuthProvider";
 import { ToastProvider, useToast } from "./ToastContext";
 import useEntitlements from "./useEntitlements";
 import ErrorBoundary from "./ErrorBoundary";
 import { formatApiError } from "../lib/errorUtils";
+import { captureException } from "../lib/monitoring";
 
 const Sidebar = React.lazy(() => import("../components/Sidebar"));
 const Topbar = React.lazy(() => import("../components/Topbar"));
@@ -45,6 +32,7 @@ function UnhandledRejectionToaster() {
   useEffect(() => {
     const onUnhandled = (event) => {
       const msg = formatApiError(event?.reason, { context: "generic" });
+      captureException(event?.reason || new Error("Unhandled rejection"));
       pushToast?.({ message: msg, type: "error" });
     };
     window.addEventListener("unhandledrejection", onUnhandled);
@@ -60,24 +48,6 @@ export default function AppShell() {
   const { data: entitlements } = useEntitlements();
   const [theme, setTheme] = useState(getInitialTheme);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-
-  const navItems = useMemo(
-    () => [
-      { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, tour: "tour-dashboard" },
-      { to: "/app/inventory", label: "Inventaire", icon: Boxes, tour: "tour-inventory" },
-      { to: "/app/products", label: "Produits", icon: Package, tour: "tour-products" },
-      { to: "/app/categories", label: "Catégories", icon: Tag },
-      { to: "/app/losses", label: "Pertes", icon: MinusCircle, tour: "tour-losses" },
-      { to: "/app/exports", label: "Exports", icon: Download, tour: "tour-exports" },
-      { to: "/app/duplicates", label: "Doublons", icon: Copy },
-      { to: "/app/rituals", label: "Rituels", icon: ListChecks },
-      { to: "/app/receipts", label: "Réceptions", icon: FileUp },
-      { to: "/app/labels", label: "Étiquettes", icon: QrCode },
-      { to: "/app/settings", label: "Settings", icon: Settings, tour: "tour-settings" },
-      { to: "/app/support", label: "Support", icon: HelpCircle },
-    ],
-    []
-  );
 
   const isAppSection = location.pathname.startsWith("/app");
 
@@ -147,7 +117,11 @@ export default function AppShell() {
           <Toasts />
         </Suspense>
         <Suspense fallback={null}>
-          <MobileNav open={mobileNavOpen} onClose={() => setMobileNavOpen(false)} items={navItems} />
+          <MobileNav
+            open={mobileNavOpen}
+            onClose={() => setMobileNavOpen(false)}
+            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+          />
         </Suspense>
       </div>
     </ToastProvider>

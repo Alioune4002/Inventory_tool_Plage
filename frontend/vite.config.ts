@@ -16,6 +16,7 @@ export default defineConfig({
           if (id.includes("react-helmet-async")) return "seo";
           if (id.includes("lucide-react")) return "icons";
           if (id.includes("@tanstack/react-query")) return "query";
+          if (id.includes("@sentry")) return "sentry";
           if (id.includes("html5-qrcode") || id.includes("@zxing")) return "scanner";
           return "vendor";
         },
@@ -25,5 +26,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/setupTests.js',
+    include: ["src/**/*.test.{js,jsx,ts,tsx}"],
+    exclude: ["e2e/**", "node_modules/**"],
   },
 })

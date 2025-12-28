@@ -1,0 +1,29 @@
+import {
+  LayoutDashboard,
+  Boxes,
+  Package,
+  Tag,
+  Download,
+  Settings,
+  HelpCircle,
+  MinusCircle,
+  Copy,
+  ListChecks,
+  FileUp,
+  QrCode,
+} from "lucide-react";
+
+export const navItems = [
+  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, tour: "tour-dashboard" },
+  { to: "/app/inventory", label: "Inventaire", icon: Boxes, tour: "tour-inventory" },
+  { to: "/app/products", label: "Produits", icon: Package, tour: "tour-products" },
+  { to: "/app/categories", label: "Catégories", icon: Tag },
+  { to: "/app/losses", label: "Pertes", icon: MinusCircle, tour: "tour-losses" },
+  { to: "/app/exports", label: "Exports", icon: Download, tour: "tour-exports" },
+  { to: "/app/duplicates", label: "Doublons", icon: Copy },
+  { to: "/app/rituals", label: "Rituels", icon: ListChecks },
+  { to: "/app/receipts", label: "Réceptions", icon: FileUp },
+  { to: "/app/labels", label: "Étiquettes", icon: QrCode },
+  { to: "/app/settings", label: "Settings", icon: Settings, tour: "tour-settings" },
+  { to: "/app/support", label: "Support", icon: HelpCircle },
+];

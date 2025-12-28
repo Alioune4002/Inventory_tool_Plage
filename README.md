@@ -42,6 +42,7 @@ Backend (dans votre shell, voir `.env.example`) :
 
 Frontend (`frontend/.env`) :
 - `VITE_API_BASE_URL=http://localhost:8000` pour pointer sur l’API locale.
+- `VITE_SENTRY_DSN` (optionnel) pour activer la remontée d’erreurs front.
 
 ## Setup rapide (dev)
 1. Cloner  
@@ -65,7 +66,7 @@ cd ../frontend
 npm install
 npm run dev
 ```
-Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:8000` en dev et `https://inventory-tool-plage.onrender.com` en prod.
+Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:8000` en dev et `https://inventory-tool-plage.onrender.com` en prod. `VITE_SENTRY_DSN` active l’observabilité front (optionnel).
 
 ## Endpoints principaux (extraits)
 - Auth :  
@@ -133,7 +134,7 @@ Le front pointe sur `VITE_API_BASE_URL` si défini, sinon sur `http://localhost:
 - Invitations : `INVITATIONS_SEND_EMAILS` (true/false) pour activer l’envoi d’emails via SendGrid. Si vous la passez à `false`, SendGrid n’est pas requis et les invitations peuvent rester manuelles.
 - Email : `SENDGRID_API_KEY`, `SENDGRID_FROM_EMAIL` (optionnel si les invitations sont désactivées). Le fallback logge un warning si la clé est absente.
 - Assistant IA : `AI_ENABLED=true`, `OPENAI_API_KEY`, `AI_MODEL`, `AI_THROTTLE_RATE`.
-- Frontend : Vercel/Netlify (build Vite). `VITE_API_BASE_URL` doit pointer vers `https://inventory-tool-plage.onrender.com`, `VITE_DEMO_MODE=false` en prod (pour désactiver AutoDemo) et `VITE_STRIPE_ENABLED=true/false` pour activer les boutons checkout. Le script `scripts/validate.sh` vérifie la présence des env critiques et ne bloque pas si `npm test` n’existe pas.
+- Frontend : Vercel/Netlify (build Vite). `VITE_API_BASE_URL` doit pointer vers `https://inventory-tool-plage.onrender.com`, `VITE_DEMO_MODE=false` en prod (pour désactiver AutoDemo), `VITE_STRIPE_ENABLED=true/false` pour activer les boutons checkout, et `VITE_SENTRY_DSN` pour activer Sentry (optionnel). Le script `scripts/validate.sh` vérifie la présence des env critiques et ne bloque pas si `npm test` n’existe pas.
 
 Consultez `DEPLOYMENT.md` pour le runbook complet, les smoke tests curl (Stripe, invitations, entitlements, export, IA) et les alertes à surveiller en production.
 Consultez `RUNBOOK.md` pour un guide minimal (dev/prod, commandes, smoke tests).

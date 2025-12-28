@@ -26,6 +26,7 @@ npm run dev
 - OPENAI_API_KEY, AI_ENABLED=true (if AI assistant enabled).
 - AI_MODEL_LIGHT (optionnel), AI_MODEL_FULL (optionnel) pour ajuster les modeles IA.
 - VITE_API_BASE_URL on the frontend.
+- VITE_SENTRY_DSN (optionnel) pour la remontée d’erreurs front.
 
 ## Smoke tests (examples)
 ```bash
@@ -49,6 +50,23 @@ curl -sS -X GET "https://<api-host>/api/catalog/pdf/?service=all&fields=barcode,
 curl -sS -X GET "https://<api-host>/api/labels/pdf/?service=all&ids=1,2&fields=price,unit" \
   -H "Authorization: Bearer <token>" -o /tmp/labels.pdf
 ```
+Automated smoke (pytest):
+```bash
+cd backend
+pytest tests/test_smoke_flows.py -q
+```
+
+## E2E UI (Playwright)
+Pré-requis:
+- `npm install` dans `frontend`
+- `npx playwright install`
+- Variables d'env: `E2E_USER`, `E2E_PASS` (et `E2E_BASE_URL` si vous ciblez un déploiement).
+
+Run:
+```bash
+cd frontend
+E2E_USER="demo" E2E_PASS="demo123" npm run test:e2e
+```
 
 ## Metrics (/metrics)
 - Endpoint Prometheus : `GET /metrics/`
@@ -60,6 +78,22 @@ Exemple:
 ```bash
 curl -sS https://<api-host>/metrics/ | head -n 20
 ```
+
+## Observabilite front (Sentry)
+- Activer `VITE_SENTRY_DSN` sur le frontend.
+- Configurer une alerte Sentry (erreurs >= 5 / 10 min) + notification email/Slack.
+
+## QA mobile (Réceptions / Étiquettes)
+1. Réceptions
+   - Ouvrir le drawer, choisir service + fichier CSV/PDF, importer.
+   - Vérifier que le mapping s’affiche et que “Appliquer la réception” fonctionne.
+2. Étiquettes
+   - Ouvrir le drawer, rechercher un produit, l’ajouter à la sélection.
+   - Générer le PDF et valider le téléchargement.
+3. Accessibilité
+   - Le focus reste dans le drawer et la touche Échap ferme le panneau.
+
+Checklist complète: `QA_MOBILE.md`
 
 ## Emails en doublon (strategie safe)
 Important: la migration `0017_unique_email_index` ne cree PAS l'index si des doublons (case-insensitive) existent. Elle logue un warning et fait un no-op.

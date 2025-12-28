@@ -1,5 +1,5 @@
 // frontend/src/pages/Inventory.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
@@ -12,7 +12,7 @@ import Select from "../ui/Select";
 import Drawer from "../ui/Drawer";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
-import BarcodeScannerModal from "../components/BarcodeScannerModal";
+const BarcodeScannerModal = React.lazy(() => import("../components/BarcodeScannerModal"));
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 import { useEntitlements } from "../app/useEntitlements";
@@ -823,7 +823,15 @@ export default function Inventory() {
         <meta name="description" content={ux.inventoryIntro} />
       </Helmet>
 
-      <BarcodeScannerModal open={scannerOpen} onClose={() => setScannerOpen(false)} onDetected={onScannerDetected} />
+      {scannerOpen && (
+        <Suspense fallback={null}>
+          <BarcodeScannerModal
+            open={scannerOpen}
+            onClose={() => setScannerOpen(false)}
+            onDetected={onScannerDetected}
+          />
+        </Suspense>
+      )}
 
       <div className="grid gap-4 min-w-0">
         <Card className="p-6 space-y-4 min-w-0">

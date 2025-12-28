@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { X, Camera } from "lucide-react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
 
 export default function BarcodeScannerModal({ open, onClose, onDetected }) {
   const videoRef = useRef(null);
@@ -45,7 +44,8 @@ export default function BarcodeScannerModal({ open, onClose, onDetected }) {
       setStatus("starting");
 
       try {
-        const reader = new BrowserMultiFormatReader();
+        const mod = await import("@zxing/browser");
+        const reader = new mod.BrowserMultiFormatReader();
 
         const constraints = {
           audio: false,

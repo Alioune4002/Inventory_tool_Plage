@@ -2,6 +2,7 @@
 import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { Moon, Sun } from "lucide-react";
+import { navItems } from "../app/navItems";
 import Button from "../ui/Button";
 
 function isLightTheme() {
@@ -9,8 +10,9 @@ function isLightTheme() {
   return t === "light";
 }
 
-export default function MobileNav({ open, onClose, items, onToggleTheme }) {
+export default function MobileNav({ open, onClose, onToggleTheme }) {
   const light = useMemo(() => isLightTheme(), [document?.documentElement?.getAttribute?.("data-theme")]);
+  const items = navItems;
 
   if (!open) return null;
 

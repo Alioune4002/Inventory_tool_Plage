@@ -1,47 +1,10 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Boxes,
-  Package,
-  Tag,
-  Download,
-  Settings,
-  HelpCircle,
-  MinusCircle,
-  Copy,
-  ListChecks,
-  FileUp,
-  QrCode,
-} from "lucide-react";
 import { cn } from "../lib/cn";
 import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
 import { getWording } from "../lib/labels";
-
-const items = [
-  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/app/inventory", label: "Inventaire", icon: Boxes },
-  { to: "/app/products", label: "Produits", icon: Package },
-  { to: "/app/categories", label: "Catégories", icon: Tag },
-  { to: "/app/losses", label: "Pertes", icon: MinusCircle },
-  { to: "/app/exports", label: "Exports", icon: Download },
-  { to: "/app/duplicates", label: "Doublons", icon: Copy },
-  { to: "/app/rituals", label: "Rituels", icon: ListChecks },
-  { to: "/app/receipts", label: "Réceptions", icon: FileUp },
-  { to: "/app/labels", label: "Étiquettes", icon: QrCode },
-  { to: "/app/settings", label: "Settings", icon: Settings },
-  { to: "/app/support", label: "Support", icon: HelpCircle },
-];
-
-const tourTargets = {
-  "/app/dashboard": "tour-dashboard",
-  "/app/inventory": "tour-inventory",
-  "/app/products": "tour-products",
-  "/app/losses": "tour-losses",
-  "/app/exports": "tour-exports",
-  "/app/settings": "tour-settings",
-};
+import { navItems } from "../app/navItems";
 
 export default function Sidebar() {
   const { tenant, services, serviceId, serviceProfile } = useAuth();
@@ -51,6 +14,8 @@ export default function Sidebar() {
   const serviceType = serviceProfile?.service_type || currentService?.service_type;
   const wording = getWording(serviceType, tenantDomain);
   const identifierLabel = wording?.identifierLabel || "code-barres";
+
+  const items = navItems;
 
   return (
     <aside className="hidden lg:flex h-full w-72 flex-col p-3 space-y-3 text-[var(--text)] min-w-0-safe">
@@ -84,7 +49,7 @@ export default function Sidebar() {
               <NavLink
                 key={it.to}
                 to={it.to}
-                data-tour={tourTargets[it.to]}
+                data-tour={it.tour}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition min-w-0-safe",

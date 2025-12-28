@@ -1,8 +1,12 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export default function Drawer({ open, onClose, title, children, footer, className = "" }) {
+  const panelRef = useRef(null);
+  const previousFocus = useRef(null);
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event) => {
@@ -11,6 +15,18 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
+    previousFocus.current = document.activeElement;
+    const focusTarget = panelRef.current?.querySelector(
+      "button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])"
+    );
+    if (focusTarget) focusTarget.focus();
+    return () => {
+      previousFocus.current?.focus?.();
+    };
+  }, [open]);
 
   return (
     <div
@@ -29,6 +45,7 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
       />
 
       <div
+        ref={panelRef}
         className={cn(
           "absolute inset-x-0 bottom-0 max-h-[85vh] rounded-t-3xl bg-[var(--surface)] shadow-soft border border-[var(--border)]",
           "sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:max-h-full sm:w-[520px] sm:rounded-l-3xl sm:rounded-tr-none",
@@ -38,10 +55,14 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
         )}
         role="dialog"
         aria-modal="true"
-        aria-label={title || "Panneau"}
+        aria-label={title ? undefined : "Panneau"}
+        aria-labelledby={title ? titleId : undefined}
+        tabIndex={-1}
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-          <div className="text-base font-semibold text-[var(--text)]">{title}</div>
+          <div id={titleId} className="text-base font-semibold text-[var(--text)]">
+            {title}
+          </div>
           <button
             type="button"
             onClick={onClose}
