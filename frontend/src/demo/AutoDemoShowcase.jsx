@@ -47,6 +47,15 @@ const isLowEndDevice = () => {
   return (cores && cores <= 4) || (memory && memory <= 4);
 };
 
+const isIOSDevice = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const isIOS = /iP(ad|hone|od)/.test(ua);
+  const isIPadOS = platform === "MacIntel" && navigator.maxTouchPoints > 1;
+  return isIOS || isIPadOS;
+};
+
 const StatChip = ({ label, value }) => (
   <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
     <div className="text-[11px] text-white/50">{label}</div>
@@ -173,7 +182,8 @@ export default function AutoDemoShowcase() {
   const containerRef = useRef(null);
   const isInView = useInView(containerRef, { margin: "-35% 0px -35% 0px" });
   const lowEnd = isLowEndDevice();
-  const canAnimate = !reduceMotion && !lowEnd;
+  const iOS = isIOSDevice();
+  const canAnimate = !reduceMotion && !lowEnd && !iOS;
 
   const activeScene = useMemo(() => SCENES[active] || SCENES[0], [active]);
 
@@ -189,6 +199,7 @@ export default function AutoDemoShowcase() {
     <section
       ref={containerRef}
       className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6 text-white shadow-[0_24px_60px_rgba(15,23,42,0.45)]"
+      style={{ touchAction: "pan-y" }}
     >
       <div className="pointer-events-none absolute inset-0 bg-grid opacity-10" />
 
@@ -230,13 +241,13 @@ export default function AutoDemoShowcase() {
           </div>
         </div>
 
-        <div className="relative">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-center justify-between text-xs text-white/60">
-              <span>StockScan · Démo</span>
-              <span>Données fictives</span>
-            </div>
-            {canAnimate ? (
+          <div className="relative">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-center justify-between text-xs text-white/60">
+                <span>StockScan · Démo</span>
+                <span>Données fictives</span>
+              </div>
+              {canAnimate ? (
               <AnimatePresence mode="wait">
                 <motion.div
                   key={activeScene.id}
@@ -256,13 +267,17 @@ export default function AutoDemoShowcase() {
             )}
           </div>
 
-          <div className="hidden lg:block absolute -right-4 top-10 w-40">
-            <PhonePreview sceneId={activeScene.id} />
-          </div>
+          {!iOS && !lowEnd && (
+            <div className="hidden lg:block absolute -right-4 top-10 w-40">
+              <PhonePreview sceneId={activeScene.id} />
+            </div>
+          )}
 
-          <div className="mt-4 lg:hidden">
-            <PhonePreview sceneId={activeScene.id} />
-          </div>
+          {!iOS && !lowEnd && (
+            <div className="mt-4 lg:hidden">
+              <PhonePreview sceneId={activeScene.id} />
+            </div>
+          )}
         </div>
       </div>
     </section>
