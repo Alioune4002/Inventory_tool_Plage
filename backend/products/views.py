@@ -3,6 +3,7 @@ from datetime import timedelta
 from rest_framework import status, viewsets, permissions, exceptions
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
+from rest_framework.renderers import BaseRenderer
 
 from django.http import JsonResponse
 import openpyxl
@@ -273,6 +274,28 @@ class NumberedCanvas(canvas.Canvas):
         self.setFont("Helvetica", 9)
         self.setFillColorRGB(0.45, 0.45, 0.45)
         self.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"Page {self._pageNumber} / {page_count}")
+
+
+class PDFRenderer(BaseRenderer):
+    media_type = "application/pdf"
+    format = "pdf"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        if data is None:
+            return b""
+        response = renderer_context.get("response") if renderer_context else None
+        if response is not None and response.status_code >= 400:
+            response["Content-Type"] = "application/json"
+            return json.dumps(data).encode("utf-8")
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, str):
+            return data.encode()
+        try:
+            return bytes(data)
+        except TypeError:
+            return json.dumps(data).encode("utf-8")
 
 
 def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, company_address, fields, products, truncated, include_service):
@@ -1315,6 +1338,7 @@ def export_advanced(request):
 
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated, ManagerPermission])
+@renderer_classes([PDFRenderer])
 def catalog_pdf(request):
     tenant = get_tenant_for_request(request)
     check_entitlement(tenant, "pdf_catalog")
