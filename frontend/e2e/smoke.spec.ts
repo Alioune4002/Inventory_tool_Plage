@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import path from "path";
+import process from "node:process";
 
 const hasCreds = Boolean(process.env.E2E_USER && process.env.E2E_PASS);
 test.skip(!hasCreds, "Définissez E2E_USER et E2E_PASS pour exécuter les tests E2E.");
