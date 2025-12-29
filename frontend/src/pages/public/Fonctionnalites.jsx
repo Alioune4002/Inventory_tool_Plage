@@ -1,4 +1,5 @@
-// frontend/src/pages/public/Fonctionnalites.jsx
+
+
 import React from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -66,8 +67,9 @@ export default function Fonctionnalites() {
       </Helmet>
 
       {/* Fond plein écran (évite les “bandes” latérales) */}
-      <main className="w-full overflow-x-hidden bg-slate-950 text-white">
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-10 py-12 space-y-10">
+      <main className="w-full bg-slate-950 text-white">
+        {/* Container plus large + paddings latéraux réduits */}
+        <div className="mx-auto w-full max-w-[1480px] px-2 sm:px-3 lg:px-4 py-12 space-y-10">
           <header className="space-y-4">
             <p className="text-sm font-semibold text-blue-300 uppercase tracking-wide">Fonctionnalités</p>
 
@@ -81,10 +83,10 @@ export default function Fonctionnalites() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-1">
-              <Button as={Link} to="/metiers" className="w-full sm:w-auto">
+              <Button as={Link} to="/metiers" className="w-full sm:w-auto rounded-full">
                 Choisir mon métier
               </Button>
-              <Button as={Link} to="/register" variant="secondary" className="w-full sm:w-auto">
+              <Button as={Link} to="/register" variant="secondary" className="w-full sm:w-auto rounded-full">
                 Commencer gratuitement
               </Button>
             </div>
@@ -93,7 +95,11 @@ export default function Fonctionnalites() {
           {/* Problème -> Solution -> Bénéfice */}
           <section className="grid md:grid-cols-2 gap-4">
             {PROBLEM_SOLUTION.map((b) => (
-              <Card key={b.problem} className="p-6 border-white/10 bg-white/5 space-y-3" hover>
+              <Card
+                key={b.problem}
+                className="p-6 border-white/10 bg-white/5 space-y-3 rounded-3xl"
+                hover
+              >
                 <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Problème</div>
                 <div className="text-lg font-semibold text-white">{b.problem}</div>
 
@@ -127,7 +133,11 @@ export default function Fonctionnalites() {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {MODULES.map((mod) => (
-                <Card key={mod.id} className="p-5 border-white/10 bg-white/5 space-y-2" hover>
+                <Card
+                  key={mod.id}
+                  className="p-5 border-white/10 bg-white/5 space-y-2 rounded-3xl"
+                  hover
+                >
                   <div className="text-xs uppercase tracking-[0.3em] text-slate-400">Option</div>
                   <div className="text-lg font-semibold text-white">{mod.name}</div>
                   <p className="text-sm text-slate-200">{mod.description}</p>
@@ -137,20 +147,20 @@ export default function Fonctionnalites() {
           </section>
 
           {/* CTA final */}
-          <section className="rounded-3xl bg-blue-600 text-white p-8 space-y-3 shadow-[0_30px_70px_rgba(37,99,235,0.35)]">
+          <section className="rounded-[32px] bg-blue-600 text-white p-8 space-y-3 shadow-[0_30px_70px_rgba(37,99,235,0.35)]">
             <h3 className="text-2xl font-black">Vous voulez voir si StockScan colle à votre commerce ?</h3>
             <p className="text-blue-100 text-sm">
               Choisissez votre métier, puis testez la logique “base produits + inventaire” en quelques minutes.
             </p>
             <div className="flex flex-wrap gap-3 pt-2">
-              <Button as={Link} to="/metiers" className="bg-white text-slate-900">
+              <Button as={Link} to="/metiers" className="bg-white text-slate-900 rounded-full">
                 Explorer les métiers
               </Button>
               <Button
                 as={Link}
                 to="/register"
                 variant="secondary"
-                className="bg-white/10 text-white border-white/30"
+                className="bg-white/10 text-white border-white/30 rounded-full"
               >
                 Commencer gratuitement
               </Button>

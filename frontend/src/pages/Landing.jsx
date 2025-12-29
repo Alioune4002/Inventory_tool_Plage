@@ -1,3 +1,4 @@
+
 import React from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -93,10 +94,13 @@ export default function Landing() {
         <script type="application/ld+json">{JSON.stringify(jsonLd)}</script>
       </Helmet>
 
-      {/* Fond plein écran (évite les “bandes” latérales) */}
-      <main className="w-full overflow-x-hidden bg-slate-950 text-white">
-        {/* Container (large) */}
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-10 pb-16 pt-10 space-y-14">
+      {/* IMPORTANT:
+          - On évite overflow-x-hidden sur le <main> si ça “lock” parfois le scroll via un parent (Safari iOS + drawers/modals).
+          - On laisse le scroll au document et on corrige l’horizontal “au cas par cas” via wrappers internes.
+      */}
+      <main className="w-full bg-slate-950 text-white">
+        {/* Container plus large + paddings latéraux réduits au max */}
+        <div className="mx-auto w-full max-w-[1480px] px-2 sm:px-3 lg:px-4 pb-16 pt-10 space-y-14">
           {/* HERO */}
           <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-8 items-center">
             <div className="space-y-5">
@@ -112,8 +116,8 @@ export default function Landing() {
               <p className="text-lg text-slate-200">
                 StockScan vous aide à{" "}
                 <span className="font-semibold text-white">garder une base produits propre</span> et à{" "}
-                <span className="font-semibold text-white">réaliser vos inventaires mensuels</span> plus vite.
-                Simple, lisible, pensée pour le terrain.
+                <span className="font-semibold text-white">réaliser vos inventaires mensuels</span> plus vite. Simple,
+                lisible, pensée pour le terrain.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3">
@@ -139,7 +143,7 @@ export default function Landing() {
                   { title: "Inventaire rapide", desc: "comptage guidé, clair et structuré" },
                   { title: "Exports prêts", desc: "CSV / Excel faciles à partager" },
                 ].map((item) => (
-                  <Card key={item.title} className="p-3 border-white/10 bg-white/5" hover>
+                  <Card key={item.title} className="p-3 border-white/10 bg-white/5 rounded-2xl" hover>
                     <div className="font-semibold text-white">{item.title}</div>
                     <div className="text-xs text-white/70 mt-1">{item.desc}</div>
                   </Card>
@@ -147,24 +151,24 @@ export default function Landing() {
               </div>
             </div>
 
-            {/* PREVIEW */}
-            <div className="rounded-[28px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900/80 to-slate-950 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+            {/* PREVIEW (arrondis +++) */}
+            <div className="rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900/80 to-slate-950 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
               <div className="text-sm text-white/70">Aperçu</div>
               <div className="mt-2 text-2xl font-black text-white">Tableau de bord</div>
 
               <div className="mt-4 space-y-3">
-                <Card className="p-4 border-white/10 bg-white/5">
+                <Card className="p-4 border-white/10 bg-white/5 rounded-2xl">
                   <div className="text-xs text-white/60">Valeur du stock (HT)</div>
                   <div className="text-2xl font-black text-white">12 480 €</div>
                 </Card>
 
-                <Card className="p-4 border-white/10 bg-white/5">
+                <Card className="p-4 border-white/10 bg-white/5 rounded-2xl">
                   <div className="text-xs text-white/60">Pertes déclarées</div>
                   <div className="text-xl font-semibold text-white">- 380 €</div>
                   <div className="text-xs text-white/60">casse, DLC/DDM, erreurs…</div>
                 </Card>
 
-                <Card className="p-4 border-white/10 bg-white/5">
+                <Card className="p-4 border-white/10 bg-white/5 rounded-2xl">
                   <div className="text-xs text-white/60">Options activées</div>
                   <div className="text-sm text-white/80">Prix & TVA · Lots · Produits entamés</div>
                 </Card>
@@ -174,7 +178,7 @@ export default function Landing() {
 
           {/* EXPLICATION SIMPLE */}
           <section className="grid md:grid-cols-2 gap-6">
-            <Card className="p-6 border-white/10 bg-white/5 space-y-2">
+            <Card className="p-6 border-white/10 bg-white/5 space-y-2 rounded-3xl">
               <div className="flex items-center gap-2 text-sm text-blue-200">
                 <BookOpen className="h-4 w-4" /> Produits
               </div>
@@ -185,7 +189,7 @@ export default function Landing() {
               </p>
             </Card>
 
-            <Card className="p-6 border-white/10 bg-white/5 space-y-2">
+            <Card className="p-6 border-white/10 bg-white/5 space-y-2 rounded-3xl">
               <div className="flex items-center gap-2 text-sm text-blue-200">
                 <ClipboardList className="h-4 w-4" /> Inventaires
               </div>
@@ -221,7 +225,7 @@ export default function Landing() {
                   <Link
                     key={family.id}
                     to={ROUTES[family.id] || "/metiers"}
-                    className="group rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:border-white/30 hover:-translate-y-1"
+                    className="group rounded-3xl border border-white/10 bg-white/5 p-5 transition hover:border-white/30 hover:-translate-y-1"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 text-white">
@@ -260,7 +264,7 @@ export default function Landing() {
 
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
               {MODULES.map((module) => (
-                <Card key={module.id} className="p-5 border-white/10 bg-white/5 space-y-2" hover>
+                <Card key={module.id} className="p-5 border-white/10 bg-white/5 space-y-2 rounded-3xl" hover>
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-400">{module.name}</div>
                   <div className="text-sm text-slate-200">{module.description}</div>
                 </Card>
@@ -271,7 +275,7 @@ export default function Landing() {
           {/* ÉTAPES */}
           <section className="grid md:grid-cols-3 gap-4">
             {steps.map((step) => (
-              <Card key={step.title} className="p-5 border-white/10 bg-white/5 space-y-2" hover>
+              <Card key={step.title} className="p-5 border-white/10 bg-white/5 space-y-2 rounded-3xl" hover>
                 <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Démarrage</div>
                 <div className="text-lg font-semibold text-white">{step.title}</div>
                 <div className="text-sm text-slate-300">{step.desc}</div>
@@ -286,11 +290,19 @@ export default function Landing() {
             <p className="text-sm text-slate-300">
               Une démonstration guidée : inventaire, pertes, exports, tableau de bord — sans créer de compte.
             </p>
-            <LazyAutoDemoShowcase />
+
+            {/* IMPORTANT:
+                - On “masque” toute barre de progression éventuelle via CSS utilitaire
+                - sans toucher au composant LazyAutoDemoShowcase (au cas où il est partagé ailleurs).
+                - Ajuste les sélecteurs si ta progressbar a une classe/data-attr spécifique.
+            */}
+            <div className="[&_[role='progressbar']]:hidden [&_.progress]:hidden [&_.progress-bar]:hidden">
+              <LazyAutoDemoShowcase />
+            </div>
           </section>
 
           {/* CTA */}
-          <section className="rounded-3xl bg-blue-600 text-white p-8 space-y-3 shadow-[0_30px_70px_rgba(37,99,235,0.35)]">
+          <section className="rounded-[32px] bg-blue-600 text-white p-8 space-y-3 shadow-[0_30px_70px_rgba(37,99,235,0.35)]">
             <h2 className="text-2xl font-black">Prêt à faire votre premier inventaire ?</h2>
             <p className="text-sm text-blue-100">En 2 minutes : choisissez votre métier, puis démarrez votre comptage.</p>
             <div className="flex flex-wrap gap-3">

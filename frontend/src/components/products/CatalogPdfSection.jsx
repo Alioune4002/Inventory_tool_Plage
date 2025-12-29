@@ -23,6 +23,11 @@ export default function CatalogPdfSection({
   togglePdfField,
   pdfBranding,
   setPdfBranding,
+  pdfTemplate,
+  setPdfTemplate,
+  pdfLogo,
+  setPdfLogo,
+  templateOptions,
   generateCatalogPdf,
   pdfLoading,
   pdfError,
@@ -130,7 +135,16 @@ export default function CatalogPdfSection({
         </div>
 
         <div className="space-y-3">
-          <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Branding</div>
+          <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Identité</div>
+          <Select
+            label="Style"
+            value={pdfTemplate}
+            onChange={(value) => {
+              setPdfTemplate(value);
+              clearPdfError();
+            }}
+            options={templateOptions}
+          />
           <Input
             label="Nom d’entreprise"
             value={pdfBranding.company_name}
@@ -163,9 +177,25 @@ export default function CatalogPdfSection({
               clearPdfError();
             }}
           />
-          <div className="text-xs text-[var(--muted)]">
-            Logo : utilisé automatiquement si configuré dans votre compte.
-          </div>
+          <label className="block space-y-1.5 text-sm text-[var(--text)]">
+            <span className="text-sm font-medium text-[var(--text)]">Logo (optionnel)</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+              onChange={(e) => {
+                const next = e.target.files?.[0] || null;
+                setPdfLogo(next);
+                clearPdfError();
+              }}
+            />
+            {pdfLogo ? (
+              <span className="text-xs text-[var(--muted)]">Fichier sélectionné : {pdfLogo.name}</span>
+            ) : null}
+            <span className="text-xs text-[var(--muted)]">
+              Utilisé en couverture pour un rendu premium. Formats PNG/JPG recommandés.
+            </span>
+          </label>
           <Button onClick={generateCatalogPdf} loading={pdfLoading} disabled={!canPdfCatalog || pdfLoading}>
             Générer le PDF
           </Button>

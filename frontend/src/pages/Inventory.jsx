@@ -156,6 +156,37 @@ export default function Inventory() {
   const itemTypeEnabled = getFeatureFlag("item_type", familyModules.includes("itemType"));
   const showOpenFields = openEnabled;
   const canStockAlerts = Boolean(entitlements?.entitlements?.alerts_stock);
+  const nextAvailable =
+    categories.length > 0 ||
+    dlcEnabled ||
+    purchaseEnabled ||
+    sellingEnabled ||
+    (tvaEnabled && (purchaseEnabled || sellingEnabled));
+  const advancedExtras = canStockAlerts || variantsEnabled || multiUnitEnabled || lotEnabled || openEnabled || itemTypeEnabled;
+  const hasExtraSteps = nextAvailable || advancedExtras;
+  const addCtaEssentialLabel = isEditing
+    ? "Mettre à jour"
+    : hasExtraSteps && !showNext && !showAdvanced
+      ? "Ajouter / Suivant"
+      : "Ajouter";
+  const addCtaNextLabel = isEditing
+    ? "Mettre à jour"
+    : advancedExtras && !showAdvanced
+      ? "Ajouter / Suivant"
+      : "Ajouter";
+  const addCtaAdvancedLabel = isEditing ? "Mettre à jour" : "Ajouter";
+  const renderCta = (label) => (
+    <div className="flex flex-wrap items-center gap-2 pt-2">
+      <Button type="submit" loading={loading}>
+        {label}
+      </Button>
+      {isEditing && (
+        <Button variant="secondary" type="button" onClick={resetQuick}>
+          Annuler l’édition
+        </Button>
+      )}
+    </div>
+  );
 
   const productRoleOptions = [
     { value: "", label: "Non précisé" },
@@ -1009,16 +1040,6 @@ export default function Inventory() {
                       options={unitSelectOptions}
                     />
 
-                    <div className="flex flex-col gap-2 min-w-0">
-                      <Button type="submit" loading={loading}>
-                        {isEditing ? "Mettre à jour" : "Ajouter / Suivant"}
-                      </Button>
-                      {isEditing && (
-                        <Button variant="secondary" type="button" onClick={resetQuick}>
-                          Annuler l’édition
-                        </Button>
-                      )}
-                    </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2 items-center text-xs text-[var(--muted)]">
@@ -1034,17 +1055,21 @@ export default function Inventory() {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      type="button"
-                      onClick={() => setShowNext((prev) => !prev)}
-                    >
-                      {showNext ? "Masquer les infos utiles" : "Ajouter des infos utiles (+ prix, TVA, DLC…)"}
-                    </Button>
-                    <span>Optionnel mais recommandé pour des stats plus fiables.</span>
-                  </div>
+                  {nextAvailable && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        type="button"
+                        onClick={() => setShowNext((prev) => !prev)}
+                      >
+                        {showNext ? "Masquer les infos utiles" : "Ajouter des infos utiles (+ prix, TVA, DLC…)"}
+                      </Button>
+                      <span>Optionnel mais recommandé pour des stats plus fiables.</span>
+                    </div>
+                  )}
+
+                  {!showNext && !showAdvanced && renderCta(addCtaEssentialLabel)}
 
                   {showNext && (
                     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/40 p-4 space-y-3">
@@ -1109,6 +1134,7 @@ export default function Inventory() {
                           />
                         )}
                       </div>
+                      {!showAdvanced && renderCta(addCtaNextLabel)}
                     </div>
                   )}
 
@@ -1120,10 +1146,11 @@ export default function Inventory() {
                     <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
                       Avancé (variantes, conversions, alertes, pertes…)
                     </summary>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <div className="md:col-span-2 text-xs uppercase tracking-wide text-[var(--muted)]">
-                        Modules & stock
-                      </div>
+                    <div className="mt-3 space-y-3">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="md:col-span-2 text-xs uppercase tracking-wide text-[var(--muted)]">
+                          Modules & stock
+                        </div>
                       {canStockAlerts && (
                         <Input
                           label="Stock minimum (alerte)"
@@ -1262,6 +1289,8 @@ export default function Inventory() {
                         value={quick.comment}
                         onChange={(e) => setQuick((p) => ({ ...p, comment: e.target.value }))}
                       />
+                      </div>
+                      {showAdvanced && renderCta(addCtaAdvancedLabel)}
                     </div>
                   </details>
 
@@ -1403,7 +1432,7 @@ export default function Inventory() {
                       <div className="text-sm text-[var(--muted)]">{ux.emptyInventoryText}</div>
                       <div className="flex justify-center gap-2">
                         <Button size="sm" onClick={() => setSearch("")}>
-                          Reset recherche
+                          Réinitialiser la recherche
                         </Button>
                       </div>
                     </div>
@@ -1514,7 +1543,7 @@ export default function Inventory() {
                             <div className="text-sm text-[var(--muted)]">{ux.emptyInventoryText}</div>
                             <div className="flex justify-center gap-2">
                               <Button size="sm" onClick={() => setSearch("")}>
-                                Reset recherche
+                                Réinitialiser la recherche
                               </Button>
                             </div>
                           </div>

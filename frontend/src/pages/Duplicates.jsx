@@ -124,6 +124,9 @@ export default function Duplicates() {
           <p className="text-sm text-[var(--muted)]">
             Identifie les doublons (nom, SKU, code-barres) et fusionne-les en toute sécurité.
           </p>
+          <div className="text-xs text-[var(--muted)]">
+            StockScan propose des regroupements probables : la validation finale reste sous votre contrôle.
+          </div>
         </Card>
 
         {!canUse ? (
@@ -143,11 +146,17 @@ export default function Duplicates() {
                 StockScan repère les doublons probables pour garder un catalogue propre.
                 Les suggestions sont graduées (code-barres/SKU fiables, noms proches à confirmer).
               </p>
+              <p className="text-xs text-[var(--muted)]">
+                L’algorithme croise identifiants, catégories, fournisseurs et prix pour éviter les faux positifs.
+              </p>
               <ul className="text-xs text-[var(--muted)] space-y-1">
                 <li>1) Choisis un produit maître</li>
                 <li>2) Coche les doublons à fusionner</li>
                 <li>3) La fusion déplace l’historique et archive les doublons</li>
               </ul>
+              <div className="text-xs text-[var(--muted)]">
+                Conseil : commence par les doublons “code-barres” ou “SKU”, ce sont les plus sûrs.
+              </div>
             </Card>
 
             <Card className="p-6 space-y-4">

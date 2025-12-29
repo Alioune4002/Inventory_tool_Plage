@@ -13,8 +13,8 @@ def _auth_client(user):
     return client
 
 
-def _csv_file():
-    content = "name,quantity,unit,barcode\nFarine,2,kg,\nBeurre,1,pcs,\n"
+def _csv_file(suffix=""):
+    content = f"name,quantity,unit,barcode\nFarine{suffix},2,kg,\nBeurre{suffix},1,pcs,\n"
     return SimpleUploadedFile("receipt.csv", content.encode("utf-8"), content_type="text/csv")
 
 
@@ -24,13 +24,17 @@ def test_receipt_import_solo_quota():
     user = UserFactory(profile=tenant)
     client = _auth_client(user)
 
-    res1 = client.post("/api/receipts/import/", {"file": _csv_file()}, format="multipart")
+    res1 = client.post("/api/receipts/import/", {"file": _csv_file("A")}, format="multipart")
     assert res1.status_code == 201
     assert res1.data.get("lines")
 
-    res2 = client.post("/api/receipts/import/", {"file": _csv_file()}, format="multipart")
-    assert res2.status_code == 201
+    res2 = client.post("/api/receipts/import/", {"file": _csv_file("A")}, format="multipart")
+    assert res2.status_code == 409
+    assert res2.data.get("code") == "RECEIPT_DUPLICATE_INVOICE"
 
-    res3 = client.post("/api/receipts/import/", {"file": _csv_file()}, format="multipart")
-    assert res3.status_code == 403
-    assert res3.data.get("code") == "LIMIT_RECEIPTS_IMPORT_MONTH"
+    res3 = client.post("/api/receipts/import/", {"file": _csv_file("B")}, format="multipart")
+    assert res3.status_code == 201
+
+    res4 = client.post("/api/receipts/import/", {"file": _csv_file("C")}, format="multipart")
+    assert res4.status_code == 403
+    assert res4.data.get("code") == "LIMIT_RECEIPTS_IMPORT_MONTH"

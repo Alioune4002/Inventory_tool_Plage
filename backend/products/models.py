@@ -302,6 +302,9 @@ class Receipt(models.Model):
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="receipts")
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name="receipts")
     supplier_name = models.CharField(max_length=150, blank=True, default="")
+    invoice_number = models.CharField(max_length=80, blank=True, default="")
+    invoice_date = models.DateField(null=True, blank=True)
+    import_hash = models.CharField(max_length=64, blank=True, default="")
     source = models.CharField(max_length=10, choices=SOURCE_CHOICES, default="csv")
     file_name = models.CharField(max_length=200, blank=True, default="")
     received_at = models.DateField(default=timezone.now)
@@ -318,6 +321,8 @@ class Receipt(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["tenant", "created_at"], name="receipt_tenant_created_idx"),
+            models.Index(fields=["tenant", "invoice_number"], name="receipt_tenant_invoice_idx"),
+            models.Index(fields=["tenant", "import_hash"], name="receipt_tenant_import_hash_idx"),
         ]
 
     def __str__(self):
@@ -338,6 +343,8 @@ class ReceiptLine(models.Model):
     quantity = models.DecimalField(max_digits=10, decimal_places=3, default=0)
     unit = models.CharField(max_length=10, blank=True, default="pcs")
     purchase_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    tva = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    category = models.CharField(max_length=80, blank=True, default="")
     barcode = models.CharField(max_length=50, blank=True, default="")
     internal_sku = models.CharField(max_length=50, blank=True, default="")
     matched_product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)

@@ -1,4 +1,5 @@
-// frontend/src/pages/public/CommentCaMarche.jsx
+
+
 import React from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -77,8 +78,9 @@ export default function CommentCaMarche() {
       </Helmet>
 
       {/* Fond plein écran (évite les “bandes” latérales) */}
-      <main className="w-full overflow-x-hidden bg-slate-950 text-white">
-        <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-10 py-12 space-y-10">
+      <main className="w-full bg-slate-950 text-white">
+        {/* Container plus large + paddings latéraux réduits */}
+        <div className="mx-auto w-full max-w-[1480px] px-2 sm:px-3 lg:px-4 py-12 space-y-10">
           <header className="space-y-4">
             <p className="text-sm font-semibold text-blue-300 uppercase tracking-wide">Comment ça marche</p>
 
@@ -92,10 +94,10 @@ export default function CommentCaMarche() {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 pt-1">
-              <Button as={Link} to="/metiers" className="w-full sm:w-auto">
+              <Button as={Link} to="/metiers" className="w-full sm:w-auto rounded-full">
                 Choisir mon métier
               </Button>
-              <Button as={Link} to="/register" variant="secondary" className="w-full sm:w-auto">
+              <Button as={Link} to="/register" variant="secondary" className="w-full sm:w-auto rounded-full">
                 Créer mon espace
               </Button>
             </div>
@@ -104,7 +106,11 @@ export default function CommentCaMarche() {
           {/* Steps */}
           <section className="grid md:grid-cols-2 gap-4">
             {STEPS.map((step) => (
-              <Card key={step.title} className="p-6 border-white/10 bg-white/5 space-y-2" hover>
+              <Card
+                key={step.title}
+                className="p-6 border-white/10 bg-white/5 space-y-2 rounded-3xl"
+                hover
+              >
                 <div className="text-xs uppercase tracking-[0.2em] text-slate-400">Méthode StockScan</div>
                 <div className="text-lg font-semibold text-white">{step.title}</div>
                 <p className="text-slate-200 text-sm">{step.desc}</p>
@@ -114,7 +120,7 @@ export default function CommentCaMarche() {
 
           {/* Simple explanation */}
           <section className="grid md:grid-cols-2 gap-4">
-            <Card className="p-6 border-white/10 bg-white/5 space-y-2" hover>
+            <Card className="p-6 border-white/10 bg-white/5 space-y-2 rounded-3xl" hover>
               <h2 className="text-xl font-semibold text-white">Produits = votre base</h2>
               <p className="text-slate-200 text-sm">
                 Une base stable et propre : nom, catégorie, unité, marque (si utile), fournisseur (si utile), prix (si
@@ -125,7 +131,7 @@ export default function CommentCaMarche() {
               </p>
             </Card>
 
-            <Card className="p-6 border-white/10 bg-white/5 space-y-2" hover>
+            <Card className="p-6 border-white/10 bg-white/5 space-y-2 rounded-3xl" hover>
               <h2 className="text-xl font-semibold text-white">Inventaire = le comptage</h2>
               <p className="text-slate-200 text-sm">
                 À une date donnée, vous comptez les quantités. Vous pouvez aussi déclarer des pertes (casse, DLC/DDM,
@@ -139,16 +145,16 @@ export default function CommentCaMarche() {
           </section>
 
           {/* Closing CTA */}
-          <section className="rounded-3xl bg-white/5 border border-white/10 p-6 md:p-8 space-y-3">
+          <section className="rounded-[32px] bg-white/5 border border-white/10 p-6 md:p-8 space-y-3">
             <h2 className="text-2xl font-black">Vous voulez voir si ça colle à votre activité ?</h2>
             <p className="text-slate-200 text-sm">
               Commencez par choisir votre métier. StockScan vous affiche une interface adaptée dès le départ.
             </p>
             <div className="flex flex-wrap gap-3">
-              <Button as={Link} to="/metiers">
+              <Button as={Link} to="/metiers" className="rounded-full">
                 Explorer les métiers
               </Button>
-              <Button as={Link} to="/tarifs" variant="secondary">
+              <Button as={Link} to="/tarifs" variant="secondary" className="rounded-full">
                 Voir les offres
               </Button>
             </div>

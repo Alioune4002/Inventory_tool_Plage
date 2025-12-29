@@ -12,14 +12,14 @@ export function ToastProvider({ children }) {
     setToast(null);
   }, []);
 
-  const pushToast = useCallback(({ message, type = "info", durationMs = 3500 } = {}) => {
+  const pushToast = useCallback(({ message, type = "info", durationMs = 18000 } = {}) => {
     if (!message) return;
 
     if (timerRef.current) window.clearTimeout(timerRef.current);
 
     setToast({ message: String(message), type });
 
-    const ms = Math.max(1200, Number(durationMs) || 3500);
+    const ms = Math.max(9000, Number(durationMs) || 18000);
     timerRef.current = window.setTimeout(() => {
       setToast(null);
       timerRef.current = null;

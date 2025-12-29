@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 import difflib
 import unicodedata
 
@@ -10,6 +10,7 @@ from rest_framework.renderers import BaseRenderer
 from django.http import JsonResponse
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
 from openpyxl.chart import BarChart, Reference
 import numbers
 import re
@@ -17,16 +18,22 @@ import logging
 import csv
 import io
 import json
+import hashlib
 from django.db import transaction
-from django.db.models import Q, F, Count, Case, When, IntegerField
+from django.db.models import Q, F, Count, Case, When, IntegerField, Sum
 from django.core.cache import cache
 from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.utils.text import slugify
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.colors import HexColor
 from reportlab.graphics.barcode import code128
 
 from accounts.mixins import TenantQuerySetMixin
+from accounts.models import Service
 from accounts.utils import get_tenant_for_request, get_service_from_request, get_user_role
 from accounts.permissions import ProductPermission, ManagerPermission
 from accounts.services.access import (
@@ -75,7 +82,12 @@ OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 CATALOG_PDF_MAX_PRODUCTS = 500
 LABELS_PDF_MAX_PRODUCTS = 400
 RECEIPT_IMPORT_MAX_LINES = 500
-DUPLICATE_NAME_SIMILARITY = 0.95
+DUPLICATE_NAME_SIMILARITY = 0.985
+CATALOG_TEMPLATES = {
+    "classic": {"accent": "#1E3A8A", "muted": "#475569"},
+    "midnight": {"accent": "#0F172A", "muted": "#334155"},
+    "emerald": {"accent": "#047857", "muted": "#475569"},
+}
 NAME_STOPWORDS = {
     "produit",
     "article",
@@ -521,32 +533,68 @@ class PDFRenderer(BaseRenderer):
             return json.dumps(data).encode("utf-8")
 
 
-def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, company_address, fields, products, truncated, include_service):
+def _build_catalog_pdf(
+    *,
+    tenant,
+    company_name,
+    company_email,
+    company_phone,
+    company_address,
+    fields,
+    products,
+    truncated,
+    include_service,
+    logo_bytes=None,
+    template="classic",
+):
     buffer = io.BytesIO()
     c = NumberedCanvas(buffer, pagesize=A4)
     width, height = A4
+    theme = CATALOG_TEMPLATES.get((template or "").lower(), CATALOG_TEMPLATES["classic"])
+    accent = HexColor(theme["accent"])
+    muted = HexColor(theme["muted"])
 
     def draw_cover():
-        c.setFont("Helvetica-Bold", 20)
+        c.setFillColor(accent)
+        c.rect(0, height - 2.3 * cm, width, 2.3 * cm, fill=1, stroke=0)
+
+        if logo_bytes:
+            try:
+                logo = ImageReader(io.BytesIO(logo_bytes))
+                c.drawImage(
+                    logo,
+                    2 * cm,
+                    height - 2.05 * cm,
+                    width=3.8 * cm,
+                    height=1.6 * cm,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                pass
+
+        c.setFillColorRGB(1, 1, 1)
+        c.setFont("Helvetica-Bold", 18)
+        c.drawRightString(width - 2 * cm, height - 1.4 * cm, company_name or tenant.name or "StockScan")
+
+        c.setFont("Helvetica-Bold", 18)
         c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.drawString(2 * cm, height - 3 * cm, company_name or tenant.name or "StockScan")
-        c.setFont("Helvetica", 12)
-        c.drawString(2 * cm, height - 3.8 * cm, "Catalogue produits")
-        c.setFont("Helvetica", 10)
-        c.setFillColorRGB(0.4, 0.4, 0.4)
-        c.drawString(2 * cm, height - 4.6 * cm, timezone.now().strftime("%d/%m/%Y"))
+        c.drawString(2 * cm, height - 4 * cm, "Catalogue produits")
+        c.setFont("Helvetica", 11)
+        c.setFillColor(muted)
+        c.drawString(2 * cm, height - 4.7 * cm, timezone.now().strftime("%d/%m/%Y"))
 
         info_lines = [company_email, company_phone, company_address]
         y = height - 6 * cm
         c.setFont("Helvetica", 10)
-        c.setFillColorRGB(0.25, 0.25, 0.25)
+        c.setFillColor(muted)
         for line in info_lines:
             if line:
                 c.drawString(2 * cm, y, str(line))
                 y -= 0.6 * cm
 
         if truncated:
-            c.setFillColorRGB(0.55, 0.2, 0.2)
+            c.setFillColor(HexColor("#B91C1C"))
             c.drawString(2 * cm, y - 0.6 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
 
     draw_cover()
@@ -566,6 +614,7 @@ def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, co
             c.showPage()
             y = height - 2.5 * cm
         c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(accent)
         c.drawString(2 * cm, y, category)
         y -= 0.6 * cm
 
@@ -579,7 +628,7 @@ def _build_catalog_pdf(*, tenant, company_name, company_email, company_phone, co
             c.drawString(2 * cm, y, f"• {p.name}")
             y -= 0.45 * cm
             if line:
-                c.setFillColorRGB(0.4, 0.4, 0.4)
+                c.setFillColor(muted)
                 c.drawString(2.6 * cm, y, line[:160])
                 y -= 0.45 * cm
         y -= 0.4 * cm
@@ -641,16 +690,104 @@ def _name_is_generic(tokens):
     if len(tokens) < 2:
         return True
     text = " ".join(tokens)
-    return len(text) < 6
+    if len(text) < 8:
+        return True
+    if len(tokens) < 3 and all(len(t) <= 3 for t in tokens):
+        return True
+    return False
 
 
-def _has_supporting_signal(a, b):
+def _tokens_are_specific(tokens):
+    if len(tokens) < 2:
+        return False
+    long_tokens = [t for t in tokens if len(t) >= 4]
+    return len(long_tokens) >= 2
+
+
+def _supporting_signal_count(a, b):
     def same_field(field):
         av = (getattr(a, field, None) or "").strip().lower()
         bv = (getattr(b, field, None) or "").strip().lower()
         return bool(av and bv and av == bv)
 
-    return same_field("category") or same_field("brand") or same_field("unit")
+    count = 0
+    count += 1 if same_field("category") else 0
+    count += 1 if same_field("brand") else 0
+    count += 1 if same_field("supplier") else 0
+    count += 1 if same_field("pack_uom") else 0
+    count += 1 if same_field("pack_size") else 0
+
+    try:
+        ap = float(a.purchase_price) if a.purchase_price is not None else None
+        bp = float(b.purchase_price) if b.purchase_price is not None else None
+    except (TypeError, ValueError):
+        ap, bp = None, None
+    if ap is not None and bp is not None and ap > 0 and bp > 0 and abs(ap - bp) < 0.01:
+        count += 1
+
+    return count
+
+
+def _has_meaningful_signal(a, b):
+    def same_field(field):
+        av = (getattr(a, field, None) or "").strip().lower()
+        bv = (getattr(b, field, None) or "").strip().lower()
+        return bool(av and bv and av == bv)
+
+    if same_field("category") or same_field("brand") or same_field("supplier"):
+        return True
+    if same_field("pack_uom") or same_field("pack_size"):
+        return True
+    try:
+        ap = float(a.purchase_price) if a.purchase_price is not None else None
+        bp = float(b.purchase_price) if b.purchase_price is not None else None
+    except (TypeError, ValueError):
+        ap, bp = None, None
+    return ap is not None and bp is not None and ap > 0 and bp > 0 and abs(ap - bp) < 0.01
+
+
+def _has_core_signal(a, b):
+    def same_field(field):
+        av = (getattr(a, field, None) or "").strip().lower()
+        bv = (getattr(b, field, None) or "").strip().lower()
+        return bool(av and bv and av == bv)
+
+    return bool(same_field("category") or same_field("brand") or same_field("supplier"))
+
+
+def _group_has_core_signal(group):
+    if len(group) < 2:
+        return False
+    for idx, p in enumerate(group):
+        for q in group[idx + 1 :]:
+            if _has_core_signal(p, q):
+                return True
+    return False
+
+
+def _has_strong_signal(a, b):
+    return bool(
+        (a.barcode and b.barcode and a.barcode == b.barcode)
+        or (a.internal_sku and b.internal_sku and a.internal_sku == b.internal_sku)
+    )
+
+
+def _has_supporting_signal(a, b, min_signals=3):
+    if _has_strong_signal(a, b):
+        return True
+    if not _has_meaningful_signal(a, b):
+        return False
+    return _supporting_signal_count(a, b) >= min_signals
+
+
+def _group_has_supporting_signal(group, min_signals=3):
+    if len(group) < 2:
+        return False
+    for idx, p in enumerate(group):
+        for q in group[idx + 1 :]:
+            if _has_supporting_signal(p, q, min_signals=min_signals):
+                return True
+    return False
 
 
 def _history_month_cutoff(months):
@@ -668,10 +805,12 @@ def _history_month_cutoff(months):
     return f"{year:04d}-{month:02d}"
 
 
-def _build_csv_bytes(headers, rows, delimiter=";"):
+def _build_csv_bytes(headers, rows, delimiter=";", title=None):
     buffer = io.StringIO()
     buffer.write("sep=;\n")
     writer = csv.writer(buffer, delimiter=delimiter)
+    if title:
+        writer.writerow([title] + [""] * (len(headers) - 1))
     writer.writerow(headers)
     for row in rows:
         writer.writerow(["" if value is None else value for value in row])
@@ -679,22 +818,34 @@ def _build_csv_bytes(headers, rows, delimiter=";"):
     return ("\ufeff" + content).encode("utf-8")
 
 
-def _apply_sheet_style(ws, headers):
-    ws.freeze_panes = "A2"
-    ws.auto_filter.ref = ws.dimensions
-    ws.row_dimensions[1].height = 22
+def _apply_sheet_style(ws, headers, title=None):
+    header_row = 1
+    if title:
+        ws.insert_rows(1)
+        title_cell = ws.cell(row=1, column=1)
+        title_cell.value = title
+        title_cell.font = Font(bold=True, size=14)
+        title_cell.alignment = Alignment(horizontal="left", vertical="center")
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+        ws.row_dimensions[1].height = 26
+        header_row = 2
+
+    ws.freeze_panes = f"A{header_row + 1}"
+    last_col = get_column_letter(len(headers))
+    ws.auto_filter.ref = f"A{header_row}:{last_col}{ws.max_row}"
+    ws.row_dimensions[header_row].height = 22
 
     header_lookup = {index + 1: (header or "") for index, header in enumerate(headers)}
 
     for col_idx, header in header_lookup.items():
-        cell = ws.cell(row=1, column=col_idx)
+        cell = ws.cell(row=header_row, column=col_idx)
         cell.value = header
         cell.font = EXPORT_HEADER_FONT
         cell.fill = EXPORT_HEADER_FILL
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border = EXPORT_BORDER
 
-    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, max_col=ws.max_column):
+    for row in ws.iter_rows(min_row=header_row + 1, max_row=ws.max_row, max_col=ws.max_column):
         row_idx = row[0].row
         if row_idx % 2 == 0:
             for cell in row:
@@ -725,6 +876,54 @@ def _apply_sheet_style(ws, headers):
                 max_length = max(max_length, len(str(cell.value)))
         if column_letter:
             ws.column_dimensions[column_letter].width = min(max(max_length + 2, 10), 42)
+
+
+def _format_service_label(tenant, service_param=None):
+    if isinstance(service_param, Service):
+        return service_param.name
+    if service_param and service_param != "all":
+        svc = Service.objects.filter(id=service_param, tenant=tenant).first()
+        return svc.name if svc else "Service"
+    names = list(tenant.services.values_list("name", flat=True))
+    if not names:
+        return "Tous services"
+    if len(names) <= 3:
+        return ", ".join(names)
+    return f"{', '.join(names[:3])} +{len(names) - 3}"
+
+
+def _format_period_label(month=None, from_month=None, to_month=None):
+    def format_month(val):
+        if not val:
+            return ""
+        match = re.match(r"^(\\d{4})-(\\d{2})$", str(val))
+        if match:
+            year, mm = match.groups()
+            return f"{mm}/{year}"
+        return str(val)
+
+    if month:
+        return format_month(month)
+    if from_month and to_month:
+        return f"{format_month(from_month)} → {format_month(to_month)}"
+    if from_month:
+        return f"Depuis {format_month(from_month)}"
+    if to_month:
+        return f"Jusqu’à {format_month(to_month)}"
+    return "Toutes périodes"
+
+
+def _build_export_title(tenant, period_label, service_label):
+    base = f"Inventaire {period_label}" if period_label else "Inventaire"
+    return f"{base} - {tenant.name} (Services : {service_label})"
+
+
+def _build_export_filename(prefix, period_label, tenant_name, service_label, ext):
+    parts = [prefix, period_label, tenant_name, service_label]
+    safe = [slugify(p) for p in parts if p]
+    if not safe:
+        safe = [prefix]
+    return f"{'_'.join(safe)}.{ext}"
 
 
 def home(request):
@@ -1119,16 +1318,19 @@ def export_excel(request):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"Inventaire {month}"
+    service_label = _format_service_label(tenant, service)
+    period_label = _format_period_label(month=month)
+    title = _build_export_title(tenant, period_label, service_label)
     ws.append(headers)
     for row in rows:
         ws.append(row)
-    _apply_sheet_style(ws, headers)
+    _apply_sheet_style(ws, headers, title=title)
 
     bio = io.BytesIO()
     wb.save(bio)
     xlsx_bytes = bio.getvalue()
 
-    filename = f"inventaire_{month}.xlsx"
+    filename = _build_export_filename("inventaire", period_label, tenant.name, service_label, "xlsx")
     resp = Response(xlsx_bytes, content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     resp["Content-Disposition"] = f'attachment; filename="{filename}"'
     _log_export_event(
@@ -1220,7 +1422,16 @@ def export_generic(request):
             ]
         )
 
-    filename = "stockscan_export.xlsx" if export_format == "xlsx" else "stockscan_export.csv"
+    service_label = _format_service_label(tenant, service_param)
+    period_label = _format_period_label(from_month=from_month, to_month=to_month)
+    title = _build_export_title(tenant, period_label, service_label)
+    filename = _build_export_filename(
+        "inventaire",
+        period_label,
+        tenant.name,
+        service_label,
+        "xlsx" if export_format == "xlsx" else "csv",
+    )
     mimetype = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         if export_format == "xlsx"
@@ -1228,7 +1439,7 @@ def export_generic(request):
     )
 
     if export_format == "csv":
-        attachment_bytes = _build_csv_bytes(headers, rows)
+        attachment_bytes = _build_csv_bytes(headers, rows, title=title)
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -1236,7 +1447,7 @@ def export_generic(request):
         ws.append(headers)
         for row in rows:
             ws.append(row)
-        _apply_sheet_style(ws, headers)
+        _apply_sheet_style(ws, headers, title=title)
         bio = io.BytesIO()
         wb.save(bio)
         attachment_bytes = bio.getvalue()
@@ -1445,7 +1656,25 @@ def export_advanced(request):
     products_qs = qs.select_related("service")
     rows = [build_row(p) for p in products_qs]
 
-    filename = "export_avance.xlsx" if export_format != "csv" else "export_avance.csv"
+    service_ids = [int(s) for s in services if str(s).isdigit()]
+    service_label = _format_service_label(tenant, "all" if not service_ids else None)
+    if service_ids:
+        service_label = _format_service_label(
+            tenant,
+            Service.objects.filter(id__in=service_ids, tenant=tenant).first(),
+        )
+        names = list(Service.objects.filter(id__in=service_ids, tenant=tenant).values_list("name", flat=True))
+        if names:
+            service_label = ", ".join(names) if len(names) <= 3 else f"{', '.join(names[:3])} +{len(names) - 3}"
+    period_label = _format_period_label(from_month=from_month, to_month=to_month)
+    title = _build_export_title(tenant, period_label, service_label)
+    filename = _build_export_filename(
+        "export_avance",
+        period_label,
+        tenant.name,
+        service_label,
+        "csv" if export_format == "csv" else "xlsx",
+    )
     mimetype = (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         if export_format != "csv"
@@ -1453,7 +1682,7 @@ def export_advanced(request):
     )
 
     if export_format == "csv":
-        attachment_bytes = _build_csv_bytes(headers, rows)
+        attachment_bytes = _build_csv_bytes(headers, rows, title=title)
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -1461,7 +1690,7 @@ def export_advanced(request):
         ws.append(headers)
         for row in rows:
             ws.append(row)
-        _apply_sheet_style(ws, headers)
+        _apply_sheet_style(ws, headers, title=title)
 
         if include_summary or include_charts:
             summary = wb.create_sheet("Synthèse")
@@ -1607,7 +1836,7 @@ def export_advanced(request):
     return resp
 
 
-@api_view(["GET"])
+@api_view(["GET", "POST"])
 @permission_classes([permissions.IsAuthenticated, ManagerPermission])
 @renderer_classes([PDFRenderer])
 def catalog_pdf(request):
@@ -1615,7 +1844,8 @@ def catalog_pdf(request):
     check_entitlement(tenant, "pdf_catalog")
     _enforce_pdf_catalog_quota(tenant)
 
-    service_param = request.query_params.get("service")
+    payload = request.data if request.method == "POST" else request.query_params
+    service_param = payload.get("service")
     include_service = service_param == "all"
 
     qs = Product.objects.filter(tenant=tenant)
@@ -1626,7 +1856,7 @@ def catalog_pdf(request):
         except (ValueError, TypeError):
             pass
 
-    query = request.query_params.get("q")
+    query = payload.get("q")
     if query:
         qs = qs.filter(
             Q(name__icontains=query)
@@ -1636,7 +1866,7 @@ def catalog_pdf(request):
             | Q(supplier__icontains=query)
         )
 
-    category = request.query_params.get("category")
+    category = payload.get("category")
     if category:
         qs = qs.filter(category__iexact=category)
 
@@ -1645,11 +1875,20 @@ def catalog_pdf(request):
     truncated = len(raw_products) > CATALOG_PDF_MAX_PRODUCTS
     products = raw_products[:CATALOG_PDF_MAX_PRODUCTS]
 
-    fields = _parse_pdf_fields(request.query_params.get("fields"))
-    company_name = (request.query_params.get("company_name") or "").strip() or tenant.name
-    company_email = (request.query_params.get("company_email") or "").strip()
-    company_phone = (request.query_params.get("company_phone") or "").strip()
-    company_address = (request.query_params.get("company_address") or "").strip()
+    fields = _parse_pdf_fields(payload.get("fields"))
+    company_name = (payload.get("company_name") or "").strip() or tenant.name
+    company_email = (payload.get("company_email") or "").strip()
+    company_phone = (payload.get("company_phone") or "").strip()
+    company_address = (payload.get("company_address") or "").strip()
+    template = (payload.get("template") or "classic").strip().lower()
+    if template not in CATALOG_TEMPLATES:
+        template = "classic"
+
+    logo_bytes = None
+    if request.method == "POST":
+        logo_file = request.FILES.get("logo")
+        if logo_file:
+            logo_bytes = logo_file.read()
 
     pdf_bytes = _build_catalog_pdf(
         tenant=tenant,
@@ -1661,6 +1900,8 @@ def catalog_pdf(request):
         products=products,
         truncated=truncated,
         include_service=include_service,
+        logo_bytes=logo_bytes,
+        template=template,
     )
 
     _log_catalog_pdf_event(
@@ -1671,6 +1912,8 @@ def catalog_pdf(request):
             "fields": fields,
             "q": query,
             "category": category,
+            "template": template,
+            "logo": bool(logo_bytes),
         },
     )
 
@@ -1853,7 +2096,7 @@ def product_duplicates(request):
     name_tokens = {}
     for p in qs:
         tokens = _tokenize_name(p.name)
-        if _name_is_generic(tokens):
+        if _name_is_generic(tokens) or not _tokens_are_specific(tokens):
             continue
         norm = " ".join(tokens)
         if not norm:
@@ -1864,14 +2107,20 @@ def product_duplicates(request):
     for norm, group in name_groups.items():
         if len(group) < 2:
             continue
+        if not any((not p.barcode and not p.internal_sku) for p in group):
+            continue
+        if not _group_has_core_signal(group):
+            continue
+        if not _group_has_supporting_signal(group, min_signals=4):
+            continue
         master = _pick_master(group)
         duplicates.append(
             {
                 "type": "name",
                 "key": norm,
                 "master_id": master.id if master else None,
-                "confidence": 0.9,
-                "reason": "Nom identique (normalisé)",
+                "confidence": 0.82,
+                "reason": "Nom identique + signaux communs (catégorie, prix, fournisseur…)",
                 "products": [_product_brief(p) for p in group],
             }
         )
@@ -1887,17 +2136,21 @@ def product_duplicates(request):
                 tokens_a = name_tokens.get(base, [])
                 tokens_b = name_tokens.get(other, [])
                 shared = set(tokens_a) & set(tokens_b)
-                if len(shared) < 2:
+                if len(shared) < 3:
                     continue
-                if _token_similarity(tokens_a, tokens_b) < 0.8:
+                if _token_similarity(tokens_a, tokens_b) < 0.9:
                     continue
                 if _similarity(base, other) < DUPLICATE_NAME_SIMILARITY:
                     continue
                 merged = list({*name_groups.get(base, []), *name_groups.get(other, [])})
+                if not any((not p.barcode and not p.internal_sku) for p in merged):
+                    continue
+                if not _group_has_core_signal(merged):
+                    continue
                 has_signal = False
                 for idx, p in enumerate(merged):
                     for q in merged[idx + 1 :]:
-                        if _has_supporting_signal(p, q):
+                        if _has_supporting_signal(p, q, min_signals=4):
                             has_signal = True
                             break
                     if has_signal:
@@ -1913,8 +2166,8 @@ def product_duplicates(request):
                         "type": "name_fuzzy",
                         "key": f"{base} ~ {other}",
                         "master_id": master.id if master else None,
-                        "confidence": 0.82,
-                        "reason": "Nom très proche + signal commun",
+                        "confidence": 0.76,
+                        "reason": "Nom très proche + signaux forts (catégorie/prix/fournisseur)",
                         "products": [_product_brief(p) for p in merged],
                     }
                 )
@@ -2029,6 +2282,8 @@ def rituals(request):
     ).count()
     missing_prices = qs.filter(purchase_price__isnull=True, selling_price__isnull=True).count()
     missing_categories = qs.filter(Q(category__isnull=True) | Q(category="")).count()
+    missing_suppliers = qs.filter(Q(supplier__isnull=True) | Q(supplier="")).count()
+    missing_units = qs.filter(Q(unit__isnull=True) | Q(unit="")).count()
 
     now = timezone.now().date()
     dlc_30 = qs.filter(dlc__isnull=False, dlc__lte=now + timedelta(days=30)).count()
@@ -2038,6 +2293,17 @@ def rituals(request):
 
     missing_lots = qs.filter(lot_number__isnull=True).count()
 
+    top_low_stock = list(
+        qs.filter(min_qty__isnull=False, quantity__lte=F("min_qty"))
+        .order_by("quantity")
+        .values_list("name", flat=True)[:3]
+    )
+    top_losses = list(
+        losses_qs.values("product__name")
+        .annotate(total_qty=Sum("quantity"))
+        .order_by("-total_qty")[:3]
+    )
+
     def add_priority(acc, label, value, tone, hint):
         if value:
             acc.append({"label": label, "value": value, "tone": tone, "hint": hint})
@@ -2046,17 +2312,62 @@ def rituals(request):
     if total_products == 0:
         insights.append("Aucun produit suivi ce mois-ci : importez un catalogue pour démarrer le rituel.")
     if missing_identifiers:
-        insights.append(f"{missing_identifiers} produit(s) sans code-barres ni SKU : risque de doublons.")
+        insights.append(f"{missing_identifiers} produit(s) sans identifiant : risque élevé de doublons.")
     if missing_prices:
-        insights.append(f"{missing_prices} produit(s) sans prix : analyses financières limitées.")
+        insights.append(f"{missing_prices} produit(s) sans prix : marge et pertes difficiles à mesurer.")
     if missing_categories:
         insights.append(f"{missing_categories} produit(s) sans catégorie : pilotage moins précis.")
+    if missing_suppliers:
+        insights.append(f"{missing_suppliers} produit(s) sans fournisseur : suivi d’achats incomplet.")
+    if missing_units:
+        insights.append(f"{missing_units} produit(s) sans unité claire : risques d’erreurs de comptage.")
     if dlc_30:
         insights.append(f"{dlc_30} produit(s) à moins de 30 jours d’échéance.")
     if low_stock:
         insights.append(f"{low_stock} produit(s) sous stock minimum.")
     if losses_count:
         insights.append(f"{losses_count} perte(s) enregistrée(s) ce mois.")
+    if top_low_stock:
+        insights.append("Stocks bas prioritaires : " + ", ".join(top_low_stock[:3]) + ".")
+    if top_losses:
+        focus = ", ".join(
+            f"{item['product__name']} ({int(item['total_qty'] or 0)}u)"
+            for item in top_losses
+            if item.get("product__name")
+        )
+        if focus:
+            insights.append(f"Pertes concentrées : {focus}.")
+
+    score = 100
+    score -= min(missing_identifiers * 2, 18)
+    score -= min(missing_prices * 2, 16)
+    score -= min(missing_categories, 10)
+    score -= min(missing_suppliers, 10)
+    score -= min(missing_units, 8)
+    score -= min(dlc_30 * 3, 24)
+    score -= min(low_stock * 2, 20)
+    score -= min(losses_count * 3, 20)
+    score = max(40, score)
+    if score >= 80:
+        status = "Stock sain"
+    elif score >= 60:
+        status = "À surveiller"
+    else:
+        status = "Priorités urgentes"
+
+    dynamic_actions = []
+    if missing_identifiers:
+        dynamic_actions.append({"label": "Activer SKU / code-barres", "href": "/app/settings"})
+    if missing_prices:
+        dynamic_actions.append({"label": "Compléter les prix manquants", "href": "/app/products"})
+    if missing_suppliers:
+        dynamic_actions.append({"label": "Renseigner les fournisseurs clés", "href": "/app/products"})
+    if dlc_30:
+        dynamic_actions.append({"label": "Contrôler les DLC proches", "href": "/app/inventory"})
+    if low_stock:
+        dynamic_actions.append({"label": "Ajuster les stocks bas", "href": "/app/inventory"})
+    if losses_count:
+        dynamic_actions.append({"label": "Analyser les pertes", "href": "/app/losses"})
 
     ritual_map = {
         "grocery_food": {
@@ -2070,6 +2381,7 @@ def rituals(request):
                 *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "danger", "hint": "Rotation rapide"}]),
                 *([] if low_stock == 0 else [{"label": "Stocks sous seuil", "value": low_stock, "tone": "warning", "hint": "Risque de rupture"}]),
                 *([] if losses_count == 0 else [{"label": "Pertes du mois", "value": losses_count, "tone": "info", "hint": "À expliquer"}]),
+                *([] if missing_identifiers == 0 else [{"label": "Produits sans identifiant", "value": missing_identifiers, "tone": "warning", "hint": "Doublons probables"}]),
             ],
             "checklist": [
                 {"label": "Contrôler les DLC < 30j", "href": "/app/inventory"},
@@ -2092,6 +2404,7 @@ def rituals(request):
                 *([] if losses_count == 0 else [{"label": "Pertes matières premières", "value": losses_count, "tone": "danger", "hint": "Causes ciblées"}]),
                 *([] if low_stock == 0 else [{"label": "Stocks bas", "value": low_stock, "tone": "warning", "hint": "Risque de rupture"}]),
                 *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "info", "hint": "Rotation"}]),
+                *([] if missing_prices == 0 else [{"label": "Prix d’achat manquants", "value": missing_prices, "tone": "info", "hint": "Impact pertes"}]),
             ],
             "checklist": [
                 {"label": "Revoir les pertes sur matières premières", "href": "/app/losses"},
@@ -2114,6 +2427,7 @@ def rituals(request):
                 *([] if dlc_30 == 0 else [{"label": "DLC à moins de 30j", "value": dlc_30, "tone": "danger", "hint": "Contrôle immédiat"}]),
                 *([] if dlc_90 == 0 else [{"label": "DLC à 90j", "value": dlc_90, "tone": "warning", "hint": "Anticiper"}]),
                 *([] if missing_lots == 0 else [{"label": "Lots manquants", "value": missing_lots, "tone": "info", "hint": "Traçabilité"}]),
+                *([] if missing_suppliers == 0 else [{"label": "Fournisseurs manquants", "value": missing_suppliers, "tone": "info", "hint": "Suivi achats"}]),
             ],
             "checklist": [
                 {"label": "Contrôler les dates proches", "href": "/app/inventory"},
@@ -2132,12 +2446,14 @@ def rituals(request):
         {
             "id": service_type,
             "title": ritual["title"],
-            "summary": f"{total_products} produit(s) suivis ce mois.",
+            "summary": f"{total_products} produit(s) suivis · {status} ({score}/100).",
             "items": ritual["items"],
             "priorities": ritual.get("priorities", []),
             "checklist": ritual.get("checklist", []),
             "insights": insights[:3],
-            "actions": ritual["actions"],
+            "actions": (dynamic_actions + ritual["actions"])[:4],
+            "status": status,
+            "score": score,
         }
     ]
 
@@ -2149,7 +2465,9 @@ def _parse_receipt_rows(file_obj, file_name):
     if file_name.lower().endswith(".csv"):
         raw = file_obj.read().decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(raw))
-        return list(reader), "csv"
+        rows = list(reader)
+        meta = _extract_invoice_meta_from_rows(rows)
+        return rows, "csv", meta
 
     if file_name.lower().endswith(".pdf"):
         try:
@@ -2157,33 +2475,102 @@ def _parse_receipt_rows(file_obj, file_name):
         except Exception as exc:
             raise exceptions.ValidationError("PDF non supporté sur ce déploiement.") from exc
         reader = PdfReader(file_obj)
-        text = "\n".join(page.extract_text() or "" for page in reader.pages)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        page_texts = []
+        for page in reader.pages:
+            text = ""
+            try:
+                text = page.extract_text(extraction_mode="layout") or ""
+            except TypeError:
+                text = page.extract_text() or ""
+            if not text:
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    text = ""
+            if text:
+                page_texts.append(text)
+
+        raw_text = "\n".join(page_texts)
+        raw_text = _normalize_receipt_text(raw_text)
+        meta = _extract_invoice_meta_from_text(raw_text)
+        lines = [_normalize_receipt_text(line).strip() for line in raw_text.splitlines() if line.strip()]
+        lines = _merge_receipt_lines(lines)
         if not lines:
-            return [], "pdf"
+            return [], "pdf", meta
         header = lines[0].lower()
-        has_delim = ";" in header or "," in header or "\t" in header
+        header_idx = None
+        for idx, line in enumerate(lines[:20]):
+            lower = line.lower()
+            if any(k in lower for k in ("produit", "designation", "libelle", "article", "quantite", "qte")) and (
+                ";" in line or "," in line or "\t" in line or "|" in line
+            ):
+                header_idx = idx
+                header = lower
+                break
+        has_delim = ";" in header or "," in header or "\t" in header or "|" in header
         if has_delim and any(k in header for k in ("produit", "designation", "libelle", "qty", "quantite", "qte", "prix")):
-            delimiter = ";" if ";" in header else "," if "," in header else "\t"
-            reader = csv.DictReader(io.StringIO("\n".join(lines)), delimiter=delimiter)
+            delimiter = ";" if ";" in header else "," if "," in header else "\t" if "\t" in header else "|"
+            csv_start = header_idx if header_idx is not None else 0
+            reader = csv.DictReader(io.StringIO("\n".join(lines[csv_start:])), delimiter=delimiter)
             rows = list(reader)
             if rows:
-                return rows, "pdf"
+                meta_from_rows = _extract_invoice_meta_from_rows(rows)
+                return rows, "pdf", meta_from_rows or meta
 
         rows = []
         for line in lines:
             parsed = _parse_receipt_line(line)
             if parsed:
                 rows.append(parsed)
-        return rows, "pdf"
+        return rows, "pdf", meta
 
     raise exceptions.ValidationError("Format non supporté (CSV ou PDF).")
+
+
+def _normalize_receipt_text(value):
+    if not value:
+        return ""
+    return (
+        str(value)
+        .replace("\u00a0", " ")
+        .replace("\u202f", " ")
+        .replace("\u2007", " ")
+    )
+
+
+def _merge_receipt_lines(lines):
+    if not lines:
+        return []
+
+    def has_price(val):
+        return bool(re.search(r"\\d+[.,]\\d{2}", val))
+
+    def has_words(val):
+        return bool(re.search(r"[A-Za-zÀ-ÿ]", val))
+
+    def is_name_only(val):
+        return has_words(val) and not has_price(val)
+
+    merged = []
+    idx = 0
+    while idx < len(lines):
+        current = _normalize_receipt_text(lines[idx]).strip()
+        if not current:
+            idx += 1
+            continue
+        next_line = _normalize_receipt_text(lines[idx + 1]).strip() if idx + 1 < len(lines) else ""
+        if is_name_only(current) and next_line and has_price(next_line):
+            merged.append(f"{current} {next_line}")
+            idx += 2
+            continue
+        merged.append(current)
+        idx += 1
+    return merged
 
 
 RECEIPT_IGNORE_TOKENS = (
     "facture",
     "total",
-    "tva",
     "ht",
     "ttc",
     "montant",
@@ -2197,25 +2584,102 @@ RECEIPT_IGNORE_TOKENS = (
     "référence",
     "reference",
 )
+RECEIPT_NAME_BLACKLIST = {
+    "facture",
+    "invoice",
+    "total",
+    "ttc",
+    "ht",
+    "tva",
+    "montant",
+    "date",
+    "client",
+    "adresse",
+    "reglement",
+    "iban",
+}
 RECEIPT_UNITS = {"kg", "g", "l", "ml", "pcs", "pc", "un", "u", "unite", "unité"}
+RECEIPT_INVOICE_PATTERNS = (
+    r"(?:facture|invoice|bon)\\s*(?:n[o°º]?|num(?:ero)?|#)?\\s*[:\\-]?\\s*([A-Z0-9][A-Z0-9\\-_/]{2,})",
+    r"\\bF\\d{4,}\\b",
+    r"\\b[A-Z]{2,5}[-/]\\d{3,}\\b",
+)
+RECEIPT_DATE_PATTERNS = (
+    r"\\b\\d{4}-\\d{2}-\\d{2}\\b",
+    r"\\b\\d{1,2}[\\-/]\\d{1,2}[\\-/]\\d{2,4}\\b",
+)
+
+
+def _normalize_invoice_number(value):
+    if not value:
+        return ""
+    raw = re.sub(r"\\s+", "", str(value).strip())
+    return raw.upper()
+
+
+def _parse_invoice_date(value):
+    if not value:
+        return None
+    raw = str(value).strip().replace(".", "/")
+    if re.match(r"^\\d{4}-\\d{2}-\\d{2}$", raw):
+        return parse_date(raw)
+    match = re.match(r"^(\\d{1,2})[\\-/](\\d{1,2})[\\-/](\\d{2,4})$", raw)
+    if not match:
+        return None
+    day, month, year = match.groups()
+    if len(year) == 2:
+        year = f"20{year}"
+    return parse_date(f"{year}-{int(month):02d}-{int(day):02d}")
+
+
+def _extract_invoice_meta_from_text(text):
+    meta = {"invoice_number": "", "invoice_date": None}
+    if not text:
+        return meta
+    for pattern in RECEIPT_INVOICE_PATTERNS:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            meta["invoice_number"] = _normalize_invoice_number(
+                match.group(1) if match.groups() else match.group(0)
+            )
+            break
+    for pattern in RECEIPT_DATE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            meta["invoice_date"] = _parse_invoice_date(match.group(0))
+            if meta["invoice_date"]:
+                break
+    return meta
+
+
+def _extract_invoice_meta_from_rows(rows):
+    meta = {"invoice_number": "", "invoice_date": None}
+    for row in rows or []:
+        lower = {str(k).strip().lower(): v for k, v in (row or {}).items()}
+        if not meta["invoice_number"]:
+            for key in ("invoice_number", "facture", "numero_facture", "num_facture", "invoice"):
+                value = lower.get(key)
+                if value:
+                    meta["invoice_number"] = _normalize_invoice_number(value)
+                    break
+        if not meta["invoice_date"]:
+            for key in ("invoice_date", "date_facture", "date"):
+                parsed = _parse_invoice_date(lower.get(key))
+                if parsed:
+                    meta["invoice_date"] = parsed
+                    break
+        if meta["invoice_number"] and meta["invoice_date"]:
+            break
+    return meta
 
 
 def _parse_receipt_line(line: str):
     if not line:
         return None
+    line = _normalize_receipt_text(line).strip()
     lower = line.lower()
-    if any(token in lower for token in RECEIPT_IGNORE_TOKENS):
+    if any(lower.startswith(token) for token in RECEIPT_IGNORE_TOKENS):
         return None
-
-    tokens = [t for t in re.split(r"\\s+", line) if t]
-    if len(tokens) < 2:
-        return None
-
-    barcode = ""
-    for t in tokens:
-        if re.fullmatch(r"\\d{8,14}", t):
-            barcode = t
-            break
 
     def to_number(token):
         cleaned = re.sub(r"[^0-9,\\.]", "", token)
@@ -2226,6 +2690,219 @@ def _parse_receipt_line(line: str):
             return float(cleaned)
         except ValueError:
             return None
+
+    def parse_columns(columns):
+        if not columns:
+            return None
+        cols = [c.strip() for c in columns if c.strip()]
+        if len(cols) < 2:
+            return None
+        barcode = ""
+        for idx, col in enumerate(list(cols)):
+            compact = col.replace(" ", "")
+            if re.fullmatch(r"\\d{8,14}", compact):
+                barcode = compact
+                cols.pop(idx)
+                break
+
+        price_candidates = []
+        for idx in range(len(cols) - 1, -1, -1):
+            num = to_number(cols[idx])
+            if num is not None:
+                price_candidates.append((idx, num))
+        if not price_candidates:
+            qty_idx = None
+            qty_val = None
+            unit = ""
+            for idx in range(len(cols) - 1, -1, -1):
+                part = cols[idx]
+                match = re.fullmatch(r"(\\d+[.,]?\\d*)\\s*([a-zA-Z]{1,4})?", part)
+                if match:
+                    qty_val = to_number(match.group(1))
+                    unit = (match.group(2) or "").lower()
+                    if unit and unit not in RECEIPT_UNITS:
+                        unit = ""
+                    qty_idx = idx
+                    break
+            if qty_idx is not None and not unit and qty_idx + 1 < len(cols):
+                unit_candidate = cols[qty_idx + 1].strip().lower()
+                if unit_candidate in RECEIPT_UNITS:
+                    unit = unit_candidate
+            if qty_val is None:
+                return None
+            name_parts = []
+            for idx, col in enumerate(cols):
+                if idx == qty_idx:
+                    continue
+                if col.lower().strip(".,;") in RECEIPT_UNITS:
+                    continue
+                if re.fullmatch(r"\\d+[.,]?\\d*", col):
+                    continue
+                name_parts.append(col)
+            name = " ".join(name_parts).strip()
+            if not name:
+                return None
+            tokens = _tokenize_name(name)
+            if not tokens:
+                return None
+            if len(tokens) == 1 and (tokens[0] in RECEIPT_NAME_BLACKLIST or len(tokens[0]) < 3):
+                return None
+            return {
+                "name": name,
+                "quantity": qty_val if qty_val is not None else "",
+                "unit": unit,
+                "purchase_price": "",
+                "tva": "",
+                "category": "",
+                "barcode": barcode,
+                "internal_sku": "",
+            }
+        price_candidates = list(reversed(price_candidates))
+        price_idx, price_val = price_candidates[-1]
+
+        qty_idx = None
+        qty_val = None
+        unit = ""
+        for idx in range(price_idx - 1, -1, -1):
+            part = cols[idx]
+            match = re.fullmatch(r"(\\d+[.,]?\\d*)\\s*([a-zA-Z]{1,4})?", part)
+            if match:
+                qty_val = to_number(match.group(1))
+                unit = (match.group(2) or "").lower()
+                if unit and unit not in RECEIPT_UNITS:
+                    unit = ""
+                qty_idx = idx
+                break
+        if qty_idx is not None and not unit and qty_idx + 1 < len(cols):
+            unit_candidate = cols[qty_idx + 1].strip().lower()
+            if unit_candidate in RECEIPT_UNITS:
+                unit = unit_candidate
+
+        if qty_val is not None and len(price_candidates) >= 2:
+            total_price = price_candidates[-1][1]
+            for idx, num in reversed(price_candidates[:-1]):
+                if qty_idx is not None and idx == qty_idx:
+                    continue
+                if num <= 0:
+                    continue
+                if abs((num * qty_val) - total_price) < 0.05:
+                    price_idx, price_val = idx, num
+                    break
+
+        tva = None
+        for col in cols:
+            if "%" in col:
+                rate = to_number(col)
+                if rate is not None and 0 <= rate <= 30:
+                    tva = rate
+                    break
+
+        name_parts = []
+        for idx, col in enumerate(cols):
+            if idx == price_idx or (qty_idx is not None and idx == qty_idx):
+                continue
+            if col.lower().strip(".,;") in RECEIPT_UNITS:
+                continue
+            if re.fullmatch(r"\\d+[.,]?\\d*", col):
+                continue
+            name_parts.append(col)
+        name = " ".join(name_parts).strip()
+        if not name:
+            return None
+        tokens = _tokenize_name(name)
+        if not tokens:
+            return None
+        if len(tokens) == 1 and (tokens[0] in RECEIPT_NAME_BLACKLIST or len(tokens[0]) < 3):
+            return None
+        return {
+            "name": name,
+            "quantity": qty_val if qty_val is not None else "",
+            "unit": unit,
+            "purchase_price": price_val,
+            "tva": tva if tva is not None else "",
+            "category": "",
+            "barcode": barcode,
+            "internal_sku": "",
+        }
+
+    for delim in (";", "|", "\t"):
+        if delim in line:
+            parsed = parse_columns(line.split(delim))
+            if parsed:
+                return parsed
+
+    columns = [c.strip() for c in re.split(r"\\s{2,}|\\t|\\|", line) if c.strip()]
+    parsed_columns = parse_columns(columns)
+    if parsed_columns:
+        return parsed_columns
+
+    def parse_regex(raw_line):
+        price_hits = re.findall(r"(\\d+[.,]\\d{2})", raw_line)
+        if not price_hits:
+            return None
+        price_raw = price_hits[-1]
+        price_val = to_number(price_raw)
+        if price_val is None:
+            return None
+        prefix = raw_line[: raw_line.rfind(price_raw)].strip()
+        prefix = re.sub(r"[€$£]\\s*$", "", prefix).strip()
+        prefix = re.sub(r"[×x]\\s*$", "", prefix).strip()
+
+        qty_val = None
+        unit = ""
+        qty_match = re.search(r"(\\d+[.,]?\\d*)\\s*(kg|g|l|ml|pcs|pc|u|un|unite|unité)?\\s*$", prefix, flags=re.I)
+        barcode = ""
+        barcode_match = re.search(r"\\b(\\d{8,14})\\b", prefix)
+        if barcode_match:
+            barcode = barcode_match.group(1)
+            prefix = prefix.replace(barcode, " ").strip()
+
+        if qty_match:
+            qty_val = to_number(qty_match.group(1))
+            unit = (qty_match.group(2) or "").lower()
+            if unit and unit not in RECEIPT_UNITS:
+                unit = ""
+            name = prefix[: qty_match.start()].strip()
+        else:
+            name = prefix
+
+        if not name:
+            return None
+        tokens = _tokenize_name(name)
+        if not tokens:
+            return None
+        if len(tokens) == 1 and (tokens[0] in RECEIPT_NAME_BLACKLIST or len(tokens[0]) < 3):
+            return None
+
+        tva = None
+        for token in re.split(r"\\s+", raw_line):
+            if "%" in token:
+                rate = to_number(token)
+                if rate is not None and 0 <= rate <= 30:
+                    tva = rate
+                    break
+
+        return {
+            "name": name,
+            "quantity": qty_val if qty_val is not None else "",
+            "unit": unit,
+            "purchase_price": price_val,
+            "tva": tva if tva is not None else "",
+            "category": "",
+            "barcode": barcode,
+            "internal_sku": "",
+        }
+
+    tokens = [t for t in re.split(r"\\s+", line) if t]
+    if len(tokens) < 2:
+        parsed_regex = parse_regex(line)
+        return parsed_regex
+
+    barcode = ""
+    for t in tokens:
+        if re.fullmatch(r"\\d{8,14}", t):
+            barcode = t
+            break
 
     number_positions = []
     for idx, t in enumerate(tokens):
@@ -2246,17 +2923,36 @@ def _parse_receipt_line(line: str):
         qty_idx = None
 
     unit = ""
-    for t in tokens:
+    for idx, t in enumerate(tokens):
         t_clean = t.lower().strip(".,;")
         if t_clean in RECEIPT_UNITS:
             unit = t_clean
             break
+        token_match = re.fullmatch(r"(\\d+[.,]?\\d*)(kg|g|l|ml|pcs|pc|u|un|unite|unité)", t_clean)
+        if token_match and qty_idx is None:
+            qty_val = to_number(token_match.group(1))
+            unit = token_match.group(2).lower()
+            qty_idx = idx
+
+    if len(number_positions) == 1 and unit:
+        qty_idx = price_idx
+        qty_val = price_val
+        price_val = ""
+        price_idx = None
+
+    tva = None
+    for t in tokens:
+        if "%" in t:
+            rate = to_number(t)
+            if rate is not None and 0 <= rate <= 30:
+                tva = rate
+                break
 
     name_tokens = []
     for idx, t in enumerate(tokens):
         if barcode and t == barcode:
             continue
-        if idx == price_idx or (qty_idx is not None and idx == qty_idx):
+        if (price_idx is not None and idx == price_idx) or (qty_idx is not None and idx == qty_idx):
             continue
         if t.lower().strip(".,;") in RECEIPT_UNITS:
             continue
@@ -2266,13 +2962,23 @@ def _parse_receipt_line(line: str):
 
     name = " ".join(name_tokens).strip()
     if not name:
-        return None
+        parsed_regex = parse_regex(line)
+        return parsed_regex
+    tokens = _tokenize_name(name)
+    if not tokens:
+        parsed_regex = parse_regex(line)
+        return parsed_regex
+    if len(tokens) == 1 and (tokens[0] in RECEIPT_NAME_BLACKLIST or len(tokens[0]) < 3):
+        parsed_regex = parse_regex(line)
+        return parsed_regex
 
     return {
         "name": name,
         "quantity": qty_val if qty_val is not None else "",
         "unit": unit,
         "purchase_price": price_val,
+        "tva": tva if tva is not None else "",
+        "category": "",
         "barcode": barcode,
         "internal_sku": "",
     }
@@ -2291,9 +2997,38 @@ def _normalize_receipt_row(row):
         "quantity": pick("quantity", "qty", "quantite", "qte"),
         "unit": pick("unit", "uom", "unite"),
         "purchase_price": pick("purchase_price", "prix_achat", "price", "prix"),
+        "tva": pick("tva", "vat", "tax", "taux_tva"),
+        "category": pick("category", "categorie", "famille", "rayon"),
         "barcode": pick("barcode", "ean", "code_barres"),
         "internal_sku": pick("internal_sku", "sku", "ref", "reference"),
     }
+
+
+def _compute_receipt_hash(rows, supplier_name, invoice_number, invoice_date, received_at):
+    if not rows:
+        return ""
+    normalized = []
+    for row in rows:
+        normalized.append(
+            {
+                "name": (row.get("name") or "").strip().lower(),
+                "quantity": str(row.get("quantity") or "").strip(),
+                "unit": (row.get("unit") or "").strip().lower(),
+                "purchase_price": str(row.get("purchase_price") or "").strip(),
+                "tva": str(row.get("tva") or "").strip(),
+                "barcode": str(row.get("barcode") or "").strip(),
+                "internal_sku": str(row.get("internal_sku") or "").strip(),
+            }
+        )
+    payload = {
+        "supplier": (supplier_name or "").strip().lower(),
+        "invoice_number": (invoice_number or "").strip().lower(),
+        "invoice_date": str(invoice_date or ""),
+        "received_at": str(received_at or ""),
+        "lines": normalized,
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _match_product_from_line(tenant, service, line, month):
@@ -2327,11 +3062,65 @@ def import_receipt(request):
 
     service = get_service_from_request(request)
     supplier_name = (request.data.get("supplier_name") or "").strip()
-    received_at = request.data.get("received_at") or timezone.now().date().isoformat()
+    received_at_raw = request.data.get("received_at") or ""
+    received_at = _parse_invoice_date(received_at_raw) or parse_date(received_at_raw) or timezone.now().date()
 
-    rows, source = _parse_receipt_rows(file_obj, file_obj.name)
+    rows, source, meta = _parse_receipt_rows(file_obj, file_obj.name)
     if len(rows) > RECEIPT_IMPORT_MAX_LINES:
         rows = rows[:RECEIPT_IMPORT_MAX_LINES]
+    raw_rows_count = len(rows)
+
+    invoice_number = _normalize_invoice_number(
+        request.data.get("invoice_number") or (meta or {}).get("invoice_number") or ""
+    )
+    invoice_date = _parse_invoice_date(request.data.get("invoice_date") or "")
+    if not invoice_date:
+        invoice_date = (meta or {}).get("invoice_date")
+
+    if invoice_number:
+        exists = Receipt.objects.filter(tenant=tenant, invoice_number__iexact=invoice_number).exists()
+        if exists:
+            return Response(
+                {
+                    "detail": "Facture déjà importée pour ce commerce.",
+                    "code": "RECEIPT_DUPLICATE_INVOICE",
+                },
+                status=409,
+            )
+
+    cleaned_rows = []
+    for row in rows:
+        cleaned = _normalize_receipt_row(row)
+        if not cleaned["name"]:
+            continue
+        cleaned_rows.append(cleaned)
+
+    if not cleaned_rows:
+        return Response(
+            {
+                "detail": "Aucune ligne exploitable n’a été trouvée dans ce fichier. Vérifiez le format.",
+                "code": "RECEIPT_EMPTY",
+            },
+            status=422,
+        )
+
+    import_hash = _compute_receipt_hash(
+        cleaned_rows,
+        supplier_name,
+        invoice_number,
+        invoice_date,
+        received_at,
+    )
+    if not invoice_number and import_hash:
+        exists = Receipt.objects.filter(tenant=tenant, import_hash=import_hash).exists()
+        if exists:
+            return Response(
+                {
+                    "detail": "Cette facture a déjà été importée pour ce commerce.",
+                    "code": "RECEIPT_DUPLICATE_INVOICE",
+                },
+                status=409,
+            )
 
     supplier = None
     if supplier_name:
@@ -2351,6 +3140,9 @@ def import_receipt(request):
         service=service,
         supplier=supplier,
         supplier_name=supplier_name,
+        invoice_number=invoice_number,
+        invoice_date=invoice_date,
+        import_hash=import_hash,
         source=source,
         file_name=file_obj.name or "",
         received_at=received_at,
@@ -2359,20 +3151,22 @@ def import_receipt(request):
 
     month = timezone.now().strftime("%Y-%m")
     lines_payload = []
-    skipped = 0
-    for idx, row in enumerate(rows, start=1):
-        cleaned = _normalize_receipt_row(row)
-        if not cleaned["name"]:
-            skipped += 1
-            continue
+    skipped = max(0, raw_rows_count - len(cleaned_rows))
+    for idx, cleaned in enumerate(cleaned_rows, start=1):
         try:
-            qty = float(cleaned["quantity"] or 0)
+            qty = float(cleaned["quantity"]) if cleaned["quantity"] not in ("", None) else 1
         except (TypeError, ValueError):
-            qty = 0
+            qty = 1
+        if qty <= 0:
+            qty = 1
         try:
             price = float(cleaned["purchase_price"]) if cleaned["purchase_price"] not in ("", None) else None
         except (TypeError, ValueError):
             price = None
+        try:
+            tva = float(cleaned["tva"]) if cleaned.get("tva") not in ("", None) else None
+        except (TypeError, ValueError):
+            tva = None
 
         matched = _match_product_from_line(tenant, service, cleaned, month)
 
@@ -2383,6 +3177,8 @@ def import_receipt(request):
             quantity=qty,
             unit=cleaned["unit"] or "pcs",
             purchase_price=price,
+            tva=tva,
+            category=cleaned.get("category") or "",
             barcode=cleaned["barcode"] or "",
             internal_sku=cleaned["internal_sku"] or "",
             matched_product=matched,
@@ -2395,6 +3191,8 @@ def import_receipt(request):
                 "quantity": float(line.quantity or 0),
                 "unit": line.unit,
                 "purchase_price": line.purchase_price,
+                "tva": line.tva,
+                "category": line.category,
                 "barcode": line.barcode,
                 "internal_sku": line.internal_sku,
                 "matched_product_id": matched.id if matched else None,
@@ -2404,7 +3202,7 @@ def import_receipt(request):
     _log_receipt_import_event(
         tenant=tenant,
         user=request.user,
-        params={"lines": len(lines_payload), "supplier": supplier_name, "source": source},
+        params={"lines": len(lines_payload), "supplier": supplier_name, "source": source, "skipped": skipped},
     )
     logger.info(
         "receipts_imported",
@@ -2412,6 +3210,7 @@ def import_receipt(request):
             "tenant_id": tenant.id,
             "service_id": getattr(service, "id", None),
             "lines": len(lines_payload),
+            "skipped": skipped,
             "supplier": supplier_name,
             "source": source,
         },
@@ -2421,6 +3220,9 @@ def import_receipt(request):
         {
             "receipt_id": receipt.id,
             "supplier": supplier_name,
+            "invoice_number": receipt.invoice_number,
+            "invoice_date": receipt.invoice_date.isoformat() if receipt.invoice_date else None,
+        "received_at": receipt.received_at.isoformat() if receipt.received_at else None,
             "lines": lines_payload,
             "skipped_lines": skipped,
         },
@@ -2476,8 +3278,29 @@ def apply_receipt(request, receipt_id):
                     purchase_price=line.purchase_price,
                 )
 
+            updates = []
+            if line.barcode and not product.barcode:
+                product.barcode = line.barcode
+                updates.append("barcode")
+            if line.internal_sku and not product.internal_sku:
+                product.internal_sku = line.internal_sku
+                updates.append("internal_sku")
+            if line.category and not product.category:
+                product.category = line.category
+                updates.append("category")
+            if line.unit and not product.unit:
+                product.unit = line.unit
+                updates.append("unit")
+            if line.purchase_price is not None and product.purchase_price in (None, "", 0):
+                product.purchase_price = line.purchase_price
+                updates.append("purchase_price")
+            if line.tva is not None and product.tva in (None, ""):
+                product.tva = line.tva
+                updates.append("tva")
+
             product.quantity = float(product.quantity or 0) + float(line.quantity or 0)
-            product.save(update_fields=["quantity"])
+            updates.append("quantity")
+            product.save(update_fields=updates)
             line.matched_product = product
             line.status = "MATCHED" if action == "match" else "CREATED"
             line.save(update_fields=["matched_product", "status"])
@@ -2496,6 +3319,66 @@ def apply_receipt(request, receipt_id):
     )
 
     return Response({"detail": "Réception appliquée.", "applied": applied})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def receipts_history(request):
+    tenant = get_tenant_for_request(request)
+    check_entitlement(tenant, "receipts_import")
+
+    service_param = request.query_params.get("service")
+    query = (request.query_params.get("q") or "").strip()
+    date_param = (request.query_params.get("date") or "").strip()
+    limit = _parse_positive_int(request.query_params.get("limit"), 30) or 30
+
+    qs = (
+        Receipt.objects.filter(tenant=tenant)
+        .select_related("service", "supplier")
+        .annotate(lines_count=Count("lines"))
+        .order_by("-received_at", "-created_at")
+    )
+
+    if service_param and service_param != "all":
+        try:
+            qs = qs.filter(service_id=int(service_param))
+        except (ValueError, TypeError):
+            pass
+
+    if query:
+        q_date = _parse_invoice_date(query) or parse_date(query)
+        filters = (
+            Q(invoice_number__icontains=query)
+            | Q(supplier_name__icontains=query)
+            | Q(file_name__icontains=query)
+        )
+        if q_date:
+            filters |= Q(received_at=q_date) | Q(invoice_date=q_date)
+        qs = qs.filter(filters)
+
+    if date_param:
+        parsed_date = _parse_invoice_date(date_param) or parse_date(date_param)
+        if parsed_date:
+            qs = qs.filter(Q(received_at=parsed_date) | Q(invoice_date=parsed_date))
+
+    receipts = list(qs[:limit])
+    payload = [
+        {
+            "id": r.id,
+            "service_id": r.service_id,
+            "service_name": r.service.name if r.service else None,
+            "supplier": r.supplier_name or (r.supplier.name if r.supplier else ""),
+            "invoice_number": r.invoice_number,
+            "invoice_date": r.invoice_date.isoformat() if r.invoice_date else None,
+            "received_at": r.received_at.isoformat() if r.received_at else None,
+            "status": r.status,
+            "source": r.source,
+            "lines_count": getattr(r, "lines_count", 0),
+        }
+        for r in receipts
+    ]
+
+    return Response({"count": len(payload), "results": payload})
 
 
 @api_view(["GET"])
@@ -2557,8 +3440,8 @@ def labels_pdf(request):
             return Response(exc.detail, status=400)
 
     width, height = A4
-    margin_x = 0.5 * cm
-    margin_y = 0.6 * cm
+    margin_x = 0.18 * cm
+    margin_y = 0.18 * cm
     cols = 3
     rows = 8
     label_w = (width - (margin_x * 2)) / cols
@@ -2591,21 +3474,27 @@ def labels_pdf(request):
         if not code:
             return False
 
-        pad = 5
+        pad_x = 5
+        pad_y = 6
         name = (product.name or "").strip().upper()
-        name_lines = wrap_label_text(name, max_len=30, max_lines=2)
+        name_lines = wrap_label_text(name, max_len=28, max_lines=2)
         c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.setFont("Helvetica-Bold", 8.4)
-        y_name = y + label_h - 10
+        c.setFont("Helvetica-Bold", 8.8)
+        y_name = y + label_h - pad_y - 1
         for line in name_lines:
-            c.drawString(x + pad, y_name, line)
-            y_name -= 9
+            c.drawString(x + pad_x, y_name, line)
+            y_name -= 9.2
 
         base_price = product.selling_price if product.selling_price is not None else product.purchase_price
-        price = _format_price(base_price, currency_code) if "price" in fields else None
+        price = _format_price(base_price, currency_code) if "price" in fields and base_price is not None else None
         promo_price = _apply_promo(base_price, promo) if promo else None
         promo_active = promo_price is not None and price
-        price_line_y = y + label_h - 28
+        barcode_height = max(22, label_h * 0.24)
+        barcode_y = y + pad_y + 6
+        price_line_y = max(y + (label_h * 0.58), y_name - 6)
+        min_price_y = barcode_y + barcode_height + 18
+        if price_line_y < min_price_y:
+            price_line_y = min_price_y
 
         if promo_active:
             old_price = _format_price(base_price, currency_code)
@@ -2615,17 +3504,20 @@ def labels_pdf(request):
                 if promo["type"] == "percent"
                 else f"-{_format_price(promo['value'], currency_code)}"
             )
-            c.setFont("Helvetica", 8.5)
-            c.drawString(x + pad, price_line_y + 10, old_price or "")
-            old_width = c.stringWidth(old_price or "", "Helvetica", 8.5)
-            c.line(x + pad, price_line_y + 8, x + pad + old_width, price_line_y + 8)
-            c.setFont("Helvetica-Bold", 16.5)
-            c.drawCentredString(x + label_w / 2, price_line_y - 2, new_price or "")
-            c.setFont("Helvetica-Bold", 9)
-            c.drawRightString(x + label_w - pad, price_line_y + 10, badge)
+            c.setFont("Helvetica", 8)
+            c.drawString(x + pad_x, price_line_y + 12, old_price or "")
+            old_width = c.stringWidth(old_price or "", "Helvetica", 8)
+            c.line(x + pad_x, price_line_y + 10, x + pad_x + old_width, price_line_y + 10)
+            c.setFont("Helvetica-Bold", 21)
+            c.drawCentredString(x + label_w / 2, price_line_y, new_price or "")
+            c.setFont("Helvetica-Bold", 8.4)
+            c.drawRightString(x + label_w - pad_x, price_line_y + 12, badge)
         elif price:
-            c.setFont("Helvetica-Bold", 15.5)
+            c.setFont("Helvetica-Bold", 21)
             c.drawCentredString(x + label_w / 2, price_line_y, price)
+        elif "price" in fields:
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(x + label_w / 2, price_line_y + 4, "Prix à renseigner")
 
         if "price_unit" in fields:
             unit = (product.unit or "").lower()
@@ -2648,13 +3540,19 @@ def labels_pdf(request):
                     elif unit == "ml":
                         per_unit, suffix = price_val * 1000, f"{symbol}/L"
             if per_unit is not None and suffix:
-                c.setFont("Helvetica", 7)
-                c.drawRightString(x + label_w - pad, price_line_y - 6, f"{per_unit:.2f} {suffix}")
+                info_floor = barcode_y + barcode_height + 6
+                info_y = max(price_line_y - 10, info_floor)
+                if info_y < price_line_y - 2:
+                    c.setFont("Helvetica", 7.2)
+                    c.drawRightString(x + label_w - pad_x, info_y, f"{per_unit:.2f} {suffix}")
 
         pack_info = _format_pack_info(product)
         if pack_info:
-            c.setFont("Helvetica", 7)
-            c.drawRightString(x + label_w - pad, price_line_y - 16, pack_info)
+            info_floor = barcode_y + barcode_height + 6
+            pack_y = max(price_line_y - 18, info_floor - 8)
+            if pack_y < price_line_y - 2:
+                c.setFont("Helvetica", 7.1)
+                c.drawRightString(x + label_w - pad_x, pack_y, pack_info)
 
         extra_lines = []
         if "unit" in fields and product.unit:
@@ -2672,19 +3570,19 @@ def labels_pdf(request):
 
         extra_lines = extra_lines[:2]
         if extra_lines:
-            c.setFont("Helvetica", 7)
-            y_line = price_line_y - 22
-            for line in extra_lines:
-                c.drawString(x + pad, y_line, line[:40])
-                y_line -= 9
+            info_floor = barcode_y + barcode_height + 6
+            y_line = max(price_line_y - 14, info_floor)
+            if y_line < price_line_y - 2:
+                c.setFont("Helvetica", 7)
+                for line in extra_lines:
+                    c.drawString(x + pad_x, y_line, line[:40])
+                    y_line -= 8.2
 
-        barcode_obj = code128.Code128(code, barHeight=18, barWidth=0.8)
+        barcode_obj = code128.Code128(code, barHeight=barcode_height, barWidth=0.82)
         barcode_x = x + (label_w - barcode_obj.width) / 2
-        barcode_y = y + 9
         barcode_obj.drawOn(c, barcode_x, barcode_y)
 
-        c.setFont("Helvetica", 6)
-        c.drawString(x + pad, y + 3, f"{company_name}"[:30])
+        c.setFont("Helvetica", 6.5)
         c.drawCentredString(x + label_w / 2, barcode_y - 6, code)
         return True
 

@@ -157,6 +157,8 @@ export default function Products() {
     company_phone: "",
     company_address: "",
   });
+  const [pdfTemplate, setPdfTemplate] = useState("classic");
+  const [pdfLogo, setPdfLogo] = useState(null);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -318,6 +320,14 @@ export default function Products() {
     base.push("unit");
     return base;
   }, [barcodeEnabled, skuEnabled]);
+  const templateOptions = useMemo(
+    () => [
+      { value: "classic", label: "Classique" },
+      { value: "midnight", label: "Minuit" },
+      { value: "emerald", label: "Émeraude" },
+    ],
+    []
+  );
 
   const load = async () => {
     if (!serviceId) return;
@@ -625,6 +635,12 @@ export default function Products() {
       return;
     }
 
+    if (pdfLogo && pdfLogo.size > 2 * 1024 * 1024) {
+      setPdfError("Logo trop lourd. Limitez à 2 Mo.");
+      setPdfErrorCode("LOGO_TOO_LARGE");
+      return;
+    }
+
     setPdfLoading(true);
     try {
       const params = new URLSearchParams();
@@ -636,8 +652,22 @@ export default function Products() {
       if (pdfBranding.company_email) params.set("company_email", pdfBranding.company_email);
       if (pdfBranding.company_phone) params.set("company_phone", pdfBranding.company_phone);
       if (pdfBranding.company_address) params.set("company_address", pdfBranding.company_address);
+      if (pdfTemplate) params.set("template", pdfTemplate);
 
-      const res = await api.get(`/api/catalog/pdf/?${params.toString()}`, { responseType: "blob" });
+      let res;
+      if (pdfLogo) {
+        const formData = new FormData();
+        formData.append("logo", pdfLogo);
+        for (const [key, value] of params.entries()) {
+          formData.append(key, value);
+        }
+        res = await api.post("/api/catalog/pdf/", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+          responseType: "blob",
+        });
+      } else {
+        res = await api.get(`/api/catalog/pdf/?${params.toString()}`, { responseType: "blob" });
+      }
       const filename = parseFilenameFromContentDisposition(
         res?.headers?.["content-disposition"],
         "stockscan_catalogue.pdf"
@@ -1001,7 +1031,7 @@ export default function Products() {
                 }}
                 disabled={loading}
               >
-                Reset
+                Réinitialiser
               </Button>
               <Button onClick={openNewProduct} disabled={isAllServices}>
                 Nouveau produit
@@ -1213,6 +1243,11 @@ export default function Products() {
           togglePdfField={togglePdfField}
           pdfBranding={pdfBranding}
           setPdfBranding={setPdfBranding}
+          pdfTemplate={pdfTemplate}
+          setPdfTemplate={setPdfTemplate}
+          pdfLogo={pdfLogo}
+          setPdfLogo={setPdfLogo}
+          templateOptions={templateOptions}
           generateCatalogPdf={generateCatalogPdf}
           pdfLoading={pdfLoading}
           pdfError={pdfError}

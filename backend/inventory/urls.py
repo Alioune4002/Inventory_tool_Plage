@@ -25,6 +25,7 @@ from products.views import (
     rituals,
     import_receipt,
     apply_receipt,
+    receipts_history,
 )
 
 router = DefaultRouter()
@@ -71,6 +72,7 @@ urlpatterns = [
     path("api/rituals/", rituals),
     path("api/receipts/import/", import_receipt),
     path("api/receipts/<int:receipt_id>/apply/", apply_receipt),
+    path("api/receipts/history/", receipts_history),
 
     path("api/auth/", include("accounts.urls")),
     path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),

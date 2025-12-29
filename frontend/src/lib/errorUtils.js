@@ -38,7 +38,22 @@ export function formatApiError(error, options = {}) {
     return "Service indisponible pour le moment. Réessaie dans quelques instants.";
   }
 
-  if (typeof data?.detail === "string" && data.detail.trim()) return data.detail;
+  if (typeof data?.detail === "string" && data.detail.trim()) {
+    const detail = data.detail.trim();
+    const lowered = detail.toLowerCase();
+    if (
+      lowered.includes("no active account found") ||
+      lowered.includes("unable to log in") ||
+      lowered.includes("invalid username") ||
+      lowered.includes("invalid credentials")
+    ) {
+      return "Identifiants incorrects.";
+    }
+    if (lowered.includes("this field may not be blank")) {
+      return "Ce champ est requis.";
+    }
+    return detail;
+  }
 
   if (Array.isArray(data?.non_field_errors) && data.non_field_errors.length) {
     return String(data.non_field_errors[0]);

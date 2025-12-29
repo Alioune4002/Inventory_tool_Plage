@@ -216,7 +216,17 @@ class SimpleTokenObtainPairSerializer(TokenObtainPairSerializer):
                 code="email_not_verified",
             )
 
-        data = super().validate(attrs)
+        try:
+            data = super().validate(attrs)
+        except exceptions.AuthenticationFailed as exc:
+            detail = str(getattr(exc, "detail", "")) or ""
+            code = getattr(exc, "default_code", None) or getattr(exc, "code", None) or "invalid_credentials"
+            if "No active account found" in detail or code == "no_active_account":
+                raise exceptions.AuthenticationFailed(
+                    "Identifiants invalides. Vérifiez votre email/nom d’utilisateur et mot de passe.",
+                    code="invalid_credentials",
+                )
+            raise exceptions.AuthenticationFailed(detail or "Connexion impossible.", code=code)
 
         profile = getattr(self.user, "profile", None)
         if not profile:

@@ -65,6 +65,9 @@ export default function Rituals() {
           <p className="text-sm text-[var(--muted)]">
             Une checklist claire, des alertes prioritaires et des actions directes.
           </p>
+          <div className="text-xs text-[var(--muted)]">
+            Objectif : vous guider sur les 3 prochaines actions utiles, sans surcharge.
+          </div>
         </Card>
 
         {!canUse ? (

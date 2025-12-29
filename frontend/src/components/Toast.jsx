@@ -19,7 +19,7 @@ export default function Toasts() {
     <AnimatePresence>
       {toast ? (
         <motion.div
-          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2"
+          className="fixed bottom-4 left-0 right-0 z-50 px-4"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 10 }}
@@ -27,7 +27,7 @@ export default function Toasts() {
         >
           <div
             className={cn(
-              "flex items-center gap-3 rounded-2xl px-4 py-3 shadow-soft border max-w-[92vw]",
+              "flex items-center gap-3 rounded-2xl px-4 py-3 border w-full max-w-none shadow-[0_18px_50px_rgba(0,0,0,0.25)] ring-1 ring-black/10",
               toneClass(toast.type)
             )}
             role="status"
@@ -37,7 +37,7 @@ export default function Toasts() {
             <button
               type="button"
               onClick={close}
-              className="rounded-xl px-2 py-1 text-sm bg-black/10 hover:bg-black/15"
+              className="ml-auto rounded-xl px-2 py-1 text-sm bg-black/15 hover:bg-black/20"
               aria-label="Fermer"
             >
               ×
@@ -48,5 +48,3 @@ export default function Toasts() {
     </AnimatePresence>
   );
 }
-
-

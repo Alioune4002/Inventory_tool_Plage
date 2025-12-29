@@ -1,5 +1,5 @@
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getTourKey, getTourPendingKey } from "../lib/tour";
 
 
@@ -71,23 +71,23 @@ const makeHighlighter = () => {
   };
 
   const waitForTarget = (targets, timeout = 2000) =>
-  new Promise((resolve) => {
-    const start = Date.now();
+    new Promise((resolve) => {
+      const start = Date.now();
 
-    const tick = () => {
-      const el = pickTarget(targets);
-      if (el) return resolve(el);
-      if (Date.now() - start > timeout) return resolve(null);
-      requestAnimationFrame(tick);
-    };
+      const tick = () => {
+        const el = pickTarget(targets);
+        if (el) return resolve(el);
+        if (Date.now() - start > timeout) return resolve(null);
+        requestAnimationFrame(tick);
+      };
 
-    tick();
-  });
+      tick();
+    });
 
-  return { apply, clear, waitForTarget};
+  return { apply, clear, waitForTarget };
 };
 
-export default function GuidedTour({ userId }) {
+export default function GuidedTour({ userId, onRequestMobileNav }) {
   const [open, setOpen] = useState(false);
   const [stepIndex, setStepIndex] = useState(0);
   const [startedByUser, setStartedByUser] = useState(false); // utile si tu veux tracer plus tard

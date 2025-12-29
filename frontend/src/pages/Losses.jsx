@@ -252,10 +252,10 @@ export default function Losses() {
 
       <div className="grid gap-4">
         <Card className="p-6 space-y-3">
-          <div className="text-sm text-slate-500">Optionnel, mais très utile</div>
-          <div className="text-2xl font-black tracking-tight">Pertes du mois</div>
+          <div className="text-sm text-[var(--muted)]">Optionnel, mais très utile</div>
+          <div className="text-2xl font-black tracking-tight text-[var(--text)]">Pertes du mois</div>
 
-          <div className="text-sm text-slate-600">
+          <div className="text-sm text-[var(--muted)]">
             Ici, tu déclares les pertes (casse, péremption, vol, erreur…). Cela aide à expliquer les écarts
             entre le stock attendu et le stock compté.
           </div>
@@ -270,21 +270,13 @@ export default function Losses() {
             />
 
             {services?.length > 0 && (
-              <label className="space-y-1.5">
-                <span className="text-sm font-medium text-slate-700">Service</span>
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-                  value={serviceId || ""}
-                  onChange={(e) => selectService(e.target.value)}
-                >
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-slate-500">Les pertes sont séparées par service.</span>
-              </label>
+              <Select
+                label="Service"
+                value={serviceId || ""}
+                onChange={(value) => selectService(value)}
+                options={services.map((s) => ({ value: s.id, label: s.name }))}
+                helper="Les pertes sont séparées par service."
+              />
             )}
 
             <Button onClick={load} loading={loading} className="w-full">
@@ -294,30 +286,22 @@ export default function Losses() {
         </Card>
 
         <Card className="p-6 space-y-4">
-          <div className="text-sm font-semibold text-slate-700">Déclarer une perte</div>
-          <div className="text-xs text-slate-500">
+          <div className="text-sm font-semibold text-[var(--text)]">Déclarer une perte</div>
+          <div className="text-xs text-[var(--muted)]">
             Astuce : tu peux laisser {itemLabel.toLowerCase()} vide si tu veux juste enregistrer une perte “globale”.
           </div>
 
           <form className="grid md:grid-cols-2 lg:grid-cols-3 gap-3 items-end" onSubmit={submit}>
-            <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">{itemLabel} (optionnel)</span>
-              <select
-                value={form.product}
-                onChange={(e) => setForm((p) => ({ ...p, product: e.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-              >
-                <option value="">— Aucun —</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-500">
-                Si tu choisis un {itemLabel.toLowerCase()}, la perte sera liée à sa fiche.
-              </span>
-            </label>
+            <Select
+              label={`${itemLabel} (optionnel)`}
+              value={form.product}
+              onChange={(value) => setForm((p) => ({ ...p, product: value }))}
+              options={[
+                { value: "", label: "— Aucun —" },
+                ...products.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              helper={`Si tu choisis un ${itemLabel.toLowerCase()}, la perte sera liée à sa fiche.`}
+            />
 
             <Input
               label="Quantité perdue"
@@ -329,37 +313,21 @@ export default function Losses() {
               helper="Ex : 2, 0.5, 10…"
             />
 
-            <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Unité</span>
-              <select
-                value={form.unit}
-                onChange={(e) => setForm((p) => ({ ...p, unit: e.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-              >
-                {unitOptions.map((u) => (
-                  <option key={u} value={u}>
-                    {u}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-500">Adapté au mode de comptage du service.</span>
-            </label>
+            <Select
+              label="Unité"
+              value={form.unit}
+              onChange={(value) => setForm((p) => ({ ...p, unit: value }))}
+              options={unitOptions.map((u) => ({ value: u, label: u }))}
+              helper="Adapté au mode de comptage du service."
+            />
 
-            <label className="space-y-1.5">
-              <span className="text-sm font-medium text-slate-700">Motif</span>
-              <select
-                value={form.reason}
-                onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold"
-              >
-                {reasons.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-              <span className="text-xs text-slate-500">Choisis le motif le plus proche.</span>
-            </label>
+            <Select
+              label="Motif"
+              value={form.reason}
+              onChange={(value) => setForm((p) => ({ ...p, reason: value }))}
+              options={reasons.map((r) => ({ value: r.value, label: r.label }))}
+              helper="Choisis le motif le plus proche."
+            />
 
             <Input
               label="Date et heure"
@@ -384,8 +352,8 @@ export default function Losses() {
 
         <Card className="p-6 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-700">Historique</div>
-            <div className="text-xs text-slate-500">{sortedItems.length} ligne(s)</div>
+            <div className="text-sm font-semibold text-[var(--text)]">Historique</div>
+            <div className="text-xs text-[var(--muted)]">{sortedItems.length} ligne(s)</div>
           </div>
 
           {loading ? (
@@ -395,10 +363,36 @@ export default function Losses() {
               ))}
             </div>
           ) : sortedItems.length ? (
-            <div className="overflow-auto">
-              <table className="min-w-full text-sm">
+            <>
+              <div className="space-y-2 sm:hidden">
+                {paginatedItems.map((l) => (
+                  <div
+                    key={l.id}
+                    className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-semibold text-[var(--text)] break-anywhere">
+                        {l.product_name || l.product?.name || "—"}
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {l.quantity} {l.unit}
+                      </div>
+                    </div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {reasons.find((r) => r.value === l.reason)?.label || l.reason} ·{" "}
+                      {formatDisplayDatetime(l.occurred_at)}
+                    </div>
+                    <div className="text-xs text-[var(--muted)] break-anywhere">{l.note || "—"}</div>
+                    <Button size="sm" variant="ghost" onClick={() => remove(l.id)}>
+                      Supprimer
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden sm:block overflow-auto">
+              <table className="min-w-full text-sm table-fixed">
                 <thead>
-                  <tr className="text-left text-slate-500 border-b">
+                  <tr className="text-left text-[var(--muted)] border-b">
                     <th className="py-2 pr-3">{itemLabel}</th>
                     <th className="py-2 pr-3">Quantité</th>
                     <th className="py-2 pr-3">Motif</th>
@@ -410,7 +404,9 @@ export default function Losses() {
                 <tbody>
                   {paginatedItems.map((l) => (
                     <tr key={l.id} className="border-b last:border-0">
-                      <td className="py-2 pr-3">{l.product_name || l.product?.name || "—"}</td>
+                      <td className="py-2 pr-3 break-anywhere">
+                        {l.product_name || l.product?.name || "—"}
+                      </td>
                       <td className="py-2 pr-3">
                         {l.quantity} {l.unit}
                       </td>
@@ -418,7 +414,7 @@ export default function Losses() {
                         {reasons.find((r) => r.value === l.reason)?.label || l.reason}
                       </td>
                       <td className="py-2 pr-3">{formatDisplayDatetime(l.occurred_at)}</td>
-                      <td className="py-2 pr-3 text-slate-500">{l.note || "—"}</td>
+                      <td className="py-2 pr-3 text-[var(--muted)] break-anywhere">{l.note || "—"}</td>
                       <td className="py-2 pr-3">
                         <Button size="sm" variant="ghost" onClick={() => remove(l.id)}>
                           Supprimer
@@ -429,14 +425,15 @@ export default function Losses() {
                 </tbody>
               </table>
             </div>
+            </>
           ) : (
-            <div className="text-sm text-slate-500">
+            <div className="text-sm text-[var(--muted)]">
               Aucune perte enregistrée sur ce mois. Tu peux en déclarer si tu veux expliquer des écarts.
             </div>
           )}
 
           {!loading && sortedItems.length > 0 && (
-            <div className="flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center justify-between text-xs text-[var(--muted)]">
               <span>
                 Page {page} / {totalPages} · {sortedItems.length} perte(s)
               </span>
