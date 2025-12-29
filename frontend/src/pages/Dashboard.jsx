@@ -19,7 +19,6 @@ import { formatCurrency } from "../lib/currency";
 
 const fmtNumber = (n) => (typeof n === "number" ? n.toLocaleString("fr-FR") : "—");
 const safeArray = (v) => (Array.isArray(v) ? v : []);
-
 const fmtDateTime = (v) => {
   if (!v) return "—";
   try {
@@ -79,14 +78,9 @@ function getUnitLabels(serviceType, tenantDomain) {
   const isRetail = d === "general" || t === "retail_general" || t === "pharmacy_parapharmacy";
   const isFoodMulti = d === "food" && (t === "bar" || t === "restaurant_dining" || t === "kitchen" || t === "bakery");
 
-  if (isRetail) {
-    return { one: "Rayon", all: "Tous les rayons" };
-  }
-  if (isFoodMulti) {
-    // bar/restaurant : ça peut être salle, bar, cuisine, réserve, etc.
-    return { one: "Zone", all: "Toutes les zones" };
-  }
-  return { one: "Service", all: "Tous les services" };
+  if (isRetail) return { one: "Rayon", all: "Tous les rayons", plural: "rayons" };
+  if (isFoodMulti) return { one: "Zone", all: "Toutes les zones", plural: "zones" };
+  return { one: "Service", all: "Tous les services", plural: "services" };
 }
 
 function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wording, unitLabels) {
@@ -156,12 +150,14 @@ export default function Dashboard() {
     losses_total_qty: 0,
     service_totals: {},
     by_category: [],
-    by_product: [],
     losses_by_reason: [],
   });
 
-  // ✅ On garde le count mais on le présente comme "Catalogue" (dashboard global)
+  // ✅ "Catalogue" (compte de produits suivis)
   const [catalogCount, setCatalogCount] = useState(0);
+
+  // ✅ Synthèse par unité (uniquement en mode "all")
+  const [unitSummary, setUnitSummary] = useState([]);
 
   // ✅ Assistant IA "boîte" compacte
   const [aiOpen, setAiOpen] = useState(false);
@@ -215,6 +211,30 @@ export default function Dashboard() {
         );
 
         const results = await Promise.all(calls);
+
+        // ✅ Synthèse par unité (top par valeur achat)
+        const units = results
+          .map((r) => {
+            const purchase = r.stats?.service_totals?.purchase_value ?? r.stats?.total_value ?? 0;
+            const selling = r.stats?.service_totals?.selling_value ?? r.stats?.total_selling_value ?? 0;
+            const lossesCost = r.stats?.losses_total_cost ?? 0;
+            const lossesQty = r.stats?.losses_total_qty ?? 0;
+            const margin = sellingEnabled ? (selling || 0) - (purchase || 0) : null;
+
+            return {
+              id: r.service?.id,
+              name: r.service?.name || copy.unitLabel,
+              purchase_value: purchase || 0,
+              selling_value: selling || 0,
+              margin_value: margin,
+              losses_cost: lossesCost || 0,
+              losses_qty: lossesQty || 0,
+              catalog_count: (r.products || []).length,
+            };
+          })
+          .sort((a, b) => (b.purchase_value || 0) - (a.purchase_value || 0));
+
+        setUnitSummary(units);
 
         const aggregated = results.reduce(
           (acc, r) => {
@@ -302,19 +322,19 @@ export default function Dashboard() {
           service_totals: {},
         };
 
-        // normalize reasons
-        const normalizedReasons = safeArray(s.losses_by_reason).map((lr) => ({
-          ...lr,
-          reason: normalizeLossReason(lr.reason),
-        }));
-
         setStats({
           ...s,
-          losses_by_reason: normalizedReasons,
+          losses_by_reason: safeArray(s.losses_by_reason).map((lr) => ({
+            ...lr,
+            reason: normalizeLossReason(lr.reason),
+          })),
         });
 
         const list = Array.isArray(listRes.data) ? listRes.data : [];
         setCatalogCount(list.length);
+
+        // ✅ mode mono : pas de synthèse multi
+        setUnitSummary([]);
       }
     } catch (e) {
       pushToast?.({
@@ -332,6 +352,7 @@ export default function Dashboard() {
         service_totals: {},
       });
       setCatalogCount(0);
+      setUnitSummary([]);
     } finally {
       setLoading(false);
     }
@@ -510,6 +531,81 @@ export default function Dashboard() {
           ))}
         </div>
 
+        {/* ✅ Synthèse par unité (uniquement en mode all) */}
+        {isAllServices ? (
+          <Card className="p-5 space-y-3 min-w-0" hover>
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[var(--text)]">Synthèse par {unitLabels.plural}</div>
+                <div className="text-xs text-[var(--muted)] mt-1">
+                  Comparaison rapide des unités : valeur de stock, pertes et catalogue.
+                </div>
+              </div>
+              <Badge variant="neutral">{loading ? "Chargement" : `${unitSummary.length || 0} ${unitLabels.plural}`}</Badge>
+            </div>
+
+            {loading ? (
+              <div className="grid gap-2">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-14 w-full" />
+                ))}
+              </div>
+            ) : unitSummary.length ? (
+              <div className="grid md:grid-cols-2 gap-3 min-w-0">
+                {unitSummary.slice(0, 6).map((u) => (
+                  <Card key={u.id || u.name} className="p-4 min-w-0" hover>
+                    <div className="flex items-start justify-between gap-3 min-w-0">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-[var(--text)] break-anywhere">{u.name}</div>
+                        <div className="text-xs text-[var(--muted)] mt-1">
+                          Catalogue : {fmtNumber(u.catalog_count)} · Pertes :{" "}
+                          {u.losses_cost > 0 ? formatCurrency(u.losses_cost, currencyCode) : `${fmtNumber(u.losses_qty)} u.`}
+                        </div>
+                      </div>
+                      <Badge variant="info">{formatCurrency(u.purchase_value || 0, currencyCode)}</Badge>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs min-w-0">
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-[var(--muted)]">Achat</div>
+                        <div className="font-semibold text-[var(--text)]">{formatCurrency(u.purchase_value || 0, currencyCode)}</div>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-[var(--muted)]">Vente</div>
+                        <div className="font-semibold text-[var(--text)]">
+                          {sellingEnabled ? formatCurrency(u.selling_value || 0, currencyCode) : "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-[var(--muted)]">Marge</div>
+                        <div className="font-semibold text-[var(--text)]">
+                          {sellingEnabled ? formatCurrency(u.margin_value || 0, currencyCode) : "—"}
+                        </div>
+                      </div>
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                        <div className="text-[var(--muted)]">Pertes</div>
+                        <div className="font-semibold text-[var(--text)]">
+                          {u.losses_cost > 0 ? formatCurrency(u.losses_cost || 0, currencyCode) : `${fmtNumber(u.losses_qty)} u.`}
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-[var(--muted)]">
+                Pas encore de données multi-unités sur cette période. Lance un inventaire sur au moins une unité ✨
+              </div>
+            )}
+
+            {unitSummary.length > 6 ? (
+              <div className="text-xs text-[var(--muted)]">
+                Affichage limité aux 6 premières unités (triées par valeur achat). On peut ajouter un mode “voir tout” si tu veux.
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+
         {/* Alerts + AI compact box */}
         <div className="grid lg:grid-cols-2 gap-4 min-w-0">
           <AlertsPanel />
@@ -636,9 +732,6 @@ export default function Dashboard() {
           </Card>
         </div>
 
-        {/* ✅ SUPPRIMÉ : bloc "Comptages produits" / preview produits
-            (On garde le dashboard “vue générale”, pas une liste de lignes) */}
-
         {/* Admin principal: équipe + traçabilité */}
         {membersVisible ? (
           <Card className="p-6 space-y-4 min-w-0">
@@ -662,11 +755,7 @@ export default function Dashboard() {
                 <Button variant="secondary" onClick={loadMembersSummary} loading={membersLoading}>
                   Rafraîchir
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setMembersExpanded((v) => !v)}
-                  disabled={membersLoading}
-                >
+                <Button variant="secondary" onClick={() => setMembersExpanded((v) => !v)} disabled={membersLoading}>
                   {membersExpanded ? "Masquer" : "Afficher"}
                 </Button>
                 <Badge variant="neutral">{membersLoading ? "Chargement…" : `${members.length} membre(s)`}</Badge>
