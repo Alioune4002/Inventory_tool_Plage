@@ -1,3 +1,4 @@
+import json
 import time
 from datetime import timedelta
 from uuid import uuid4
@@ -14,7 +15,13 @@ from accounts.utils import get_tenant_for_request
 from inventory.metrics import track_ai_request
 
 from .models import AIRequestEvent, AIConversation, AIMessage
-from .services.assistant import build_context, call_llm_chat
+from .services.assistant import (
+    build_context,
+    call_llm,
+    validate_llm_json,
+    call_llm_chat,
+    SYSTEM_PROMPT,
+)
 
 
 class AiAssistantRateThrottle(SimpleRateThrottle):
@@ -26,18 +33,50 @@ class AiAssistantRateThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": request.user.pk}
 
 
+def _enforce_ai_quotas(tenant, scope: str):
+    """
+    Quotas:
+    - scope == support => weekly limit (ai_support_weekly_limit)
+    - else => monthly limit (ai_requests_monthly_limit)
+    """
+    limits = get_limits(tenant)
+
+    if scope == "support":
+        ai_limit = limits.get("ai_support_weekly_limit")
+        if ai_limit is None:
+            return
+        now = timezone.now()
+        start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        used = AIRequestEvent.objects.filter(tenant=tenant, scope="support", created_at__gte=start).count()
+        if used >= int(ai_limit):
+            raise LimitExceeded(
+                code="LIMIT_AI_REQUESTS_WEEK",
+                detail="Quota IA hebdomadaire atteint. Passez à un plan supérieur pour continuer.",
+            )
+        return
+
+    ai_limit = limits.get("ai_requests_monthly_limit")
+    if ai_limit is None:
+        return
+    start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    used = AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start).exclude(scope="support").count()
+    if used >= int(ai_limit):
+        raise LimitExceeded(
+            code="LIMIT_AI_REQUESTS_MONTH",
+            detail="Quota IA mensuel atteint. Passez au plan Multi pour continuer.",
+        )
+
+
 class AiAssistantView(APIView):
     """
-    Endpoint "panel / analyse" (réponse structurée) utilisé par le front:
+    Panel analyzer (réponse structurée), utilisé par AIAssistantPanel.jsx
     POST /api/ai/assistant/
 
-    Objectif: renvoyer un JSON compatible avec AIAssistantPanel.jsx :
+    Retour (front-compatible):
     {
       enabled, analysis, watch_items, actions, message, insights, suggested_actions,
       question, request_id, mode, duration_ms, invalid_json
     }
-
-    On s'appuie sur call_llm_chat() (réponse texte) puis on l'emballe en "analysis".
     """
     permission_classes = [IsAuthenticated]
     throttle_classes = [AiAssistantRateThrottle]
@@ -47,13 +86,18 @@ class AiAssistantView(APIView):
         request_id = str(uuid4())
 
         payload = request.data or {}
-        scope = (payload.get("scope") or "inventory").strip()
-
-        # Période / filtres
-        month = (payload.get("filters") or {}).get("month") or payload.get("month") or payload.get("period_start") or ""
-        month = str(month).strip()
+        scope = str(payload.get("scope") or "inventory").strip()
 
         filters = payload.get("filters") or {}
+        month = (
+            filters.get("month")
+            or payload.get("month")
+            or payload.get("period_start")
+            or payload.get("period_end")
+            or ""
+        )
+        month = str(month).strip()
+
         service = (
             filters.get("service")
             or payload.get("service")
@@ -72,8 +116,8 @@ class AiAssistantView(APIView):
         except Exception as exc:
             code = getattr(exc, "code", None) or "FEATURE_NOT_INCLUDED"
             detail = getattr(exc, "detail", None) or "Cette fonctionnalité nécessite le plan Duo ou Multi."
-
             duration_ms = int((time.time() - started) * 1000)
+
             return Response(
                 {
                     "enabled": False,
@@ -99,38 +143,13 @@ class AiAssistantView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        # Quotas (mêmes règles que chat)
-        limits = get_limits(tenant)
-        if scope == "support":
-            ai_limit = limits.get("ai_support_weekly_limit")
-            if ai_limit is not None:
-                now = timezone.now()
-                start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-                used = AIRequestEvent.objects.filter(tenant=tenant, scope="support", created_at__gte=start).count()
-                if used >= int(ai_limit):
-                    raise LimitExceeded(
-                        code="LIMIT_AI_REQUESTS_WEEK",
-                        detail="Quota IA hebdomadaire atteint. Passez à un plan supérieur pour continuer.",
-                    )
-        else:
-            ai_limit = limits.get("ai_requests_monthly_limit")
-            if ai_limit is not None:
-                start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                used = (
-                    AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start)
-                    .exclude(scope="support")
-                    .count()
-                )
-                if used >= int(ai_limit):
-                    raise LimitExceeded(
-                        code="LIMIT_AI_REQUESTS_MONTH",
-                        detail="Quota IA mensuel atteint. Passez à un plan supérieur pour continuer.",
-                    )
+        # Quotas
+        _enforce_ai_quotas(tenant, scope)
 
         plan_code = get_plan_code(tenant)
         ai_mode = "light" if plan_code == "BOUTIQUE" else "full"
 
-        # Contexte (réutilise build_context)
+        # Build context
         context = build_context(
             request.user,
             scope=scope,
@@ -141,13 +160,14 @@ class AiAssistantView(APIView):
             mode=ai_mode,
         )
 
-        # Appel LLM (format chat), puis on map vers la réponse "panel"
-        # NB: pas besoin d'historique ici
-        context["chat_history"] = []
-        raw = call_llm_chat(context)
-        reply = (raw.get("reply") or "").strip()
+        # Call structured LLM (panel)
+        context_json = json.dumps(context or {}, ensure_ascii=False)
+        raw = call_llm(SYSTEM_PROMPT, context_json, context=context)
+
+        cleaned, invalid_json = validate_llm_json(raw, context=context)
 
         duration_ms = int((time.time() - started) * 1000)
+        mode = raw.get("mode", "fallback")
 
         # Log request
         try:
@@ -156,38 +176,50 @@ class AiAssistantView(APIView):
                 user=request.user,
                 scope=scope or "inventory",
                 mode=ai_mode,
-                meta={"duration_ms": duration_ms},
+                meta={
+                    "duration_ms": duration_ms,
+                    "llm_mode": mode,
+                    "invalid_json": bool(invalid_json),
+                },
             )
         except Exception:
             pass
 
         try:
-            track_ai_request(ai_mode, template_used=False)
+            track_ai_request(ai_mode, template_used=(mode == "template"))
         except Exception:
             pass
-
-        analysis_text = reply or "Je n’ai pas pu formuler une réponse. Pouvez-vous reformuler en une phrase ?"
 
         return Response(
             {
                 "enabled": True,
-                "analysis": analysis_text,
-                "watch_items": [],
-                "actions": [],
-                "message": analysis_text,
-                "insights": [],
-                "suggested_actions": [],
-                "question": None,
+                "analysis": cleaned.get("analysis") or cleaned.get("message"),
+                "watch_items": cleaned.get("watch_items") or [],
+                "actions": cleaned.get("actions") or [],
+                "message": cleaned.get("message") or cleaned.get("analysis"),
+                "insights": cleaned.get("insights") or [],
+                "suggested_actions": cleaned.get("suggested_actions") or [],
+                "question": cleaned.get("question"),
                 "request_id": request_id,
-                "mode": raw.get("mode", "fallback"),
+                "mode": mode,
                 "duration_ms": duration_ms,
-                "invalid_json": False,
+                "invalid_json": bool(invalid_json),
             },
             status=status.HTTP_200_OK,
         )
 
 
 class AiChatView(APIView):
+    """
+    Chat endpoint (drawer global)
+    POST /api/ai/chat/
+
+    Retour enrichi (backward compatible):
+    {
+      enabled, request_id, conversation_id, reply, mode, duration_ms,
+      watch_items, actions, suggested_actions, question
+    }
+    """
     permission_classes = [IsAuthenticated]
     throttle_classes = [AiAssistantRateThrottle]
 
@@ -196,19 +228,18 @@ class AiChatView(APIView):
         request_id = str(uuid4())
 
         payload = request.data or {}
-        scope = payload.get("scope") or "inventory"
-        month = (payload.get("month") or payload.get("period_start") or "").strip()
+        scope = str(payload.get("scope") or "inventory").strip()
+        month = str(payload.get("month") or payload.get("period_start") or "").strip()
+
         service = payload.get("service") or payload.get("service_id") or (payload.get("filters") or {}).get("service")
-        if service is None:
-            service = ""
-        service = str(service)
+        service = "" if service is None else str(service)
 
         message = (payload.get("message") or payload.get("question") or "").strip()
         conversation_id = payload.get("conversation_id")
 
         tenant = get_tenant_for_request(request)
 
-        # Entitlement
+        # Entitlement (soft paywall)
         try:
             check_entitlement(tenant, "ai_assistant_basic")
         except Exception as exc:
@@ -229,32 +260,7 @@ class AiChatView(APIView):
             )
 
         # Quotas
-        limits = get_limits(tenant)
-        if scope == "support":
-            ai_limit = limits.get("ai_support_weekly_limit")
-            if ai_limit is not None:
-                now = timezone.now()
-                start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-                used = AIRequestEvent.objects.filter(tenant=tenant, scope="support", created_at__gte=start).count()
-                if used >= int(ai_limit):
-                    raise LimitExceeded(
-                        code="LIMIT_AI_REQUESTS_WEEK",
-                        detail="Quota IA hebdomadaire atteint. Passez à un plan supérieur pour continuer.",
-                    )
-        else:
-            ai_limit = limits.get("ai_requests_monthly_limit")
-            if ai_limit is not None:
-                start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                used = (
-                    AIRequestEvent.objects.filter(tenant=tenant, created_at__gte=start)
-                    .exclude(scope="support")
-                    .count()
-                )
-                if used >= int(ai_limit):
-                    raise LimitExceeded(
-                        code="LIMIT_AI_REQUESTS_MONTH",
-                        detail="Quota IA mensuel atteint. Passez à un plan supérieur pour continuer.",
-                    )
+        _enforce_ai_quotas(tenant, scope)
 
         plan_code = get_plan_code(tenant)
         ai_mode = "light" if plan_code == "BOUTIQUE" else "full"
@@ -277,11 +283,11 @@ class AiChatView(APIView):
         if message:
             AIMessage.objects.create(conversation=conv, role="user", content=message)
 
-        # Historique
+        # History (last N)
         history_qs = conv.messages.order_by("-created_at")[:14]
         history = list(reversed(list(history_qs.values("role", "content"))))
 
-        # Contexte
+        # Context
         context = build_context(
             request.user,
             scope=scope,
@@ -297,21 +303,37 @@ class AiChatView(APIView):
 
         reply = (raw.get("reply") or "").strip()
         if reply:
-            AIMessage.objects.create(conversation=conv, role="assistant", content=reply, meta={"mode": raw.get("mode")})
+            
+            try:
+                AIMessage.objects.create(
+                    conversation=conv,
+                    role="assistant",
+                    content=reply,
+                    meta={
+                        "mode": raw.get("mode"),
+                        "watch_items": raw.get("watch_items") or [],
+                        "actions": raw.get("actions") or [],
+                        "suggested_actions": raw.get("suggested_actions") or [],
+                        "question": raw.get("question"),
+                    },
+                )
+            except Exception:
+                AIMessage.objects.create(conversation=conv, role="assistant", content=reply, meta={"mode": raw.get("mode")})
 
         duration_ms = int((time.time() - started) * 1000)
 
-        # log request
+        
         try:
             AIRequestEvent.objects.create(
                 tenant=tenant,
                 user=request.user,
                 scope=scope or "inventory",
                 mode=ai_mode,
-                meta={"duration_ms": duration_ms, "conversation_id": str(conv.id)},
+                meta={"duration_ms": duration_ms, "conversation_id": str(conv.id), "llm_mode": raw.get("mode")},
             )
         except Exception:
             pass
+
         try:
             track_ai_request(ai_mode, template_used=False)
         except Exception:
@@ -325,6 +347,11 @@ class AiChatView(APIView):
                 "reply": reply or "Je n’ai pas pu formuler une réponse. Pouvez-vous reformuler en une phrase ?",
                 "mode": raw.get("mode", "fallback"),
                 "duration_ms": duration_ms,
+               
+                "watch_items": raw.get("watch_items") or [],
+                "actions": raw.get("actions") or [],
+                "suggested_actions": raw.get("suggested_actions") or [],
+                "question": raw.get("question"),
             },
             status=status.HTTP_200_OK,
         )

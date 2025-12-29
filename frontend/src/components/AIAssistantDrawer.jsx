@@ -51,6 +51,10 @@ export default function AIAssistantDrawer() {
     scope: "inventory",
   });
 
+  // Floating button state: "pill" (grand) -> "icon" (réduit)
+  const [fabMode, setFabMode] = useState("pill");
+  const fabTimerRef = useRef(null);
+
   // Chat state
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState([
@@ -85,12 +89,42 @@ export default function AIAssistantDrawer() {
 
   const visibleInApp = isAppPath(location.pathname);
 
+  // --- FAB auto-shrink après 10s (si drawer fermé) ---
+  const startFabTimer = useCallback(() => {
+    if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    fabTimerRef.current = window.setTimeout(() => {
+      // on shrink seulement si le drawer n'est pas ouvert
+      setFabMode((prev) => (open ? prev : "icon"));
+    }, 10000);
+  }, [open]);
+
+  useEffect(() => {
+    if (!visibleInApp) return;
+    // à l'arrivée sur une page /app : on montre le pill puis shrink après 10s
+    setFabMode("pill");
+    startFabTimer();
+    return () => {
+      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, visibleInApp]);
+
+  useEffect(() => {
+    // quand on ouvre le drawer, on repasse pill (et pas de shrink pendant l'ouverture)
+    if (open) {
+      setFabMode("pill");
+      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    } else if (visibleInApp) {
+      // drawer fermé: relance le timer
+      startFabTimer();
+    }
+  }, [open, startFabTimer, visibleInApp]);
+
   // Auto-scroll
   useEffect(() => {
     if (!open) return;
     const el = scrollRef.current;
     if (!el) return;
-    // small delay to ensure DOM is painted
     const t = window.setTimeout(() => {
       el.scrollTop = el.scrollHeight;
     }, 50);
@@ -129,7 +163,6 @@ export default function AIAssistantDrawer() {
   }, [authServiceId]);
 
   const openFromButton = () => {
-    // scope auto selon page
     const scope = location.pathname.startsWith("/app/support") ? "support" : "inventory";
     window.dispatchEvent(
       new CustomEvent("stockscan:ai:open", {
@@ -154,7 +187,6 @@ export default function AIAssistantDrawer() {
         return;
       }
 
-      // message user optimistic
       setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
       setInput("");
       setNotice("");
@@ -214,37 +246,58 @@ export default function AIAssistantDrawer() {
   // ------- UI -------
   if (!visibleInApp) return null;
 
+  const onFabClick = () => {
+    // Si réduit → 1er clic = revenir au pill (sans ouvrir)
+    if (fabMode === "icon") {
+      setFabMode("pill");
+      startFabTimer();
+      return;
+    }
+    // Sinon → ouvrir le drawer
+    openFromButton();
+  };
+
   return (
     <>
-      {/* Floating button */}
+      {/* Floating button (auto shrink + safe-area) */}
       <button
         type="button"
-        onClick={openFromButton}
-        className="fixed bottom-5 right-5 z-[70] rounded-full border border-white/10 bg-[var(--surface)] px-4 py-3 shadow-[0_20px_50px_rgba(0,0,0,0.35)] hover:opacity-95"
-        aria-label="Ouvrir l’assistant IA"
+        onClick={onFabClick}
+        className={[
+          "fixed right-5 z-[70] border border-white/10 bg-[var(--surface)] shadow-[0_20px_50px_rgba(0,0,0,0.35)] hover:opacity-95",
+          // safe-area bottom (iOS)
+          "bottom-[calc(1.25rem+env(safe-area-inset-bottom))]",
+          // transition smooth
+          "transition-all duration-200",
+          fabMode === "icon" ? "rounded-full p-3" : "rounded-full px-4 py-3",
+        ].join(" ")}
+        aria-label="Assistant IA"
         title="Assistant IA"
       >
-        <div className="flex items-center gap-2">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-          <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
-        </div>
-        <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
+        {fabMode === "icon" ? (
+          <div className="flex items-center justify-center">
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+              <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
+            </div>
+            <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
+          </>
+        )}
       </button>
 
       {/* Drawer */}
       {open ? (
         <div className="fixed inset-0 z-[80]">
           {/* overlay */}
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/40"
-            aria-label="Fermer"
-            onClick={closeDrawer}
-          />
+          <button type="button" className="absolute inset-0 bg-black/40" aria-label="Fermer" onClick={closeDrawer} />
 
-          {/* panel */}
-          <div className="absolute right-0 top-0 h-full w-full max-w-[460px]">
-            <Card className="h-full rounded-none sm:rounded-l-[28px] border-l border-[var(--border)] bg-[var(--surface)] p-0 overflow-hidden">
+          {/* panel (fix mobile height + prevent bottom overflow) */}
+          <div className="absolute right-0 top-0 h-[100dvh] w-full max-w-[460px]">
+            <Card className="h-full rounded-none sm:rounded-l-[28px] border-l border-[var(--border)] bg-[var(--surface)] p-0 overflow-hidden flex flex-col">
               {/* header */}
               <div className="p-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -262,18 +315,22 @@ export default function AIAssistantDrawer() {
                     </Badge>
                   ) : null}
 
-                  <Button size="sm" variant="secondary" onClick={() => {
-                    setConversationId(null);
-                    setMessages([
-                      {
-                        role: "assistant",
-                        content:
-                          ctx.scope === "support"
-                            ? "Nouveau fil support. Décrivez le problème (page + action + message d’erreur)."
-                            : "Nouveau fil. Posez votre question, je réponds à partir de vos données.",
-                      },
-                    ]);
-                  }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setConversationId(null);
+                      setMessages([
+                        {
+                          role: "assistant",
+                          content:
+                            ctx.scope === "support"
+                              ? "Nouveau fil support. Décrivez le problème (page + action + message d’erreur)."
+                              : "Nouveau fil. Posez votre question, je réponds à partir de vos données.",
+                        },
+                      ]);
+                    }}
+                  >
                     Nouveau
                   </Button>
 
@@ -283,22 +340,14 @@ export default function AIAssistantDrawer() {
                 </div>
               </div>
 
-              {/* body */}
-              <div className="h-full flex flex-col">
+              {/* content wrapper: IMPORTANT min-h-0 to allow scroll */}
+              <div className="flex-1 min-h-0 flex flex-col">
                 {/* quick suggestions */}
                 <div className="p-4 border-b border-[var(--border)]">
-                  <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)] mb-2">
-                    Suggestions
-                  </div>
+                  <div className="text-xs uppercase tracking-[0.2em] text-[var(--muted)] mb-2">Suggestions</div>
                   <div className="flex flex-wrap gap-2">
                     {suggestions.slice(0, 4).map((s) => (
-                      <Button
-                        key={s}
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => send(s)}
-                        disabled={sending}
-                      >
+                      <Button key={s} size="sm" variant="secondary" onClick={() => send(s)} disabled={sending}>
                         {s}
                       </Button>
                     ))}
@@ -315,8 +364,8 @@ export default function AIAssistantDrawer() {
                   ) : null}
                 </div>
 
-                {/* messages */}
-                <div ref={scrollRef} className="flex-1 overflow-auto p-4 space-y-3">
+                {/* messages (scroll) */}
+                <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto p-4 space-y-3">
                   {messages.map((m, idx) => {
                     const isUser = m.role === "user";
                     return (
@@ -344,46 +393,51 @@ export default function AIAssistantDrawer() {
                   ) : null}
                 </div>
 
-                {/* footer input */}
-                <div className="p-4 border-t border-[var(--border)] space-y-2">
-                  {notice ? (
-                    <div className="rounded-2xl border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-sm text-[var(--info-text)]">
-                      {notice}
-                    </div>
-                  ) : null}
+                {/* footer input (safe-area bottom, always visible/clickable) */}
+                <div
+                  className="border-t border-[var(--border)] space-y-2"
+                  style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
+                >
+                  <div className="p-4 space-y-2">
+                    {notice ? (
+                      <div className="rounded-2xl border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-sm text-[var(--info-text)]">
+                        {notice}
+                      </div>
+                    ) : null}
 
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
-                    <textarea
-                      rows={2}
-                      className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)]"
-                      placeholder={
-                        ctx.scope === "support"
-                          ? "Expliquez le problème (page + action + message d’erreur)"
-                          : "Posez une question précise (ex : quels produits sont à risque ?)"
-                      }
-                      value={input}
-                      onChange={(e) => setInput(e.target.value)}
-                      disabled={sending || (entLoaded && !aiAllowed)}
-                    />
-                    <div className="flex items-center justify-between pt-2 text-xs text-[var(--muted)]">
-                      <span>
-                        {ctx.scope === "support"
-                          ? "Guidage sur l’app + résolution de blocages."
-                          : "Réponses basées sur vos données (service/mois)."}
-                      </span>
-                      <Button
-                        size="sm"
-                        onClick={handleSend}
-                        loading={sending}
-                        disabled={sending || !input.trim() || (entLoaded && !aiAllowed)}
-                      >
-                        Envoyer
-                      </Button>
+                    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                      <textarea
+                        rows={2}
+                        className="w-full resize-none bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--muted)]"
+                        placeholder={
+                          ctx.scope === "support"
+                            ? "Expliquez le problème (page + action + message d’erreur)"
+                            : "Posez une question précise (ex : quels produits sont à risque ?)"
+                        }
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        disabled={sending || (entLoaded && !aiAllowed)}
+                      />
+                      <div className="flex items-center justify-between pt-2 text-xs text-[var(--muted)] gap-3">
+                        <span className="truncate">
+                          {ctx.scope === "support"
+                            ? "Guidage sur l’app + résolution de blocages."
+                            : "Réponses basées sur vos données (service/mois)."}
+                        </span>
+                        <Button
+                          size="sm"
+                          onClick={handleSend}
+                          loading={sending}
+                          disabled={sending || !input.trim() || (entLoaded && !aiAllowed)}
+                        >
+                          Envoyer
+                        </Button>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="text-[11px] text-[var(--muted)]">
-                    Astuce : si vous voulez une réponse “actionnable”, terminez par “donne-moi les 3 priorités”.
+                    <div className="text-[11px] text-[var(--muted)]">
+                      Astuce : si vous voulez une réponse “actionnable”, terminez par “donne-moi les 3 priorités”.
+                    </div>
                   </div>
                 </div>
               </div>
