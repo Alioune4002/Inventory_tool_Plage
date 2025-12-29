@@ -8,7 +8,6 @@ from accounts.utils import get_service_from_request, get_tenant_for_request
 from .sku import generate_auto_sku
 
 
-
 class ProductSerializer(serializers.ModelSerializer):
     warnings = serializers.SerializerMethodField(read_only=True)
 
@@ -105,7 +104,6 @@ class ProductSerializer(serializers.ModelSerializer):
         sku_cfg = features.get("sku", {})
         sku_enabled = sku_cfg.get("enabled") is not False
 
-        # ✅ Normalisation : ne jamais laisser "" en DB (sinon contraintes uniques explosent)
         current_barcode = attrs.get("barcode", getattr(self.instance, "barcode", None))
         current_sku = attrs.get("internal_sku", getattr(self.instance, "internal_sku", None))
         attrs["barcode"] = self._clean_optional_str(current_barcode)
@@ -134,7 +132,6 @@ class ProductSerializer(serializers.ModelSerializer):
         if min_qty is not None and min_qty < 0:
             raise serializers.ValidationError({"min_qty": "Le stock minimum doit être positif."})
 
-        # ✅ no_barcode cohérent : dérivé du barcode réel, avec enforcement seulement si explicitement demandé
         explicit_no_barcode = False
         if hasattr(self, "initial_data"):
             raw_flag = self.initial_data.get("no_barcode")
@@ -148,7 +145,6 @@ class ProductSerializer(serializers.ModelSerializer):
         if explicit_no_barcode and not attrs.get("internal_sku") and not self._auto_generate_sku:
             raise serializers.ValidationError({"internal_sku": "SKU requis quand le code-barres est absent."})
 
-        # ✅ Unité selon counting_mode
         unit = (attrs.get("unit") or "pcs").strip()
         if counting_mode == "weight" and unit not in ["kg", "g"]:
             unit = "kg"
@@ -158,13 +154,11 @@ class ProductSerializer(serializers.ModelSerializer):
             unit = "pcs"
         attrs["unit"] = unit
 
-        # ✅ Prix désactivés => forcer à None
         if prices_cfg.get("purchase_enabled") is False:
             attrs["purchase_price"] = None
         if prices_cfg.get("selling_enabled") is False:
             attrs["selling_price"] = None
 
-        # ✅ expiry_type par défaut
         if not attrs.get("expiry_type"):
             attrs["expiry_type"] = "none"
 
@@ -267,8 +261,16 @@ class LossEventSerializer(serializers.ModelSerializer):
         service = get_service_from_request(request)
 
         product = attrs.get("product")
-        if product and (product.tenant_id != tenant.id or product.service_id != service.id):
-            raise serializers.ValidationError({"product": "Ce produit appartient à un autre service. Sélectionnez le bon service puis réessayez."})
+
+        # ✅ PRODUIT OBLIGATOIRE
+        if not product:
+            raise serializers.ValidationError({"product": "Produit obligatoire."})
+
+        # ✅ Produit du bon tenant/service
+        if product.tenant_id != tenant.id or product.service_id != service.id:
+            raise serializers.ValidationError(
+                {"product": "Ce produit appartient à un autre service. Sélectionnez le bon service puis réessayez."}
+            )
 
         occurred_at = attrs.get("occurred_at") or timezone.now()
         attrs["inventory_month"] = occurred_at.strftime("%Y-%m")
