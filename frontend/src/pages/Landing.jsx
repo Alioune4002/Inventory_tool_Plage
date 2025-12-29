@@ -2,7 +2,7 @@
 import React, { useMemo } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
-import { ArrowRight, Barcode, BookOpen, ClipboardList, Sparkles } from "lucide-react";
+import { ArrowRight, Barcode, BookOpen, ClipboardList, Sparkles, FileText } from "lucide-react";
 import PublicShell from "../components/public/PublicShell";
 import Card from "../ui/Card";
 import LazyAutoDemoShowcase from "../components/public/LazyAutoDemoShowcase";
@@ -27,18 +27,9 @@ const ROUTES = {
 };
 
 const steps = [
-  {
-    title: "1) Choisissez votre métier",
-    desc: "L’interface s’adapte : vocabulaire, champs utiles, et écran plus lisible.",
-  },
-  {
-    title: "2) Organisez votre établissement",
-    desc: "Un ou plusieurs espaces : rayons / zones / services. Comme sur le terrain.",
-  },
-  {
-    title: "3) Faites votre inventaire",
-    desc: "Vous comptez. StockScan structure, calcule, et exporte proprement.",
-  },
+  { title: "1) Choisissez votre métier", desc: "L’interface s’adapte : vocabulaire, champs utiles, écran plus lisible." },
+  { title: "2) Organisez votre établissement", desc: "Un ou plusieurs espaces : rayons / zones / services." },
+  { title: "3) Faites votre inventaire", desc: "Vous comptez. StockScan structure, calcule et exporte proprement." },
 ];
 
 export default function Landing() {
@@ -60,12 +51,7 @@ export default function Landing() {
       operatingSystem: "Web",
       url: canonicalUrl,
       description: seoDescription,
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "EUR",
-        category: "Free",
-      },
+      offers: { "@type": "Offer", price: "0", priceCurrency: "EUR", category: "Free" },
     }),
     [canonicalUrl, seoDescription]
   );
@@ -81,7 +67,7 @@ export default function Landing() {
           acceptedAnswer: {
             "@type": "Answer",
             text:
-              "Oui. StockScan adapte l’interface au métier (restaurant, bar, boulangerie, épicerie, boutique, pharmacie…). Vous ne gardez que l’essentiel, puis vous activez des options si besoin.",
+              "Oui. StockScan adapte l’interface au métier (restaurant, bar, boulangerie, épicerie, boutique, pharmacie…). Vous gardez l’essentiel, puis vous activez des options si besoin.",
           },
         },
         {
@@ -114,7 +100,6 @@ export default function Landing() {
         <meta name="description" content={seoDescription} />
         <link rel="canonical" href={canonicalUrl} />
 
-        {/* Open Graph */}
         <meta property="og:site_name" content="StockScan" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content={canonicalUrl} />
@@ -124,21 +109,20 @@ export default function Landing() {
         <meta property="og:image:width" content="1200" />
         <meta property="og:image:height" content="630" />
 
-        {/* Twitter */}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={seoTitle} />
         <meta name="twitter:description" content={seoDescription} />
         <meta name="twitter:image" content={ogImage} />
 
-        {/* JSON-LD */}
         <script type="application/ld+json">{JSON.stringify(appJsonLd)}</script>
         <script type="application/ld+json">{JSON.stringify(faqJsonLd)}</script>
       </Helmet>
 
-      <main className="w-full bg-slate-950 text-white">
-        <div className="mx-auto w-full max-w-[1480px] px-2 sm:px-3 lg:px-4 pb-16 pt-10">
-          {/* ✅ Container central arrondi (aligné avec Fonctionnalites.jsx) */}
-          <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 sm:p-8 md:p-10 space-y-14">
+      {/* ✅ Fond “glace” identique à Fonctionnalites : pas de bg-slate-950 */}
+      <main className="w-full bg-transparent text-white">
+        <div className="mx-auto w-full max-w-[1480px] px-2 sm:px-3 lg:px-4 py-10">
+          {/* ✅ Bloc central arrondi identique */}
+          <div className="rounded-[32px] border border-white/10 bg-white/5 p-6 sm:p-8 md:p-10 space-y-12">
             {/* HERO */}
             <section className="grid lg:grid-cols-[1.15fr_0.85fr] gap-8 items-center">
               <div className="space-y-5">
@@ -189,8 +173,8 @@ export default function Landing() {
                 </div>
               </div>
 
-              {/* PREVIEW */}
-              <div className="rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900/80 to-slate-950 p-6 shadow-[0_30px_80px_rgba(0,0,0,0.45)]">
+              {/* PREVIEW (même logique “glace” : pas de gros bloc sombre) */}
+              <Card className="p-6 border-white/10 bg-white/5 rounded-[32px] shadow-[0_30px_80px_rgba(0,0,0,0.35)]" hover>
                 <div className="text-sm text-white/70">Aperçu</div>
                 <div className="mt-2 text-2xl font-black text-white">Tableau de bord</div>
 
@@ -214,6 +198,68 @@ export default function Landing() {
                     </div>
                   </Card>
                 </div>
+              </Card>
+            </section>
+
+            {/* ✅ “Ce que vous obtenez en 10 minutes” (impact first impression) */}
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-6 sm:p-7">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-blue-300 uppercase tracking-wide">
+                    En 10 minutes
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white mt-1">
+                    Ce que vous obtenez dès aujourd’hui
+                  </h2>
+                  <p className="text-sm text-slate-200 mt-2 max-w-3xl">
+                    Pas de prise de tête : vous configurez le minimum, vous faites un premier comptage, et le tableau de
+                    bord commence déjà à parler.
+                  </p>
+                </div>
+
+                <Link
+                  to="/comment-ca-marche"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition"
+                >
+                  Voir un exemple <ArrowRight className="h-4 w-4 text-blue-300" />
+                </Link>
+              </div>
+
+              <div className="mt-5 grid md:grid-cols-3 gap-4">
+                {[
+                  {
+                    title: "Un catalogue propre",
+                    desc: "Catégories + unité + référence interne (ou code-barres).",
+                  },
+                  {
+                    title: "Un premier inventaire guidé",
+                    desc: "Mode progressif ou chrono, sans surcharge d’écran.",
+                  },
+                  {
+                    title: "Un export partageable",
+                    desc: "CSV / Excel / PDF prêt pour l’équipe ou le comptable.",
+                  },
+                ].map((b) => (
+                  <Card key={b.title} className="p-5 border-white/10 bg-white/5 rounded-3xl" hover>
+                    <div className="text-lg font-semibold text-white">{b.title}</div>
+                    <div className="text-sm text-slate-200 mt-1">{b.desc}</div>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <Link
+                  to="/register"
+                  className="inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold bg-white text-slate-900 hover:bg-slate-100 transition"
+                >
+                  Démarrer maintenant
+                </Link>
+                <Link
+                  to="/fonctionnalites"
+                  className="inline-flex items-center justify-center rounded-full px-5 py-3 text-sm font-semibold border border-white/20 bg-white/5 text-white hover:bg-white/10 transition"
+                >
+                  Lire le détail
+                </Link>
               </div>
             </section>
 
@@ -236,8 +282,8 @@ export default function Landing() {
                 </div>
                 <h2 className="text-xl font-semibold text-white">Vos inventaires</h2>
                 <p className="text-sm text-slate-200">
-                  Vous comptez les quantités. StockScan structure, calcule et met en forme. Et si besoin : pertes,
-                  dates (DLC/DDM), lots, produits entamés… uniquement si vous activez l’option.
+                  Vous comptez les quantités. StockScan structure, calcule et met en forme. Et si besoin : pertes, dates
+                  (DLC/DDM), lots, produits entamés… uniquement si vous activez l’option.
                 </p>
               </Card>
             </section>
@@ -314,9 +360,9 @@ export default function Landing() {
               </div>
 
               <div className="text-xs text-slate-300">
-                👉 Pour voir le détail complet, vous pouvez aussi passer par{" "}
+                Pour voir le détail complet :{" "}
                 <Link to="/fonctionnalites" className="font-semibold text-blue-300 hover:text-blue-200">
-                  la page fonctionnalités
+                  fonctionnalités
                 </Link>
                 .
               </div>
@@ -343,6 +389,16 @@ export default function Landing() {
 
               <div className="[&_[role='progressbar']]:hidden [&_.progress]:hidden [&_.progress-bar]:hidden">
                 <LazyAutoDemoShowcase />
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  to="/fonctionnalites"
+                  className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/5 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10 transition"
+                >
+                  <FileText className="h-4 w-4 text-blue-300" />
+                  Voir la liste complète
+                </Link>
               </div>
             </section>
 
