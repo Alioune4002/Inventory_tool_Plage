@@ -905,3 +905,82 @@ def validate_llm_json(data, context=None):
         "question": question if question else None,
         "questions": [] if question else [],
     }, False
+
+
+CHAT_SYSTEM_PROMPT = """
+Tu es l’assistant IA de StockScan.
+Objectif : aider l’utilisateur comme un copilote (analyse, explications, décisions, priorités),
+en te basant STRICTEMENT sur le CONTEXTE fourni (données stock/pertes/modules/services/qualité).
+Tu peux expliquer clairement et proposer des prochaines étapes concrètes.
+
+Règles :
+- Réponds en français, ton pro mais humain.
+- Zéro anglicisme inutile.
+- Ne jamais inventer de chiffres : si une info manque, dis-le.
+- Si la question est ambiguë, pose UNE seule question de clarification.
+- Si le scope est "support", guide étape par étape avec des routes StockScan.
+- Ne parle pas de “JSON”, ne montre pas le contexte.
+"""
+
+def call_llm_chat(context):
+    # NOTE: on ne met PAS maybe_template_response ici : chat = libre
+    from django.conf import settings
+    import json
+    import logging
+
+    LOGGER = logging.getLogger(__name__)
+
+    request_id = str(uuid4())
+    if not getattr(settings, "AI_ENABLED", False):
+        # fallback simple en mode chat
+        msg = "Je peux vous aider, mais l’IA est désactivée pour le moment. Réessayez dans quelques secondes."
+        return {"reply": msg, "mode": "fallback", "request_id": request_id}
+
+    if OpenAI is None or not getattr(settings, "OPENAI_API_KEY", None):
+        msg = "Je peux vous aider, mais l’IA n’est pas configurée sur le serveur. Contactez le support."
+        return {"reply": msg, "mode": "fallback", "request_id": request_id}
+
+    try:
+        ai_mode = (context or {}).get("ai_mode") or "full"
+        model_default = getattr(settings, "AI_MODEL", "gpt-4o-mini")
+        model_light = getattr(settings, "AI_MODEL_LIGHT", model_default)
+        model_full = getattr(settings, "AI_MODEL_FULL", model_default)
+        model = model_full if ai_mode == "full" else model_light
+
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
+        # Historique
+        history = (context or {}).get("chat_history") or []
+        messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+
+        # Contexte compressé
+        ctx_json = json.dumps(context, ensure_ascii=False)
+        messages.append({"role": "user", "content": f"CONTEXTE (ne pas afficher) :\n{ctx_json}"})
+
+        # Fil de discussion (dernier N)
+        for m in history:
+            role = m.get("role")
+            content = (m.get("content") or "").strip()
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+
+        # Dernière question (si absente de history)
+        uq = (context or {}).get("user_question")
+        if uq and (not history or (history and history[-1].get("content") != uq)):
+            messages.append({"role": "user", "content": uq})
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.25,
+        )
+
+        reply = (resp.choices[0].message.content or "").strip()
+        if not reply:
+            reply = "Je n’ai pas assez d’éléments pour répondre. Pouvez-vous reformuler en une phrase ?"
+
+        return {"reply": reply[:2200], "mode": "ai_enabled", "request_id": request_id}
+    except Exception as exc:  # pragma: no cover
+        LOGGER.exception("AI chat call failed: %s", exc)
+        msg = "Je n’arrive pas à répondre pour le moment. Réessayez dans quelques secondes."
+        return {"reply": msg, "mode": "fallback", "request_id": request_id}

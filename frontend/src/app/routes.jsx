@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 import RouteFallback from "../components/RouteFallback.jsx";
 import RequireAuth from "./RequireAuth.jsx";
+import AIAssistantDrawer from "../components/AIAssistantDrawer.jsx";
 
 const Landing = React.lazy(() => import("../pages/Landing.jsx"));
 const Login = React.lazy(() => import("../pages/Login.jsx"));
@@ -54,6 +55,7 @@ const Protected = ({ children }) => <RequireAuth>{children}</RequireAuth>;
 export default function AppRoutes() {
   return (
     <Suspense fallback={<RouteFallback />}>
+      <AIAssistantDrawer />
       <Routes>
         {/* Public */}
         <Route path="/" element={<Landing />} />
