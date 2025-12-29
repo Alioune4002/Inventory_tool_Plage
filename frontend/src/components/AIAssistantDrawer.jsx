@@ -274,9 +274,9 @@ export default function AIAssistantDrawer() {
         aria-label="Assistant IA"
         title="Assistant IA"
       >
-         {fabMode === "icon" ? (
+        {fabMode === "icon" ? (
   <div className="flex items-center justify-center">
-    {/* AI icon (sparkles + chat bubble) */}
+    {/* AI robot head icon */}
     <svg
       width="22"
       height="22"
@@ -285,23 +285,37 @@ export default function AIAssistantDrawer() {
       aria-hidden="true"
       className="text-[var(--text)]"
     >
-      {/* chat bubble */}
+      {/* antenna */}
       <path
-        d="M7.5 18.2 4.6 19.4c-.4.16-.8-.2-.66-.6l1.02-3.1A7.9 7.9 0 0 1 4 12c0-4.1 3.6-7.5 8-7.5s8 3.4 8 7.5-3.6 7.5-8 7.5c-1.3 0-2.6-.3-3.7-.8-.27-.12-.58-.13-.86-.02Z"
+        d="M12 2.8v2"
         stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
+        strokeWidth="1.6"
+        strokeLinecap="round"
       />
-      {/* sparkles */}
-      <path
-        d="M16.2 7.2l.45 1.1c.08.2.24.36.44.44l1.1.45-1.1.45c-.2.08-.36.24-.44.44l-.45 1.1-.45-1.1a.8.8 0 0 0-.44-.44l-1.1-.45 1.1-.45c.2-.08.36-.24.44-.44l.45-1.1Z"
-        fill="currentColor"
-        opacity="0.95"
+      <circle cx="12" cy="2.4" r="1" fill="currentColor" />
+
+      {/* head */}
+      <rect
+        x="4"
+        y="6"
+        width="16"
+        height="12"
+        rx="4"
+        stroke="currentColor"
+        strokeWidth="1.6"
       />
+
+      {/* eyes */}
+      <circle cx="9" cy="12" r="1.2" fill="currentColor" />
+      <circle cx="15" cy="12" r="1.2" fill="currentColor" />
+
+      {/* mouth */}
       <path
-        d="M18.6 11.6l.25.62c.06.14.17.25.31.31l.62.25-.62.25a.56.56 0 0 0-.31.31l-.25.62-.25-.62a.56.56 0 0 0-.31-.31l-.62-.25.62-.25c.14-.06.25-.17.31-.31l.25-.62Z"
-        fill="currentColor"
-        opacity="0.75"
+        d="M9 15h6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        opacity="0.7"
       />
     </svg>
   </div>
