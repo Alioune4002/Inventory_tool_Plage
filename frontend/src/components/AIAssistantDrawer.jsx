@@ -243,17 +243,17 @@ export default function AIAssistantDrawer() {
     return currentService?.name || `Service #${ctx.serviceId}`;
   }, [ctx.serviceId, currentService]);
 
-  // ------- UI -------
+  
   if (!visibleInApp) return null;
 
   const onFabClick = () => {
-    // Si réduit → 1er clic = revenir au pill (sans ouvrir)
+    
     if (fabMode === "icon") {
       setFabMode("pill");
       startFabTimer();
       return;
     }
-    // Sinon → ouvrir le drawer
+   
     openFromButton();
   };
 
@@ -265,7 +265,7 @@ export default function AIAssistantDrawer() {
         onClick={onFabClick}
         className={[
           "fixed right-5 z-[70] border border-white/10 bg-[var(--surface)] shadow-[0_20px_50px_rgba(0,0,0,0.35)] hover:opacity-95",
-          // safe-area bottom (iOS)
+          // safe-area bottom iOS
           "bottom-[calc(1.25rem+env(safe-area-inset-bottom))]",
           // transition smooth
           "transition-all duration-200",
@@ -274,19 +274,46 @@ export default function AIAssistantDrawer() {
         aria-label="Assistant IA"
         title="Assistant IA"
       >
-        {fabMode === "icon" ? (
-          <div className="flex items-center justify-center">
-            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-              <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
-            </div>
-            <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
-          </>
-        )}
+         {fabMode === "icon" ? (
+  <div className="flex items-center justify-center">
+    {/* AI icon (sparkles + chat bubble) */}
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className="text-[var(--text)]"
+    >
+      {/* chat bubble */}
+      <path
+        d="M7.5 18.2 4.6 19.4c-.4.16-.8-.2-.66-.6l1.02-3.1A7.9 7.9 0 0 1 4 12c0-4.1 3.6-7.5 8-7.5s8 3.4 8 7.5-3.6 7.5-8 7.5c-1.3 0-2.6-.3-3.7-.8-.27-.12-.58-.13-.86-.02Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      {/* sparkles */}
+      <path
+        d="M16.2 7.2l.45 1.1c.08.2.24.36.44.44l1.1.45-1.1.45c-.2.08-.36.24-.44.44l-.45 1.1-.45-1.1a.8.8 0 0 0-.44-.44l-1.1-.45 1.1-.45c.2-.08.36-.24.44-.44l.45-1.1Z"
+        fill="currentColor"
+        opacity="0.95"
+      />
+      <path
+        d="M18.6 11.6l.25.62c.06.14.17.25.31.31l.62.25-.62.25a.56.56 0 0 0-.31.31l-.25.62-.25-.62a.56.56 0 0 0-.31-.31l-.62-.25.62-.25c.14-.06.25-.17.31-.31l.25-.62Z"
+        fill="currentColor"
+        opacity="0.75"
+      />
+    </svg>
+  </div>
+) : (
+  <>
+    <div className="flex items-center gap-2">
+      <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
+      <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
+    </div>
+    <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
+  </>
+)}
       </button>
 
       {/* Drawer */}
