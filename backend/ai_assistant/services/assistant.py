@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from uuid import uuid4
 from django.conf import settings
 from django.db.models import Sum, Count, Q, Value, DecimalField
@@ -19,32 +20,63 @@ except ImportError:  # pragma: no cover
 
 LOGGER = logging.getLogger(__name__)
 
+# -----------------------------
+# Prompts (premium + JSON strict)
+# -----------------------------
+
 SYSTEM_PROMPT = """
-You are StockScan AI: a professional inventory coach for SMBs.
+You are StockScan AI: a premium inventory coach for SMBs.
 Return ONLY valid JSON with this shape:
 {
   "analysis": "<string>",
   "watch_items": ["<string>", "..."],
   "actions": [{"label": "<string>", "type": "link|info", "href": "<string or null>"}],
+  "insights": [{"title":"<string>","description":"<string>","severity":"info|warning|danger"}],
+  "suggested_actions": [{"action_key":"<string>","label":"<string>","payload":{...},"requires_confirmation": true}],
   "question": "<string or null>"
 }
 Rules (strict):
 - No markdown, no emojis, no bullet prefixes in strings.
 - Never invent data; rely strictly on CONTEXT.
 - Never explain what StockScan is.
-- Do NOT repeat raw stats already visible unless it directly supports a decision.
-- Avoid vague phrasing (ex: “vous pouvez améliorer”, “il serait utile”).
-- Always prioritize and say what to do now.
-- Tone: concise, professional, premium, like a store manager coach.
-- If FEATURES indicate a module is disabled, speak conditionally (ex: “si vous activez…”).
-- If data is sparse, say it clearly and propose 1-2 concrete next steps to improve data quality.
-- If CONTEXT.ai_mode == "light": keep it short, 1 analysis, 1-2 watch items, 1-2 actions, no projections.
-- If CONTEXT.ai_mode == "full": add prioritization, risk/opportunity framing, up to 3 actions, allow a “if you continue…” sentence.
-- If USER_QUESTION is present, answer it first in analysis, then continue with watch_items/actions.
+- Avoid repeating raw stats unless they support a decision.
+- Avoid vague phrasing. Be specific, prioritized, and actionable.
+- Tone: concise, premium, like a store manager coach.
+- If features/modules are disabled, speak conditionally ("si vous activez…").
+- If data is sparse, say it and propose 1-2 concrete steps to improve data quality.
+- If CONTEXT.ai_mode == "light": keep short (1 analysis, 1-2 watch items, 1-2 actions), no projections.
+- If CONTEXT.ai_mode == "full": allow prioritization, risk/opportunity framing, up to 3 actions.
+- If USER_QUESTION is present, answer it FIRST in analysis, then watch_items/actions.
 - If unsure, ask ONE concise clarification in question.
-- If CONTEXT.scope == "support": provide step-by-step help and actionable next clicks (routes from SUPPORT_GUIDE).
-- If you include actions with href, use paths from CONTEXT.support_guide.routes.
+- If CONTEXT.scope == "support": give step-by-step help and next clicks using routes from CONTEXT.support_guide.routes.
+- If you include actions with href, use ONLY routes from CONTEXT.support_guide.routes when possible.
+- suggested_actions must use only action_key from ACTION_TEMPLATES (otherwise omit it).
 """
+
+CHAT_SYSTEM_PROMPT = """
+Tu es l’assistant IA de StockScan, ton premium, clair, efficace.
+Tu réponds comme un copilote : tu analyses, expliques, proposes des priorités, et des actions.
+
+Tu dois retourner UNIQUEMENT un JSON valide avec cette forme :
+{
+  "reply": "<string>",
+  "watch_items": ["<string>", "..."],
+  "actions": [{"label":"<string>","type":"link|info","href": "<string|null>"}],
+  "suggested_actions": [{"action_key":"<string>","label":"<string>","payload":{...},"requires_confirmation": true}],
+  "question": "<string|null>"
+}
+
+Règles :
+- Français uniquement. Pas de markdown. Pas d’emojis.
+- Ne jamais inventer des chiffres : si une info manque, dis-le.
+- Si la question est ambiguë, pose UNE question dans "question".
+- Si scope == "support": guide étape par étape + propose des routes StockScan.
+- suggested_actions doit utiliser uniquement action_key whitelistées.
+"""
+
+# -----------------------------
+# Whitelist actions
+# -----------------------------
 
 ACTION_TEMPLATES = {
     "refresh_stats": ("GET", "/api/inventory-stats/"),
@@ -100,7 +132,9 @@ SUPPORT_GUIDE = {
 
 INTENT_KEYWORDS = {
     "losses": ["perte", "pertes", "écart", "ecart", "gaspillage", "casse", "vol", "dlc", "ddm"],
-    "modules": ["module", "modules", "activer", "activation", "options", "fonctionnalite", "fonctionnalité", "parametres", "paramètres"],
+    "modules": [
+        "module", "modules", "activer", "activation", "options", "fonctionnalite", "fonctionnalité", "parametres", "paramètres"
+    ],
     "summary": ["résumé", "resume", "bilan", "mensuel", "mensuelle", "ce mois", "ce mois-ci", "stock du mois"],
 }
 
@@ -115,6 +149,71 @@ MODULE_LABELS = {
     "item_type": "Matières premières / produits finis",
 }
 
+
+# -----------------------------
+# JSON helpers (robust parsing)
+# -----------------------------
+
+_JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+def _extract_json_object(text: str):
+    """
+    Try to extract a JSON object from a model output that may contain extra text.
+    """
+    if not isinstance(text, str):
+        return None
+    t = text.strip()
+    t = _JSON_FENCE_RE.sub("", t).strip()
+
+    # Fast path
+    if t.startswith("{") and t.endswith("}"):
+        return t
+
+    # Try to find first {...} block (best-effort)
+    start = t.find("{")
+    end = t.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return t[start:end + 1]
+    return None
+
+
+def _safe_json_loads(text: str):
+    try:
+        candidate = _extract_json_object(text)
+        if not candidate:
+            return None
+        return json.loads(candidate)
+    except Exception:
+        return None
+
+
+def _fallback_panel_message():
+    message = "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes."
+    return {
+        "analysis": message,
+        "watch_items": [],
+        "actions": [],
+        "message": message,
+        "insights": [],
+        "suggested_actions": [],
+        "question": None,
+        "questions": [],
+    }
+
+
+def _fallback_chat_message():
+    return {
+        "reply": "Je n’arrive pas à répondre pour le moment. Réessayez dans quelques secondes.",
+        "watch_items": [],
+        "actions": [],
+        "suggested_actions": [],
+        "question": None,
+    }
+
+
+# -----------------------------
+# Intent / Templates (optionnels)
+# -----------------------------
 
 def detect_intent(question: str):
     if not question:
@@ -165,6 +264,10 @@ def _recommended_modules_for_service(service_type):
 
 
 def build_template_response(context, intent):
+    """
+    Conservé pour tes tests (template_..._response_used).
+    On l’utilise uniquement en dernier recours (AI désactivée ou incapacité à parser JSON).
+    """
     ctx = context or {}
     mode = ctx.get("ai_mode") or "full"
     inv = ctx.get("inventory_summary", {})
@@ -287,6 +390,10 @@ def maybe_template_response(context):
     return build_template_response(context, intent)
 
 
+# -----------------------------
+# Context builder (inchangé)
+# -----------------------------
+
 def build_context(user, scope=None, period_start=None, period_end=None, filters=None, user_question=None, mode="full"):
     filters = filters or {}
     tenant = getattr(user, "profile", None) and user.profile.tenant
@@ -330,19 +437,14 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     )
 
     movers_limit = 3 if mode == "light" else 5
-    fast_movers = list(
-        products_qs.order_by("-quantity").values("name", "quantity", "unit", "category")[:movers_limit]
-    )
+    fast_movers = list(products_qs.order_by("-quantity").values("name", "quantity", "unit", "category")[:movers_limit])
     slow_movers = list(
         products_qs.filter(quantity__gt=0).order_by("quantity").values("name", "quantity", "unit", "category")[:movers_limit]
     )
     top_losses = list(
-        losses_qs.values("product__name")
-        .annotate(total_qty=Sum("quantity"))
-        .order_by("-total_qty")[:movers_limit]
+        losses_qs.values("product__name").annotate(total_qty=Sum("quantity")).order_by("-total_qty")[:movers_limit]
     )
 
-    # Focus items list (limit 50)
     items_limit = 12 if mode == "light" else 50
     items = list(
         products_qs.order_by("quantity")
@@ -356,12 +458,12 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     missing_dlc_count = products_qs.filter(dlc__isnull=True).count()
     opened_count = products_qs.filter(container_status="OPENED").count()
     question = (user_question or "").strip()[:500]
+
     plan_code = None
     plan_entitlements = []
     plan_limits = {}
     try:
         from accounts.services.access import get_plan_code, get_entitlements, get_limits
-
         plan_code = get_plan_code(tenant)
         plan_entitlements = get_entitlements(tenant)
         plan_limits = get_limits(tenant)
@@ -374,13 +476,8 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
         "ai_mode": mode,
         "tenant": {"id": tenant.id, "name": tenant.name, "business_type": tenant.business_type, "domain": tenant.domain},
         "service": (
-            {
-                "id": service.id,
-                "name": service.name,
-                "service_type": service.service_type,
-            }
-            if service
-            else None
+            {"id": service.id, "name": service.name, "service_type": service.service_type}
+            if service else None
         ),
         "features": service.features if service else {},
         "scope": scope or "inventory",
@@ -392,27 +489,21 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
             "out_of_stock_count": summary.get("out_of_stock_count") or 0,
         },
         "movements": {
-            "inbound_count": 0,  # non suivi en V1
+            "inbound_count": 0,
             "outbound_count": 0,
             "loss_count": loss_totals.get("loss_count") or 0,
             "adjustments_count": 0,
         },
         "losses": {
             "total_qty": float(loss_totals.get("losses_total_qty") or 0),
-            "by_reason": [
-                {"reason": r["reason"], "total_qty": float(r["total_qty"] or 0)} for r in loss_by_reason
-            ],
+            "by_reason": [{"reason": r["reason"], "total_qty": float(r["total_qty"] or 0)} for r in loss_by_reason],
         },
         "usage": {
             "services_count": tenant.services.count(),
             "categories_count": tenant.categories.count(),
             "sku_missing_count": missing_id_count,
         },
-        "plan": {
-            "code": plan_code,
-            "entitlements": plan_entitlements,
-            "limits": plan_limits,
-        },
+        "plan": {"code": plan_code, "entitlements": plan_entitlements, "limits": plan_limits},
         "support_guide": SUPPORT_GUIDE,
         "data_quality": {
             "categories_count": tenant.categories.count(),
@@ -425,12 +516,8 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
             "loss_events_count": loss_totals.get("loss_count") or 0,
         },
         "top_items": {
-            "fast_movers": [
-                {**i, "quantity": float(i.get("quantity") or 0)} for i in fast_movers
-            ],
-            "slow_movers": [
-                {**i, "quantity": float(i.get("quantity") or 0)} for i in slow_movers
-            ],
+            "fast_movers": [{**i, "quantity": float(i.get("quantity") or 0)} for i in fast_movers],
+            "slow_movers": [{**i, "quantity": float(i.get("quantity") or 0)} for i in slow_movers],
             "highest_loss_rate": [
                 {"name": i.get("product__name") or "N/A", "loss_qty": float(i.get("total_qty") or 0)}
                 for i in top_losses
@@ -455,287 +542,34 @@ def build_context(user, scope=None, period_start=None, period_end=None, filters=
     return context
 
 
-def _local_assistant_summary(context):
-    ctx = context or {}
-    inv = ctx.get("inventory_summary", {})
-    losses = ctx.get("losses", {})
-    features = ctx.get("features") or {}
-    quality = ctx.get("data_quality") or {}
-    mode = ctx.get("ai_mode") or "full"
-    service = ctx.get("service") or {}
-    service_type = service.get("service_type") or "other"
-    top_losses = (ctx.get("top_items") or {}).get("highest_loss_rate") or []
-
-    def _enabled(flag, price=False):
-        if price:
-            prices = features.get("prices") or {}
-            return prices.get("purchase_enabled") is not False or prices.get("selling_enabled") is not False
-        cfg = features.get(flag) or {}
-        return cfg.get("enabled") is True
-
-    total_skus = inv.get("total_skus", 0)
-    low_stock = inv.get("low_stock_count", 0)
-    out_stock = inv.get("out_of_stock_count", 0)
-    loss_qty = losses.get("total_qty", 0) or 0
-
-    analysis_parts = []
-    if total_skus == 0:
-        analysis_parts.append("Aucun produit n’est suivi sur la période. L’enjeu principal est de structurer la base.")
-    else:
-        if out_stock > 0:
-            analysis_parts.append("Le stock est sous tension avec des ruptures visibles.")
-        elif low_stock > 0:
-            analysis_parts.append("Le stock est globalement en place, mais certaines références manquent de marge.")
-        else:
-            analysis_parts.append("Le stock est stable, sans alerte critique immédiate.")
-
-        if loss_qty > 0:
-            if top_losses:
-                top_names = [i.get("name") for i in top_losses if i.get("name") and i.get("name") != "N/A"][:2]
-                if top_names:
-                    analysis_parts.append(
-                        f"Les pertes se concentrent surtout sur {', '.join(top_names)}."
-                    )
-                else:
-                    analysis_parts.append("Des pertes sont enregistrées et restent concentrées sur quelques articles.")
-            else:
-                analysis_parts.append("Des pertes sont enregistrées et doivent être expliquées.")
-
-        if mode != "light" and (out_stock > 0 or low_stock > 0 or loss_qty > 0):
-            analysis_parts.append("Si cette tendance continue, l’écart entre stock réel et stock attendu va se creuser.")
-
-    analysis = " ".join(analysis_parts).strip() or "Analyse indisponible pour le moment."
-
-    watch_items = []
-    if out_stock > 0:
-        watch_items.append("Des ruptures existent : risque de ventes ou usages bloqués.")
-    if low_stock > 0 and out_stock == 0:
-        watch_items.append("Stocks faibles sur certaines références : marge de sécurité réduite.")
-    if loss_qty > 0:
-        watch_items.append("Pertes récurrentes : surveiller les produits sensibles.")
-    if quality.get("products_without_identifier_count", 0) > 0:
-        watch_items.append("Des produits sans référence rendent le suivi des pertes imprécis.")
-    if quality.get("products_without_purchase_price_count", 0) > 0 and _enabled("prices", price=True):
-        watch_items.append("Des prix d’achat manquants sous-estiment l’impact réel des pertes.")
-    if quality.get("products_without_category_count", 0) > 0:
-        watch_items.append("Des catégories manquantes rendent l’analyse moins fiable.")
-    if _enabled("dlc") and quality.get("products_without_dlc_count", 0) > 0:
-        watch_items.append("Des dates manquantes limitent la prévention des pertes liées aux DLC.")
-
-    actions = []
-    if quality.get("products_without_identifier_count", 0) > 0 and not _enabled("barcode") and not _enabled("sku"):
-        actions.append(
-            {
-                "label": "Activer le module Référence (SKU / code-barres)",
-                "type": "link",
-                "href": "/app/settings",
-            }
-        )
-    elif quality.get("products_without_identifier_count", 0) > 0:
-        actions.append(
-            {
-                "label": "Compléter les références des produits à risque",
-                "type": "link",
-                "href": "/app/products",
-            }
-        )
-
-    if loss_qty > 0:
-        actions.append(
-            {
-                "label": "Analyser les pertes enregistrées",
-                "type": "link",
-                "href": "/app/losses",
-            }
-        )
-
-    if out_stock > 0:
-        actions.append(
-            {
-                "label": "Vérifier les ruptures dans l’inventaire",
-                "type": "link",
-                "href": "/app/inventory",
-            }
-        )
-
-    if quality.get("products_without_purchase_price_count", 0) > 0 and _enabled("prices", price=True):
-        actions.append(
-            {
-                "label": "Renseigner les prix d’achat sur les produits clés",
-                "type": "link",
-                "href": "/app/products",
-            }
-        )
-
-    if service_type in ("bar", "kitchen", "bakery") and not _enabled("open_container_tracking"):
-        actions.append(
-            {
-                "label": "Activer le suivi entamé / non-entamé",
-                "type": "link",
-                "href": "/app/settings",
-            }
-        )
-
-    max_watch = 2 if mode == "light" else 4
-    max_actions = 2 if mode == "light" else 3
-
-    return {
-        "analysis": analysis,
-        "watch_items": watch_items[:max_watch],
-        "actions": actions[:max_actions],
-        "question": None,
-        "message": analysis,
-        "insights": [],
-        "suggested_actions": [],
-    }
-
-
-def _local_support_response(context):
-    ctx = context or {}
-    q = (ctx.get("user_question") or "").lower()
-    plan = ctx.get("plan") or {}
-    limits = plan.get("limits") or {}
-    ai_limit = limits.get("ai_support_weekly_limit")
-    support_email = (ctx.get("support_guide") or {}).get("support", {}).get("email") or "support@stockscan.app"
-
-    def _msg(text, question=None):
-        return {
-            "analysis": text,
-            "watch_items": [],
-            "actions": [],
-            "question": question,
-            "message": text,
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["export", "csv", "excel"]):
-        return {
-            "analysis": "Ouvrez Exports, choisissez la période et le format, puis lancez le téléchargement.",
-            "watch_items": [
-                "Une erreur 403 indique un quota de plan atteint.",
-                "Excel est disponible selon le plan (Duo/Multi).",
-            ],
-            "actions": [
-                {"label": "Ouvrir Exports", "type": "link", "href": "/app/exports"},
-            ],
-            "question": "Le problème arrive-t-il sur CSV, Excel, ou les deux ?",
-            "message": "Ouvrez Exports, choisissez la période et le format, puis lancez le téléchargement.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["403", "limite", "quota"]):
-        return {
-            "analysis": "Une erreur 403 signifie généralement qu’un quota de plan est atteint.",
-            "watch_items": ["Le quota peut concerner exports, IA ou services.", "Vérifiez votre plan et l’usage actuel."],
-            "actions": [
-                {
-                    "label": "Ouvrir Abonnement & facturation",
-                    "type": "link",
-                    "href": "/app/settings",
-                }
-            ],
-            "question": "Quelle action précise déclenche l’erreur (export, IA, création de service) ?",
-            "message": "Une erreur 403 signifie généralement qu’un quota de plan est atteint.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["assistant", "ia", "ai"]):
-        quota_msg = ""
-        if ai_limit is not None:
-            quota_msg = f" Votre quota hebdomadaire est de {ai_limit} requete(s)."
-        return {
-            "analysis": "L’assistant IA est disponible sur Duo (light) et Multi (coach)."
-            f"{quota_msg} Si l’IA ne répond pas, vérifiez le quota.",
-            "watch_items": ["Le quota support est hebdomadaire.", "Le mode Multi fournit des conseils plus approfondis."],
-            "actions": [{"label": "Ouvrir Support", "type": "link", "href": "/app/support"}],
-            "question": "Quel type d’aide attendez-vous (stock, exports, configuration) ?",
-            "message": "L’assistant IA est disponible sur Duo (light) et Multi (coach)."
-            f"{quota_msg} Si l’IA ne répond pas, vérifiez le quota.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["scan", "code-barres", "barcode", "openfoodfacts", "off"]):
-        return {
-            "analysis": "Sur iOS Safari, la caméra peut être limitée. Utilisez la saisie manuelle si besoin.",
-            "watch_items": ["OpenFoodFacts préremplit surtout les produits alimentaires."],
-            "actions": [{"label": "Ouvrir Inventaire", "type": "link", "href": "/app/inventory"}],
-            "question": "Quel navigateur utilisez-vous et quel message d’erreur voyez-vous ?",
-            "message": "Sur iOS Safari, la caméra peut être limitée. Utilisez la saisie manuelle si besoin.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["service", "services"]):
-        return {
-            "analysis": "Utilisez le sélecteur en haut de l’app pour changer de service.",
-            "watch_items": ["Le nombre de services dépend du plan."],
-            "actions": [{"label": "Ouvrir Services & modules", "type": "link", "href": "/app/settings"}],
-            "question": "Souhaitez-vous ajouter un service ou simplement en changer ?",
-            "message": "Utilisez le sélecteur en haut de l’app pour changer de service.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["paiement", "abonnement", "stripe", "facturation"]):
-        return {
-            "analysis": "Allez dans Paramètres → Abonnement & facturation pour gérer Stripe.",
-            "watch_items": ["Si le plan n’est pas activé après paiement, rechargez la page de succès."],
-            "actions": [{"label": "Ouvrir Abonnement & facturation", "type": "link", "href": "/app/settings"}],
-            "question": "Pouvez-vous confirmer le plan acheté et la date du paiement ?",
-            "message": "Allez dans Paramètres → Abonnement & facturation pour gérer Stripe.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    if any(k in q for k in ["connexion", "login", "mot de passe", "reset"]):
-        return {
-            "analysis": "Vérifiez vos identifiants. Pour réinitialiser, utilisez “Mot de passe oublié”.",
-            "watch_items": ["Si plusieurs comptes partagent un email, utilisez le nom d’utilisateur."],
-            "actions": [{"label": "Ouvrir Connexion", "type": "link", "href": "/login"}],
-            "question": "Avez-vous un message d’erreur précis à l’écran ?",
-            "message": "Vérifiez vos identifiants. Pour réinitialiser, utilisez “Mot de passe oublié”.",
-            "insights": [],
-            "suggested_actions": [],
-        }
-
-    return _msg(
-        "Je peux aider sur exports, services, facturation, IA, scan ou modules. "
-        f"Si besoin, contactez {support_email}.",
-        "Quel est votre besoin principal ?",
-    )
-
-
-def _fallback():
-    message = "Assistant IA indisponible pour le moment. Réessaie dans quelques secondes."
-    return {
-        "analysis": message,
-        "watch_items": [],
-        "actions": [],
-        "message": message,
-        "insights": [],
-        "suggested_actions": [],
-        "question": None,
-        "questions": [],
-    }
-
+# -----------------------------
+# Panel LLM call (assistant endpoint)
+# -----------------------------
 
 def call_llm(system_prompt, context_json, context=None):
+    """
+    Retourne dict (non validé) compatible validate_llm_json.
+    Objectif: quand AI_ENABLED=True => plus de réponses en dur.
+    """
     request_id = str(uuid4())
-    template = maybe_template_response(context or {})
-    if template:
-        return {**template, "request_id": request_id, "mode": "template"}
-    if not getattr(settings, "AI_ENABLED", False):
-        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
-        return {**response, "request_id": request_id, "mode": "fallback"}
 
+    # 1) template only if AI disabled / missing key (keeps tests + safe fallback)
+    template = maybe_template_response(context or {})
+
+    # 2) AI disabled => template if exists else fallback panel
+    if not getattr(settings, "AI_ENABLED", False):
+        if template:
+            return {**template, "request_id": request_id, "mode": "template"}
+        data = _fallback_panel_message()
+        return {**data, "request_id": request_id, "mode": "fallback"}
+
+    # 3) AI enabled but client/key missing => template or fallback
     if OpenAI is None or not getattr(settings, "OPENAI_API_KEY", None):
-        LOGGER.warning("AI disabled: missing OpenAI client or API key.")
-        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
-        return {**response, "request_id": request_id, "mode": "fallback"}
+        LOGGER.warning("AI enabled but OpenAI client/key missing.")
+        if template:
+            return {**template, "request_id": request_id, "mode": "template"}
+        data = _fallback_panel_message()
+        return {**data, "request_id": request_id, "mode": "fallback"}
 
     try:
         ai_mode = (context or {}).get("ai_mode") or "full"
@@ -745,27 +579,45 @@ def call_llm(system_prompt, context_json, context=None):
         model = model_full if ai_mode == "full" else model_light
 
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"CONTEXT:\n{context_json}"},
         ]
         if context and context.get("user_question"):
             messages.append({"role": "user", "content": f"USER_QUESTION:\n{context['user_question']}"})
-        response = client.chat.completions.create(
+
+        resp = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.2,
         )
-        content = response.choices[0].message.content
-        data = json.loads(content)
+
+        content = (resp.choices[0].message.content or "").strip()
+        data = _safe_json_loads(content)
+
+        if not isinstance(data, dict):
+            # last resort: template if it exists, else fallback
+            if template:
+                return {**template, "request_id": request_id, "mode": "template"}
+            fb = _fallback_panel_message()
+            return {**fb, "request_id": request_id, "mode": "fallback"}
+
         data["request_id"] = request_id
         data["mode"] = "ai_enabled"
         return data
+
     except Exception as exc:  # pragma: no cover
         LOGGER.exception("AI call failed: %s", exc)
-        response = _local_support_response(context) if (context or {}).get("scope") == "support" else _local_assistant_summary(context)
-        return {**response, "request_id": request_id, "mode": "fallback"}
+        if template:
+            return {**template, "request_id": request_id, "mode": "template"}
+        fb = _fallback_panel_message()
+        return {**fb, "request_id": request_id, "mode": "fallback"}
 
+
+# -----------------------------
+# Existing validator (kept)
+# -----------------------------
 
 def validate_llm_json(data, context=None):
     from jsonschema import validate, ValidationError
@@ -820,10 +672,7 @@ def validate_llm_json(data, context=None):
     try:
         validate(data, schema)
     except (ValidationError, Exception):
-        if context:
-            response = _local_support_response(context) if context.get("scope") == "support" else _local_assistant_summary(context)
-            return response, True
-        return _fallback(), True
+        return _fallback_panel_message(), True
 
     analysis = (data.get("analysis") or data.get("message") or "")[:1400]
     watch_items = data.get("watch_items") or []
@@ -839,8 +688,8 @@ def validate_llm_json(data, context=None):
             continue
         cleaned_insights.append(
             {
-                "title": ins.get("title", "")[:200],
-                "description": ins.get("description", "")[:800],
+                "title": (ins.get("title", "") or "")[:200],
+                "description": (ins.get("description", "") or "")[:800],
                 "severity": ins.get("severity", "info"),
             }
         )
@@ -872,7 +721,7 @@ def validate_llm_json(data, context=None):
         method, endpoint = ACTION_TEMPLATES[action_key]
         cleaned_suggested_actions.append(
             {
-                "label": act.get("label", action_key)[:120],
+                "label": (act.get("label", action_key) or action_key)[:120],
                 "endpoint": endpoint,
                 "method": method,
                 "payload": act.get("payload") or {},
@@ -890,10 +739,7 @@ def validate_llm_json(data, context=None):
             watch_items.append(f"{title} — {desc}".strip(" —"))
 
     if not analysis:
-        if context:
-            response = _local_support_response(context) if context.get("scope") == "support" else _local_assistant_summary(context)
-            return response, True
-        return _fallback(), True
+        return _fallback_panel_message(), True
 
     return {
         "analysis": message,
@@ -907,38 +753,28 @@ def validate_llm_json(data, context=None):
     }, False
 
 
-CHAT_SYSTEM_PROMPT = """
-Tu es l’assistant IA de StockScan.
-Objectif : aider l’utilisateur comme un copilote (analyse, explications, décisions, priorités),
-en te basant STRICTEMENT sur le CONTEXTE fourni (données stock/pertes/modules/services/qualité).
-Tu peux expliquer clairement et proposer des prochaines étapes concrètes.
-
-Règles :
-- Réponds en français, ton pro mais humain.
-- Zéro anglicisme inutile.
-- Ne jamais inventer de chiffres : si une info manque, dis-le.
-- Si la question est ambiguë, pose UNE seule question de clarification.
-- Si le scope est "support", guide étape par étape avec des routes StockScan.
-- Ne parle pas de “JSON”, ne montre pas le contexte.
-"""
+# -----------------------------
+# Chat LLM call (chat endpoint)
+# -----------------------------
 
 def call_llm_chat(context):
-    # NOTE: on ne met PAS maybe_template_response ici : chat = libre
-    from django.conf import settings
-    import json
-    import logging
-
-    LOGGER = logging.getLogger(__name__)
-
+    """
+    Retourne dict:
+    {
+      reply, watch_items, actions, suggested_actions, question, mode, request_id
+    }
+    AiChatView garde reply, mais on prépare déjà le format premium.
+    """
     request_id = str(uuid4())
+
     if not getattr(settings, "AI_ENABLED", False):
-        # fallback simple en mode chat
-        msg = "Je peux vous aider, mais l’IA est désactivée pour le moment. Réessayez dans quelques secondes."
-        return {"reply": msg, "mode": "fallback", "request_id": request_id}
+        data = _fallback_chat_message()
+        return {**data, "mode": "fallback", "request_id": request_id}
 
     if OpenAI is None or not getattr(settings, "OPENAI_API_KEY", None):
-        msg = "Je peux vous aider, mais l’IA n’est pas configurée sur le serveur. Contactez le support."
-        return {"reply": msg, "mode": "fallback", "request_id": request_id}
+        data = _fallback_chat_message()
+        data["reply"] = "Je peux aider, mais l’IA n’est pas configurée sur le serveur. Contactez le support."
+        return {**data, "mode": "fallback", "request_id": request_id}
 
     try:
         ai_mode = (context or {}).get("ai_mode") or "full"
@@ -949,24 +785,25 @@ def call_llm_chat(context):
 
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
 
-        # Historique
         history = (context or {}).get("chat_history") or []
         messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
 
-        # Contexte compressé
-        ctx_json = json.dumps(context, ensure_ascii=False)
+        # Context (hidden)
+        ctx_json = json.dumps(context or {}, ensure_ascii=False)
         messages.append({"role": "user", "content": f"CONTEXTE (ne pas afficher) :\n{ctx_json}"})
 
-        # Fil de discussion (dernier N)
+        # Thread
         for m in history:
             role = m.get("role")
             content = (m.get("content") or "").strip()
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-        # Dernière question (si absente de history)
+        # Ensure last user message exists
         uq = (context or {}).get("user_question")
-        if uq and (not history or (history and history[-1].get("content") != uq)):
+        if uq:
+            uq = str(uq).strip()
+        if uq and (not history or (history and (history[-1].get("content") or "").strip() != uq)):
             messages.append({"role": "user", "content": uq})
 
         resp = client.chat.completions.create(
@@ -975,12 +812,75 @@ def call_llm_chat(context):
             temperature=0.25,
         )
 
-        reply = (resp.choices[0].message.content or "").strip()
+        content = (resp.choices[0].message.content or "").strip()
+        data = _safe_json_loads(content)
+
+        # If model didn't comply, fallback to plain reply
+        if not isinstance(data, dict):
+            reply = content[:2200] if content else "Je n’ai pas assez d’éléments pour répondre. Pouvez-vous reformuler en une phrase ?"
+            return {
+                "reply": reply,
+                "watch_items": [],
+                "actions": [],
+                "suggested_actions": [],
+                "question": None,
+                "mode": "ai_enabled",
+                "request_id": request_id,
+            }
+
+        # Normalize
+        reply = (data.get("reply") or "").strip()
         if not reply:
             reply = "Je n’ai pas assez d’éléments pour répondre. Pouvez-vous reformuler en une phrase ?"
 
-        return {"reply": reply[:2200], "mode": "ai_enabled", "request_id": request_id}
+        # Clean actions (href only)
+        cleaned_actions = []
+        for act in (data.get("actions") or []):
+            if not isinstance(act, dict):
+                continue
+            label = (act.get("label") or "").strip()
+            if not label:
+                continue
+            href = act.get("href") if isinstance(act.get("href"), str) else None
+            t = act.get("type") if act.get("type") in ("link", "info") else None
+            cleaned_actions.append(
+                {"label": label[:160], "type": t or ("link" if href else "info"), "href": href[:200] if href else None}
+            )
+
+        # Clean suggested_actions via whitelist
+        cleaned_suggested_actions = []
+        for act in (data.get("suggested_actions") or []):
+            if not isinstance(act, dict):
+                continue
+            action_key = act.get("action_key")
+            if action_key not in ACTION_TEMPLATES:
+                continue
+            method, endpoint = ACTION_TEMPLATES[action_key]
+            cleaned_suggested_actions.append(
+                {
+                    "action_key": action_key,
+                    "label": (act.get("label", action_key) or action_key)[:120],
+                    "endpoint": endpoint,
+                    "method": method,
+                    "payload": act.get("payload") or {},
+                    "requires_confirmation": bool(act.get("requires_confirmation", True)),
+                }
+            )
+
+        watch_items = [w[:240] for w in (data.get("watch_items") or []) if isinstance(w, str)][:4]
+        question = data.get("question") if isinstance(data.get("question"), str) else None
+
+        return {
+            "reply": reply[:2200],
+            "watch_items": watch_items,
+            "actions": cleaned_actions[:4],
+            "suggested_actions": cleaned_suggested_actions[:4],
+            "question": question,
+            "mode": "ai_enabled",
+            "request_id": request_id,
+        }
+
     except Exception as exc:  # pragma: no cover
         LOGGER.exception("AI chat call failed: %s", exc)
-        msg = "Je n’arrive pas à répondre pour le moment. Réessayez dans quelques secondes."
-        return {"reply": msg, "mode": "fallback", "request_id": request_id}
+        data = _fallback_chat_message()
+        return {**data, "mode": "fallback", "request_id": request_id}
