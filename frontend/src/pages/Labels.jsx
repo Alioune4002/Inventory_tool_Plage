@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { ScanLine } from "lucide-react";
+import { ScanLine, Sparkles, Info } from "lucide-react";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Badge from "../ui/Badge";
@@ -78,10 +78,7 @@ export default function Labels() {
 
   const canUse = Boolean(entitlements?.entitlements?.labels_pdf);
   const limit = entitlements?.limits?.labels_pdf_monthly_limit ?? null;
-  const totalLabels = useMemo(
-    () => selected.reduce((sum, p) => sum + (p.count || 1), 0),
-    [selected]
-  );
+  const totalLabels = useMemo(() => selected.reduce((sum, p) => sum + (p.count || 1), 0), [selected]);
 
   const serviceOptions = useMemo(() => {
     const base = (services || []).map((s) => ({ value: s.id, label: s.name }));
@@ -110,17 +107,13 @@ export default function Labels() {
     try {
       if (serviceId === "all") {
         const responses = await Promise.all(
-          (services || []).map((s) =>
-            api.get(`/api/products/search/?service=${s.id}&q=${encodeURIComponent(searchValue)}`)
-          )
+          (services || []).map((s) => api.get(`/api/products/search/?service=${s.id}&q=${encodeURIComponent(searchValue)}`))
         );
         if (seq !== searchRef.current) return;
         const merged = responses.flatMap((res) => res.data || []);
         setResults(merged);
       } else {
-        const res = await api.get(
-          `/api/products/search/?service=${serviceId}&q=${encodeURIComponent(searchValue)}`
-        );
+        const res = await api.get(`/api/products/search/?service=${serviceId}&q=${encodeURIComponent(searchValue)}`);
         if (seq !== searchRef.current) return;
         setResults(res.data || []);
       }
@@ -129,9 +122,7 @@ export default function Labels() {
       setResults([]);
       pushToast?.({ message: "Recherche impossible.", type: "error" });
     } finally {
-      if (seq === searchRef.current) {
-        setSearchLoading(false);
-      }
+      if (seq === searchRef.current) setSearchLoading(false);
     }
   };
 
@@ -160,9 +151,7 @@ export default function Labels() {
     setSelected((prev) => {
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
-        return prev.map((p) =>
-          p.id === product.id ? { ...p, count: Math.min((p.count || 1) + 1, 50) } : p
-        );
+        return prev.map((p) => (p.id === product.id ? { ...p, count: Math.min((p.count || 1) + 1, 50) } : p));
       }
       return [...prev, { ...product, count: 1 }];
     });
@@ -170,9 +159,7 @@ export default function Labels() {
     pushToast?.({ message: `Ajouté : ${product.name}`, type: "success" });
   };
 
-  const removeSelected = (id) => {
-    setSelected((prev) => prev.filter((p) => p.id !== id));
-  };
+  const removeSelected = (id) => setSelected((prev) => prev.filter((p) => p.id !== id));
 
   const updateCount = (id, nextCount) => {
     const parsed = Number(nextCount);
@@ -181,9 +168,7 @@ export default function Labels() {
       removeSelected(id);
       return;
     }
-    setSelected((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, count: Math.min(parsed, 50) } : p))
-    );
+    setSelected((prev) => prev.map((p) => (p.id === id ? { ...p, count: Math.min(parsed, 50) } : p)));
   };
 
   const generateLabels = async () => {
@@ -206,9 +191,7 @@ export default function Labels() {
         params.set("promo_value", promoValue);
       }
 
-      const res = await api.get(`/api/labels/pdf/?${params.toString()}`, {
-        responseType: "blob",
-      });
+      const res = await api.get(`/api/labels/pdf/?${params.toString()}`, { responseType: "blob" });
       downloadBlob({ blob: res.data, filename: "stockscan_labels.pdf" });
       pushToast?.({ message: "Étiquettes générées.", type: "success" });
     } catch (error) {
@@ -230,16 +213,12 @@ export default function Labels() {
         <Card className="p-6 space-y-2">
           <div className="text-sm text-[var(--muted)]">PDF étiquettes</div>
           <h1 className="text-2xl font-black text-[var(--text)]">Étiquettes produits</h1>
-          <p className="text-sm text-[var(--muted)]">
-            Génération A4 paginée avec codes-barres et informations utiles.
-          </p>
+          <p className="text-sm text-[var(--muted)]">Génération A4 paginée avec codes-barres et infos utiles.</p>
         </Card>
 
         {!canUse ? (
           <Card className="p-6">
-            <div className="text-sm text-[var(--muted)]">
-              Étiquettes PDF non incluses dans votre plan.
-            </div>
+            <div className="text-sm text-[var(--muted)]">Étiquettes PDF non incluses dans votre plan.</div>
             <Button className="mt-3" onClick={() => (window.location.href = "/tarifs")}>
               Voir les plans
             </Button>
@@ -253,13 +232,52 @@ export default function Labels() {
               <Button onClick={() => setDrawerOpen(true)}>Configurer les étiquettes</Button>
             </Card>
 
+            {/* ✅ EMPTY STATE + MINI DEMO */}
+            {selected.length === 0 && !query.trim() && (
+              <Card className="p-6 space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-1">
+                    <Sparkles className="h-5 w-5 text-[var(--text)]" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-[var(--text)]">Comment ça marche</div>
+                    <div className="text-sm text-[var(--muted)]">
+                      Sélectionnez des produits puis StockScan génère un PDF prêt à imprimer (A4).
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-3">
+                  {[
+                    { title: "1) Rechercher", desc: "Tape un nom / EAN / SKU… ou scanne directement.", icon: <Info className="h-4 w-4" /> },
+                    { title: "2) Ajouter", desc: "Ajoute 1 ou plusieurs fois (quantité d’étiquettes).", icon: <Info className="h-4 w-4" /> },
+                    { title: "3) Générer", desc: "PDF paginé + code-barres + prix + infos utiles.", icon: <Info className="h-4 w-4" /> },
+                  ].map((b) => (
+                    <div key={b.title} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                        {b.icon}
+                        {b.title}
+                      </div>
+                      <div className="mt-1 text-xs text-[var(--muted)]">{b.desc}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" onClick={() => setDrawerOpen(true)}>
+                    Ouvrir la sélection
+                  </Button>
+                </div>
+              </Card>
+            )}
+
             <Card className="p-6 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[var(--text)]">Sélection actuelle</div>
                 {selected.length > 0 && (
                   <Badge variant="info">
-                    {selected.length} produit{selected.length > 1 ? "s" : ""} ·{" "}
-                    {totalLabels} étiquette{totalLabels > 1 ? "s" : ""}
+                    {selected.length} produit{selected.length > 1 ? "s" : ""} · {totalLabels} étiquette
+                    {totalLabels > 1 ? "s" : ""}
                   </Badge>
                 )}
               </div>
@@ -267,8 +285,7 @@ export default function Labels() {
                 <div className="text-sm text-[var(--muted)]">Aucun produit sélectionné.</div>
               ) : (
                 <div className="text-sm text-[var(--muted)]">
-                  {totalLabels} étiquette{totalLabels > 1 ? "s" : ""} prête
-                  {totalLabels > 1 ? "s" : ""} pour le PDF.
+                  {totalLabels} étiquette{totalLabels > 1 ? "s" : ""} prête{totalLabels > 1 ? "s" : ""} pour le PDF.
                 </div>
               )}
             </Card>
@@ -293,40 +310,36 @@ export default function Labels() {
                   <div className="text-sm font-semibold text-[var(--text)]">Recherche produits</div>
                   <div className="grid gap-3 sm:grid-cols-3 items-end">
                     {services?.length > 0 && (
-                      <Select
-                        label="Service"
-                        value={serviceId || ""}
-                        onChange={(value) => selectService(value)}
-                        options={serviceOptions}
-                      />
+                      <Select label="Service" value={serviceId || ""} onChange={(value) => selectService(value)} options={serviceOptions} />
                     )}
+
                     <Input
                       label="Recherche produit"
                       placeholder="Nom, code-barres, SKU…"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       rightSlot={
+                        // ✅ ICON ONLY (compact)
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
+                          className="inline-flex items-center justify-center rounded-full border border-[var(--border)] p-2 text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
                           onClick={() => setScannerOpen(true)}
                           title="Scanner un code-barres"
                           aria-label="Scanner un code-barres"
                         >
-                          <ScanLine className="h-3.5 w-3.5" />
-                          Scanner
+                          <ScanLine className="h-4 w-4" />
                         </button>
                       }
                     />
+
                     <Button onClick={() => searchProducts()} loading={searchLoading}>
                       Rechercher
                     </Button>
                   </div>
-                  <div className="text-xs text-[var(--muted)]">
-                    Les suggestions apparaissent dès que vous tapez.
-                  </div>
+                  <div className="text-xs text-[var(--muted)]">Les suggestions apparaissent dès que vous tapez.</div>
                 </div>
 
+                {/* le reste inchangé */}
                 {results.length > 0 && (
                   <div className="space-y-2" aria-live="polite">
                     {results.map((p) => (
@@ -343,9 +356,7 @@ export default function Labels() {
                           <div className="text-xs text-[var(--muted)]">
                             {p.barcode || p.internal_sku || "—"} · {p.inventory_month}
                           </div>
-                          {lastAddedId === p.id && (
-                            <div className="text-xs text-emerald-600">Ajouté à la sélection</div>
-                          )}
+                          {lastAddedId === p.id && <div className="text-xs text-emerald-600">Ajouté à la sélection</div>}
                         </div>
                         <Button size="sm" variant="secondary" onClick={() => addSelected(p)}>
                           {selected.some((item) => item.id === p.id) ? "Ajouter +1" : "Ajouter"}
@@ -400,14 +411,8 @@ export default function Labels() {
 
                 <div className="space-y-3">
                   <div className="text-sm font-semibold text-[var(--text)]">Identité</div>
-                  <Input
-                    label="Raison sociale"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                  />
-                  <div className="text-xs text-[var(--muted)]">
-                    Le nom de l’entreprise est obligatoire sur les étiquettes.
-                  </div>
+                  <Input label="Raison sociale" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+                  <div className="text-xs text-[var(--muted)]">Le nom de l’entreprise est obligatoire sur les étiquettes.</div>
                 </div>
 
                 <div className="space-y-2">

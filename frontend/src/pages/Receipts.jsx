@@ -26,7 +26,26 @@ function getReceiptErrorMessage(error) {
   if (code === "RECEIPT_EMPTY") {
     return "Aucune ligne exploitable n’a été trouvée dans ce fichier.";
   }
+  if (code === "UNSUPPORTED_FILE") {
+    return "Format non supporté. Importez un CSV ou PDF structuré (sans OCR).";
+  }
   return error?.detail || error?.message || "Impossible d’importer ce fichier.";
+}
+
+function isSupportedReceiptFile(file) {
+  if (!file) return false;
+  const name = (file.name || "").toLowerCase();
+  const type = (file.type || "").toLowerCase();
+
+  // iOS peut renvoyer type vide => fallback extension
+  const byExt = name.endsWith(".pdf") || name.endsWith(".csv");
+  const byMime =
+    type.includes("pdf") ||
+    type.includes("csv") ||
+    type.includes("comma-separated-values") ||
+    type.includes("application/vnd.ms-excel");
+
+  return byExt || byMime;
 }
 
 export default function Receipts() {
@@ -56,11 +75,18 @@ export default function Receipts() {
   const canUse = Boolean(entitlements?.entitlements?.receipts_import);
   const limit = entitlements?.limits?.receipts_import_monthly_limit ?? null;
 
+  // Historique: OK d'avoir "all"
   const serviceOptions = useMemo(() => {
     const base = (services || []).map((s) => ({ value: s.id, label: s.name }));
     if (services?.length > 1) base.push({ value: "all", label: "Tous les services" });
     return base;
   }, [services]);
+
+  // Import: on interdit "all" (back attend un service précis)
+  const importServiceOptions = useMemo(
+    () => (services || []).map((s) => ({ value: s.id, label: s.name })),
+    [services]
+  );
 
   const matchesRef = useRef(null);
 
@@ -72,28 +98,38 @@ export default function Receipts() {
 
   const onImport = async (e) => {
     e.preventDefault();
+
     if (!file) {
       pushToast?.({ message: "Sélectionnez un fichier CSV ou PDF.", type: "warn" });
       return;
     }
-    if (!serviceId) {
-      pushToast?.({ message: "Sélectionnez un service.", type: "warn" });
+    if (!isSupportedReceiptFile(file)) {
+      pushToast?.({
+        message: "Format non supporté. Importez un fichier .csv ou .pdf (structuré).",
+        type: "error",
+      });
+      return;
+    }
+    if (!serviceId || String(serviceId) === "all") {
+      pushToast?.({ message: "Sélectionnez un service précis (pas “Tous”).", type: "warn" });
       return;
     }
 
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", file, file.name);
     formData.append("supplier_name", supplierName);
     formData.append("received_at", receivedAt);
 
-      setLoading(true);
-      setReceiptId(null);
-      setLines([]);
-      setReceiptMeta(null);
-      try {
+    setLoading(true);
+    setReceiptId(null);
+    setLines([]);
+    setReceiptMeta(null);
+
+    try {
       const res = await api.post(`/api/receipts/import/?service=${serviceId}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+  
+});
+
       setReceiptId(res.data?.receipt_id || null);
       const newLines = res.data?.lines || [];
       setSkippedLines(res.data?.skipped_lines || 0);
@@ -105,6 +141,7 @@ export default function Receipts() {
         supplier: res.data?.supplier || "",
       });
       setDrawerOpen(false);
+
       const initial = {};
       newLines.forEach((line) => {
         initial[line.id] = {
@@ -113,6 +150,7 @@ export default function Receipts() {
         };
       });
       setDecisions(initial);
+
       if (newLines.length) {
         pushToast?.({ message: "Fichier importé. Vérifiez les correspondances ci-dessous.", type: "success" });
         window.setTimeout(() => matchesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
@@ -130,7 +168,7 @@ export default function Receipts() {
   };
 
   const loadLineOptions = async (line) => {
-    if (!serviceId) return;
+    if (!serviceId || String(serviceId) === "all") return;
     setLoadingLine((prev) => ({ ...prev, [line.id]: true }));
     try {
       const res = await api.get(`/api/products/search/?service=${serviceId}&q=${encodeURIComponent(line.name)}`);
@@ -244,9 +282,7 @@ export default function Receipts() {
 
         {!canUse ? (
           <Card className="p-6">
-            <div className="text-sm text-[var(--muted)]">
-              Import fournisseur non inclus dans votre plan.
-            </div>
+            <div className="text-sm text-[var(--muted)]">Import fournisseur non inclus dans votre plan.</div>
             <Button className="mt-3" onClick={() => (window.location.href = "/tarifs")}>
               Voir les plans
             </Button>
@@ -279,6 +315,7 @@ export default function Receipts() {
                     Appliquer la réception
                   </Button>
                 </div>
+
                 {receiptMeta && (
                   <div className="text-xs text-[var(--muted)]">
                     {receiptMeta.supplier ? `Fournisseur : ${receiptMeta.supplier} · ` : ""}
@@ -366,18 +403,14 @@ export default function Receipts() {
                   value={historyQuery}
                   onChange={(e) => setHistoryQuery(e.target.value)}
                 />
-                <Input
-                  label="Date"
-                  type="date"
-                  value={historyDate}
-                  onChange={(e) => setHistoryDate(e.target.value)}
-                />
+                <Input label="Date" type="date" value={historyDate} onChange={(e) => setHistoryDate(e.target.value)} />
                 <div className="flex items-end">
                   <Button variant="secondary" onClick={loadHistory} loading={historyLoading}>
                     Rechercher
                   </Button>
                 </div>
               </div>
+
               {historyLoading ? (
                 <Skeleton className="h-20 w-full" />
               ) : historyResults.length ? (
@@ -391,10 +424,9 @@ export default function Receipts() {
                         {item.invoice_number || "Facture sans numéro"}
                       </div>
                       <div className="text-xs text-[var(--muted)]">
-                        {(item.service_name ? `${item.service_name} · ` : "") +
-                          (item.supplier || "Fournisseur inconnu")}{" "}
-                        · {item.invoice_date || "Date inconnue"} · {item.received_at || "—"} ·{" "}
-                        {item.lines_count || 0} ligne(s)
+                        {(item.service_name ? `${item.service_name} · ` : "") + (item.supplier || "Fournisseur inconnu")}{" "}
+                        · {item.invoice_date || "Date inconnue"} · {item.received_at || "—"} · {item.lines_count || 0}{" "}
+                        ligne(s)
                       </div>
                     </div>
                   ))}
@@ -427,7 +459,7 @@ export default function Receipts() {
                     label="Service"
                     value={serviceId || ""}
                     onChange={(value) => selectService(value)}
-                    options={serviceOptions}
+                    options={importServiceOptions}
                   />
                 )}
                 <Input
@@ -446,13 +478,11 @@ export default function Receipts() {
                   <label className="block text-sm font-medium text-[var(--text)]">Fichier</label>
                   <input
                     type="file"
-                    accept=".csv,.pdf"
+                    accept=".csv,.pdf,application/pdf,text/csv"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     className="mt-2 block w-full text-sm text-[var(--muted)] file:rounded-full file:border-0 file:bg-[var(--primary)] file:px-4 file:py-2 file:text-white"
                   />
-                  <div className="text-xs text-[var(--muted)] mt-2">
-                    CSV structuré ou PDF fournisseur sans OCR.
-                  </div>
+                  <div className="text-xs text-[var(--muted)] mt-2">CSV structuré ou PDF fournisseur (sans OCR).</div>
                 </div>
               </form>
             </Drawer>

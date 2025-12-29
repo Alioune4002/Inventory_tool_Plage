@@ -532,7 +532,75 @@ class PDFRenderer(BaseRenderer):
         except TypeError:
             return json.dumps(data).encode("utf-8")
 
+def _parse_ids_param(raw):
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        vals = raw
+    else:
+        vals = str(raw).split(",")
+    out = []
+    for v in vals:
+        v = str(v).strip()
+        if v.isdigit():
+            out.append(int(v))
+    return out
 
+
+def _draw_circle_logo(c, img_bytes, x, y, size):
+    """
+    Draw a circular clipped logo (premium look).
+    x,y = bottom-left of the square container.
+    """
+    if not img_bytes:
+        return
+    try:
+        logo = ImageReader(io.BytesIO(img_bytes))
+        path = c.beginPath()
+        r = size / 2.0
+        cx = x + r
+        cy = y + r
+        path.circle(cx, cy, r)
+        c.saveState()
+        c.clipPath(path, stroke=0, fill=0)
+        c.drawImage(
+            logo,
+            x,
+            y,
+            width=size,
+            height=size,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+        c.restoreState()
+
+        # subtle ring
+        c.saveState()
+        c.setLineWidth(1)
+        c.setStrokeColor(HexColor("#E2E8F0"))
+        c.circle(cx, cy, r)
+        c.restoreState()
+    except Exception:
+
+        return
+
+
+def _truncate_text(c, text, font_name, font_size, max_width):
+    if not text:
+        return ""
+    s = str(text)
+    if c.stringWidth(s, font_name, font_size) <= max_width:
+        return s
+    ell = "…"
+    lo, hi = 0, len(s)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cand = s[:mid].rstrip() + ell
+        if c.stringWidth(cand, font_name, font_size) <= max_width:
+            lo = mid + 1
+        else:
+            hi = mid
+    return (s[: max(0, lo - 1)].rstrip() + ell) if lo > 0 else ell
 def _build_catalog_pdf(
     *,
     tenant,
@@ -550,88 +618,209 @@ def _build_catalog_pdf(
     buffer = io.BytesIO()
     c = NumberedCanvas(buffer, pagesize=A4)
     width, height = A4
+
     theme = CATALOG_TEMPLATES.get((template or "").lower(), CATALOG_TEMPLATES["classic"])
     accent = HexColor(theme["accent"])
     muted = HexColor(theme["muted"])
+    ink = HexColor("#0F172A")
+    paper = HexColor("#FFFFFF")
+    soft = HexColor("#F1F5F9")
+    border = HexColor("#E2E8F0")
+
+    margin_x = 1.6 * cm
+    top_header_h = 2.2 * cm
+
+    def draw_top_header(title_left=None):
+        # Dark premium bar
+        c.setFillColor(HexColor("#0B1220"))
+        c.rect(0, height - top_header_h, width, top_header_h, fill=1, stroke=0)
+
+        # Accent line
+        c.setFillColor(accent)
+        c.rect(0, height - top_header_h, width, 0.10 * cm, fill=1, stroke=0)
+
+        # Circular logo
+        if logo_bytes:
+            _draw_circle_logo(c, logo_bytes, margin_x, height - top_header_h + 0.35 * cm, 1.5 * cm)
+
+        # Company name
+        c.setFillColor(paper)
+        c.setFont("Helvetica-Bold", 14)
+        name_x = margin_x + (1.75 * cm if logo_bytes else 0)
+        c.drawString(name_x, height - 1.35 * cm, _truncate_text(c, company_name or tenant.name or "StockScan", "Helvetica-Bold", 14, width - name_x - margin_x))
+
+        # subtitle
+        c.setFont("Helvetica", 9.5)
+        subtitle = title_left or "Catalogue produits"
+        c.setFillColor(HexColor("#CBD5E1"))
+        c.drawString(name_x, height - 1.90 * cm, _truncate_text(c, subtitle, "Helvetica", 9.5, width - name_x - margin_x))
+
+        # date right
+        c.setFont("Helvetica", 9.5)
+        c.setFillColor(HexColor("#CBD5E1"))
+        c.drawRightString(width - margin_x, height - 1.85 * cm, timezone.now().strftime("%d/%m/%Y"))
 
     def draw_cover():
-        c.setFillColor(accent)
-        c.rect(0, height - 2.3 * cm, width, 2.3 * cm, fill=1, stroke=0)
+        # Background
+        c.setFillColor(paper)
+        c.rect(0, 0, width, height, fill=1, stroke=0)
 
-        if logo_bytes:
-            try:
-                logo = ImageReader(io.BytesIO(logo_bytes))
-                c.drawImage(
-                    logo,
-                    2 * cm,
-                    height - 2.05 * cm,
-                    width=3.8 * cm,
-                    height=1.6 * cm,
-                    preserveAspectRatio=True,
-                    mask="auto",
-                )
-            except Exception:
-                pass
+        draw_top_header("Catalogue produits")
 
-        c.setFillColorRGB(1, 1, 1)
-        c.setFont("Helvetica-Bold", 18)
-        c.drawRightString(width - 2 * cm, height - 1.4 * cm, company_name or tenant.name or "StockScan")
+        # Hero title
+        c.setFillColor(ink)
+        c.setFont("Helvetica-Bold", 22)
+        c.drawString(margin_x, height - 4.2 * cm, "Catalogue produits")
 
-        c.setFont("Helvetica-Bold", 18)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.drawString(2 * cm, height - 4 * cm, "Catalogue produits")
         c.setFont("Helvetica", 11)
         c.setFillColor(muted)
-        c.drawString(2 * cm, height - 4.7 * cm, timezone.now().strftime("%d/%m/%Y"))
+        c.drawString(margin_x, height - 4.95 * cm, "Export premium StockScan")
+
+        # Info card
+        card_x = margin_x
+        card_y = height - 8.9 * cm
+        card_w = width - 2 * margin_x
+        card_h = 3.2 * cm
+
+        c.setFillColor(soft)
+        c.setStrokeColor(border)
+        c.setLineWidth(1)
+        c.roundRect(card_x, card_y, card_w, card_h, 10, fill=1, stroke=1)
 
         info_lines = [company_email, company_phone, company_address]
-        y = height - 6 * cm
-        c.setFont("Helvetica", 10)
+        y = card_y + card_h - 0.75 * cm
+        c.setFont("Helvetica-Bold", 10)
+        c.setFillColor(ink)
+        c.drawString(card_x + 0.7 * cm, y, "Coordonnées")
+        y -= 0.55 * cm
+
+        c.setFont("Helvetica", 9.5)
         c.setFillColor(muted)
         for line in info_lines:
             if line:
-                c.drawString(2 * cm, y, str(line))
-                y -= 0.6 * cm
+                c.drawString(card_x + 0.7 * cm, y, str(line))
+                y -= 0.5 * cm
 
         if truncated:
             c.setFillColor(HexColor("#B91C1C"))
-            c.drawString(2 * cm, y - 0.6 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
+            c.setFont("Helvetica-Bold", 9.5)
+            c.drawString(margin_x, card_y - 0.65 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
 
+    # Cover
     draw_cover()
     c.showPage()
 
-    y = height - 2.5 * cm
-    c.setFont("Helvetica", 11)
-    c.setFillColorRGB(0.1, 0.1, 0.1)
-
+    # Group by category
     grouped = {}
     for p in products:
         key = (p.category or "Sans catégorie").strip() or "Sans catégorie"
         grouped.setdefault(key, []).append(p)
 
-    for category, items in grouped.items():
-        if y < 3 * cm:
-            c.showPage()
-            y = height - 2.5 * cm
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColor(accent)
-        c.drawString(2 * cm, y, category)
-        y -= 0.6 * cm
+    # Layout for product cards: 2 columns
+    col_gap = 0.7 * cm
+    card_w = (width - 2 * margin_x - col_gap) / 2
+    card_h = 4.0 * cm
+    y = height - top_header_h - 1.0 * cm
 
-        c.setFont("Helvetica", 10)
+    def new_page():
+        c.showPage()
+        draw_top_header("Catalogue produits")
+        return height - top_header_h - 1.0 * cm
+
+    draw_top_header("Catalogue produits")
+
+    for category, items in grouped.items():
+        if y < 3.2 * cm:
+            y = new_page()
+
+        # Category pill
+        c.setFillColor(HexColor("#0B1220"))
+        pill_h = 0.85 * cm
+        c.roundRect(margin_x, y - pill_h, width - 2 * margin_x, pill_h, 10, fill=1, stroke=0)
+        c.setFillColor(paper)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(margin_x + 0.55 * cm, y - 0.62 * cm, _truncate_text(c, category, "Helvetica-Bold", 11, width - 2 * margin_x - 1.2 * cm))
+        y -= (pill_h + 0.55 * cm)
+
+        col = 0
+        x = margin_x
+
         for p in items:
-            if y < 2.5 * cm:
-                c.showPage()
-                y = height - 2.5 * cm
-            line = _format_catalog_line(p, fields, include_service=include_service, currency_code=tenant.currency_code)
-            c.setFillColorRGB(0.1, 0.1, 0.1)
-            c.drawString(2 * cm, y, f"• {p.name}")
-            y -= 0.45 * cm
-            if line:
+            if y < 3.2 * cm:
+                y = new_page()
+                # repeat category label lightly
                 c.setFillColor(muted)
-                c.drawString(2.6 * cm, y, line[:160])
-                y -= 0.45 * cm
-        y -= 0.4 * cm
+                c.setFont("Helvetica-Bold", 10)
+                c.drawString(margin_x, y, _truncate_text(c, category, "Helvetica-Bold", 10, width - 2 * margin_x))
+                y -= 0.55 * cm
+
+            # Card background
+            c.setFillColor(soft)
+            c.setStrokeColor(border)
+            c.setLineWidth(1)
+            c.roundRect(x, y - card_h, card_w, card_h, 12, fill=1, stroke=1)
+
+            # Name
+            c.setFillColor(ink)
+            c.setFont("Helvetica-Bold", 11)
+            name = (p.name or "").strip()
+            c.drawString(x + 0.55 * cm, y - 0.70 * cm, _truncate_text(c, name, "Helvetica-Bold", 11, card_w - 1.1 * cm))
+
+            # Service tag
+            if include_service and getattr(p, "service", None):
+                tag = (p.service.name or "").strip()
+                c.setFont("Helvetica", 8.5)
+                c.setFillColor(accent)
+                c.drawString(x + 0.55 * cm, y - 1.25 * cm, _truncate_text(c, f"Service: {tag}", "Helvetica", 8.5, card_w - 1.1 * cm))
+
+            # Details line(s)
+            details = _format_catalog_line(p, fields, include_service=False, currency_code=tenant.currency_code)
+            c.setFont("Helvetica", 9)
+            c.setFillColor(muted)
+            if details:
+                # allow 2 lines
+                max_w = card_w - 1.1 * cm
+                line1 = _truncate_text(c, details, "Helvetica", 9, max_w)
+                c.drawString(x + 0.55 * cm, y - 1.85 * cm, line1)
+                if len(details) > len(line1):
+                    rest = details[len(line1) :].lstrip(" ·")
+                    if rest:
+                        line2 = _truncate_text(c, rest, "Helvetica", 9, max_w)
+                        c.drawString(x + 0.55 * cm, y - 2.35 * cm, line2)
+
+            # Barcode small (optional)
+            code = (p.barcode or p.internal_sku or "").strip()
+            if code:
+                try:
+                    barcode_h = 0.75 * cm
+                    barcode_obj = code128.Code128(code, barHeight=barcode_h, barWidth=0.65)
+                    bx = x + card_w - 0.55 * cm - barcode_obj.width
+                    by = y - card_h + 0.55 * cm
+                    barcode_obj.drawOn(c, bx, by)
+                    c.setFont("Helvetica", 7)
+                    c.setFillColor(muted)
+                    c.drawRightString(x + card_w - 0.55 * cm, by - 0.25 * cm, _truncate_text(c, code, "Helvetica", 7, card_w * 0.6))
+                except Exception:
+                    pass
+
+            # Move column / row
+            col += 1
+            if col % 2 == 0:
+                # new row
+                x = margin_x
+                y -= (card_h + 0.6 * cm)
+            else:
+                # next column
+                x = margin_x + card_w + col_gap
+
+        # ensure next category starts on new row properly
+        if (len(items) % 2) == 1:
+            x = margin_x
+            y -= (card_h + 0.6 * cm)
+        else:
+            x = margin_x
+
+        y -= 0.2 * cm
 
     c.save()
     return buffer.getvalue()
@@ -1850,6 +2039,7 @@ def catalog_pdf(request):
 
     payload = request.data if request.method == "POST" else request.query_params
     service_param = payload.get("service")
+    ids_list = _parse_ids_param(payload.get("ids"))
     include_service = service_param == "all"
 
     qs = Product.objects.filter(tenant=tenant)
@@ -1859,7 +2049,8 @@ def catalog_pdf(request):
             qs = qs.filter(service_id=int(service_param))
         except (ValueError, TypeError):
             pass
-
+    if ids_list:
+        qs = qs.filter(id__in=ids_list)
     query = payload.get("q")
     if query:
         qs = qs.filter(
@@ -3466,139 +3657,145 @@ def labels_pdf(request):
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setTitle("StockScan Labels")
 
-    def wrap_label_text(text, max_len=26, max_lines=2):
+    def wrap_label_text(text, max_width, font_name="Helvetica-Bold", font_size=9, max_lines=2):
         if not text:
             return []
-        words = text.split()
-        lines = []
-        current = ""
-        for word in words:
-            next_val = f"{current} {word}".strip()
-            if len(next_val) > max_len:
+        words = str(text).split()
+        lines, current = [], ""
+        for w in words:
+            test = (current + " " + w).strip()
+            if c.stringWidth(test, font_name, font_size) <= max_width:
+                current = test
+            else:
                 if current:
                     lines.append(current)
-                current = word
-            else:
-                current = next_val
+                current = w
         if current:
             lines.append(current)
         return lines[:max_lines]
 
     def draw_label(x, y, product):
-        code = product.barcode or product.internal_sku or ""
+        code = (product.barcode or product.internal_sku or "").strip()
         if not code:
             return False
 
-        pad_x = 5
+        # tighter padding -> less empty
+        pad_x = 6
         pad_y = 6
+
+        # Header (name)
         name = (product.name or "").strip().upper()
-        name_lines = wrap_label_text(name, max_len=28, max_lines=2)
-        c.setFillColorRGB(0.1, 0.1, 0.1)
-        c.setFont("Helvetica-Bold", 8.8)
-        y_name = y + label_h - pad_y - 1
+        c.setFillColorRGB(0.08, 0.1, 0.13)
+
+        name_font = 9.2
+        c.setFont("Helvetica-Bold", name_font)
+        max_name_w = label_w - (pad_x * 2)
+
+        name_lines = wrap_label_text(name, max_name_w, "Helvetica-Bold", name_font, max_lines=2)
+        y_top = y + label_h - pad_y - 2
         for line in name_lines:
-            c.drawString(x + pad_x, y_name, line)
-            y_name -= 9.2
+            c.drawString(x + pad_x, y_top, line)
+            y_top -= 10.2
 
+        # Price block (bigger, better centered)
         base_price = product.selling_price if product.selling_price is not None else product.purchase_price
-        price = _format_price(base_price, currency_code) if "price" in fields and base_price is not None else None
+        show_price = "price" in fields
+        price = _format_price(base_price, currency_code) if show_price and base_price is not None else None
+
         promo_price = _apply_promo(base_price, promo) if promo else None
-        promo_active = promo_price is not None and price
-        barcode_height = max(22, label_h * 0.24)
-        barcode_y = y + pad_y + 6
-        price_line_y = max(y + (label_h * 0.58), y_name - 6)
-        min_price_y = barcode_y + barcode_height + 18
-        if price_line_y < min_price_y:
-            price_line_y = min_price_y
+        promo_active = promo_price is not None and show_price and base_price is not None
 
-        if promo_active:
-            old_price = _format_price(base_price, currency_code)
-            new_price = _format_price(promo_price, currency_code)
-            badge = (
-                f"-{int(promo['value'])}%"
-                if promo["type"] == "percent"
-                else f"-{_format_price(promo['value'], currency_code)}"
-            )
-            c.setFont("Helvetica", 8)
-            c.drawString(x + pad_x, price_line_y + 12, old_price or "")
-            old_width = c.stringWidth(old_price or "", "Helvetica", 8)
-            c.line(x + pad_x, price_line_y + 10, x + pad_x + old_width, price_line_y + 10)
-            c.setFont("Helvetica-Bold", 21)
-            c.drawCentredString(x + label_w / 2, price_line_y, new_price or "")
-            c.setFont("Helvetica-Bold", 8.4)
-            c.drawRightString(x + label_w - pad_x, price_line_y + 12, badge)
-        elif price:
-            c.setFont("Helvetica-Bold", 21)
-            c.drawCentredString(x + label_w / 2, price_line_y, price)
-        elif "price" in fields:
-            c.setFont("Helvetica", 8)
-            c.drawCentredString(x + label_w / 2, price_line_y + 4, "Prix à renseigner")
+        # Barcode: bigger + less wasted space
+        barcode_height = max(30, label_h * 0.30)
+        barcode_obj = code128.Code128(code, barHeight=barcode_height, barWidth=0.88)
 
+        barcode_y = y + pad_y + 10
+        barcode_x = x + (label_w - barcode_obj.width) / 2
+
+        # Compute price area just above barcode
+        price_y = barcode_y + barcode_height + 18
+        # Ensure it doesn't overlap name area
+        price_y = max(price_y, y_top - 6)
+
+        if show_price:
+            if promo_active:
+                old_price = _format_price(base_price, currency_code)
+                new_price = _format_price(promo_price, currency_code)
+
+                badge = (
+                    f"-{int(promo['value'])}%"
+                    if promo["type"] == "percent"
+                    else f"-{_format_price(promo['value'], currency_code)}"
+                )
+                c.setFont("Helvetica", 7.8)
+                c.setFillColorRGB(0.25, 0.29, 0.34)
+                c.drawString(x + pad_x, price_y + 12, old_price or "")
+                old_w = c.stringWidth(old_price or "", "Helvetica", 7.8)
+                c.setLineWidth(1)
+                c.line(x + pad_x, price_y + 10, x + pad_x + old_w, price_y + 10)
+
+                c.setFont("Helvetica-Bold", 20.5)
+                c.setFillColorRGB(0.08, 0.1, 0.13)
+                c.drawCentredString(x + label_w / 2, price_y, new_price or "")
+
+                c.setFont("Helvetica-Bold", 8.4)
+                c.setFillColorRGB(0.02, 0.5, 0.33)
+                c.drawRightString(x + label_w - pad_x, price_y + 12, badge)
+            elif price:
+                c.setFont("Helvetica-Bold", 20.5)
+                c.setFillColorRGB(0.08, 0.1, 0.13)
+                c.drawCentredString(x + label_w / 2, price_y, price)
+            else:
+                c.setFont("Helvetica", 8)
+                c.setFillColorRGB(0.35, 0.4, 0.45)
+                c.drawCentredString(x + label_w / 2, price_y + 3, "Prix à renseigner")
+
+        # Secondary info line (compact)
+        extras = []
         if "price_unit" in fields:
-            unit = (product.unit or "").lower()
-            per_unit = None
-            suffix = None
-            price_for_unit = promo_price if promo_active else base_price
-            if price_for_unit is not None:
-                try:
-                    price_val = float(price_for_unit)
-                except (TypeError, ValueError):
-                    price_val = None
-                if price_val is not None:
-                    symbol = _currency_symbol(currency_code)
-                    if unit == "kg":
-                        per_unit, suffix = price_val, f"{symbol}/kg"
-                    elif unit == "g":
-                        per_unit, suffix = price_val * 1000, f"{symbol}/kg"
-                    elif unit == "l":
-                        per_unit, suffix = price_val, f"{symbol}/L"
-                    elif unit == "ml":
-                        per_unit, suffix = price_val * 1000, f"{symbol}/L"
+            per_unit, suffix = _price_per_unit(product, currency_code=currency_code)
             if per_unit is not None and suffix:
-                info_floor = barcode_y + barcode_height + 6
-                info_y = max(price_line_y - 10, info_floor)
-                if info_y < price_line_y - 2:
-                    c.setFont("Helvetica", 7.2)
-                    c.drawRightString(x + label_w - pad_x, info_y, f"{per_unit:.2f} {suffix}")
-
+                extras.append(f"{per_unit:.2f} {suffix}")
         pack_info = _format_pack_info(product)
         if pack_info:
-            info_floor = barcode_y + barcode_height + 6
-            pack_y = max(price_line_y - 18, info_floor - 8)
-            if pack_y < price_line_y - 2:
-                c.setFont("Helvetica", 7.1)
-                c.drawRightString(x + label_w - pad_x, pack_y, pack_info)
+            extras.append(pack_info)
 
-        extra_lines = []
-        if "unit" in fields and product.unit:
-            extra_lines.append(f"Unité: {product.unit}")
+        if extras:
+            c.setFont("Helvetica", 7.2)
+            c.setFillColorRGB(0.35, 0.4, 0.45)
+            c.drawRightString(x + label_w - pad_x, price_y - 10, _truncate_text(c, " · ".join(extras), "Helvetica", 7.2, label_w - 2 * pad_x))
+
+        # Two small metadata lines (left)
+        meta_lines = []
         if "tva" in fields and product.tva is not None:
-            extra_lines.append(f"TVA: {product.tva}%")
+            meta_lines.append(f"TVA {product.tva}%")
         if "supplier" in fields and product.supplier:
-            extra_lines.append(f"Fournisseur: {product.supplier}")
+            meta_lines.append(f"Fourn. {product.supplier}")
         if "brand" in fields and product.brand:
-            extra_lines.append(f"Marque: {product.brand}")
+            meta_lines.append(f"Marque {product.brand}")
         if "dlc" in fields:
-            label, date = _format_label_date(product)
-            if label and date:
-                extra_lines.append(f"{label}: {date}")
+            label_txt, date_txt = _format_label_date(product)
+            if label_txt and date_txt:
+                meta_lines.append(f"{label_txt} {date_txt}")
 
-        extra_lines = extra_lines[:2]
-        if extra_lines:
-            info_floor = barcode_y + barcode_height + 6
-            y_line = max(price_line_y - 14, info_floor)
-            if y_line < price_line_y - 2:
-                c.setFont("Helvetica", 7)
-                for line in extra_lines:
-                    c.drawString(x + pad_x, y_line, line[:40])
-                    y_line -= 8.2
+        meta_lines = meta_lines[:2]
+        if meta_lines:
+            c.setFont("Helvetica", 7.1)
+            c.setFillColorRGB(0.35, 0.4, 0.45)
+            yy = price_y - 10
+            # put on left, avoid overlap with right extras
+            for line in meta_lines:
+                c.drawString(x + pad_x, yy, _truncate_text(c, line, "Helvetica", 7.1, label_w * 0.62))
+                yy -= 8.0
 
-        barcode_obj = code128.Code128(code, barHeight=barcode_height, barWidth=0.82)
-        barcode_x = x + (label_w - barcode_obj.width) / 2
+        # Barcode
         barcode_obj.drawOn(c, barcode_x, barcode_y)
 
-        c.setFont("Helvetica", 6.5)
-        c.drawCentredString(x + label_w / 2, barcode_y - 6, code)
+        # Code under barcode
+        c.setFont("Helvetica", 6.8)
+        c.setFillColorRGB(0.35, 0.4, 0.45)
+        c.drawCentredString(x + label_w / 2, barcode_y - 7, _truncate_text(c, code, "Helvetica", 6.8, label_w - 2 * pad_x))
+
         return True
 
     index = 0
