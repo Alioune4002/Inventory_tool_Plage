@@ -19,6 +19,7 @@ import { formatCurrency } from "../lib/currency";
 
 const fmtNumber = (n) => (typeof n === "number" ? n.toLocaleString("fr-FR") : "—");
 const safeArray = (v) => (Array.isArray(v) ? v : []);
+
 const fmtDateTime = (v) => {
   if (!v) return "—";
   try {
@@ -52,7 +53,43 @@ const formatObjectLabel = (type, id) => {
   return id ? `${base} #${id}` : base;
 };
 
-function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wording) {
+// ✅ Traductions "safe" (anti-anglicismes) pour raisons de pertes
+const normalizeLossReason = (reason) => {
+  const r = String(reason || "").trim();
+  const key = r.toLowerCase();
+  const map = {
+    breakage: "Casse",
+    damaged: "Casse",
+    damage: "Casse",
+    expired: "Péremption",
+    expiry: "Péremption",
+    theft: "Vol",
+    missing: "Manquant",
+    shrinkage: "Démarque",
+    wastage: "Gaspillage",
+  };
+  return map[key] || r || "—";
+};
+
+// ✅ Libellés inclusifs : "service" peut être rayon / zone / unité…
+function getUnitLabels(serviceType, tenantDomain) {
+  const t = String(serviceType || "").toLowerCase();
+  const d = String(tenantDomain || "").toLowerCase();
+
+  const isRetail = d === "general" || t === "retail_general" || t === "pharmacy_parapharmacy";
+  const isFoodMulti = d === "food" && (t === "bar" || t === "restaurant_dining" || t === "kitchen" || t === "bakery");
+
+  if (isRetail) {
+    return { one: "Rayon", all: "Tous les rayons" };
+  }
+  if (isFoodMulti) {
+    // bar/restaurant : ça peut être salle, bar, cuisine, réserve, etc.
+    return { one: "Zone", all: "Toutes les zones" };
+  }
+  return { one: "Service", all: "Tous les services" };
+}
+
+function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wording, unitLabels) {
   const isGeneral = tenantDomain === "general" || serviceType === "retail_general";
   const isPharma = serviceType === "pharmacy_parapharmacy";
   const isBar = serviceType === "bar";
@@ -61,29 +98,25 @@ function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wor
   const isDining = serviceType === "restaurant_dining";
   const itemPlural = (wording?.itemPlural || "Produits").toLowerCase();
 
-  const title = isAll ? "Dashboard (multi-services)" : "Dashboard";
+  const title = isAll ? "Dashboard (multi-unités)" : "Dashboard";
   const subtitle = isAll
-    ? "Vue consolidée : valeurs, catégories et pertes sur tous les services."
-    : "Valeur de stock, catégories, pertes et comptage du mois.";
+    ? "Vue consolidée : valeurs, catégories et pertes sur l’ensemble de l’établissement."
+    : "Vue générale : valeurs, catégories et pertes sur la période sélectionnée.";
 
   const stockLabel = isPharma ? "Valeur stock (achat)" : isGeneral ? "Valeur stock (achat)" : "Valeur stock (achat)";
   const sellingLabel = itemTypeEnabled ? "Valeur stock (vente potentielle)" : "Valeur stock (vente)";
   const marginHelper =
     isKitchen || isDining || isBakery
       ? "Marge estimée selon prix d'achat/vente saisis (hors ventes réelles)."
-      : "Basé sur le stock actuel (hors ventes réelles)";
+      : "Basé sur le stock actuel (hors ventes réelles).";
 
   const lossHelper = isPharma
-    ? "Pertes : casse / péremption / erreurs (déclaré)"
+    ? "Pertes : casse / péremption / erreurs (déclaré)."
     : isBakery
-      ? "Pertes : invendus / 24h / casse (déclaré)"
+      ? "Pertes : invendus / casse / erreurs (déclaré)."
       : isBar || isDining
-        ? "Pertes : casse / offerts / erreurs (déclaré)"
-        : "Pertes : casse / DLC / vol (déclaré)";
-
-  const productsHelper = isAll
-    ? "Total des comptages sur tous les services (mois sélectionné)"
-    : "Comptages du mois et service sélectionnés";
+        ? "Pertes : casse / offerts / erreurs (déclaré)."
+        : "Pertes : casse / péremption / vol (déclaré).";
 
   return {
     title,
@@ -92,10 +125,9 @@ function getDashboardCopy(serviceType, tenantDomain, isAll, itemTypeEnabled, wor
     sellingLabel,
     marginHelper,
     lossHelper,
-    productsHelper,
     categoryTitle: isAll ? "Répartition par catégorie (global)" : "Répartition par catégorie",
-    productsTitle: isAll ? `Comptages (${itemPlural})` : `Comptages ${itemPlural}`,
-    inventoryCountLabel: `Comptages ${itemPlural}`,
+    catalogTitle: isAll ? `Catalogue (${itemPlural})` : `Catalogue ${itemPlural}`,
+    unitLabel: unitLabels?.one || "Service",
   };
 }
 
@@ -110,6 +142,7 @@ export default function Dashboard() {
     serviceProfile,
     serviceFeatures,
   } = useAuth();
+
   const pushToast = useToast();
   const currencyCode = tenant?.currency_code || "EUR";
 
@@ -127,7 +160,11 @@ export default function Dashboard() {
     losses_by_reason: [],
   });
 
-  const [productsCount, setProductsCount] = useState(0);
+  // ✅ On garde le count mais on le présente comme "Catalogue" (dashboard global)
+  const [catalogCount, setCatalogCount] = useState(0);
+
+  // ✅ Assistant IA "boîte" compacte
+  const [aiOpen, setAiOpen] = useState(false);
 
   // ✅ Admin panel (owner)
   const [membersLoading, setMembersLoading] = useState(false);
@@ -143,20 +180,22 @@ export default function Dashboard() {
   const wording = useMemo(() => getWording(serviceType, serviceDomain), [serviceType, serviceDomain]);
   const ux = useMemo(() => getUxCopy(serviceType, serviceDomain), [serviceType, serviceDomain]);
 
+  const unitLabels = useMemo(() => getUnitLabels(serviceType, tenantDomain), [serviceType, tenantDomain]);
+
   const priceCfg = serviceFeatures?.prices || {};
   const sellingEnabled = priceCfg.selling_enabled !== false;
   const itemTypeEnabled = serviceFeatures?.item_type?.enabled === true;
 
   const copy = useMemo(
-    () => getDashboardCopy(serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording),
-    [serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording]
+    () => getDashboardCopy(serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording, unitLabels),
+    [serviceType, tenantDomain, isAllServices, itemTypeEnabled, wording, unitLabels]
   );
 
   const badgeText = useMemo(() => {
-    if (isAllServices) return `Tous les services — ${month}`;
-    const label = currentService?.name || "Service";
+    if (isAllServices) return `${unitLabels.all} — ${month}`;
+    const label = currentService?.name || copy.unitLabel;
     return `${label} — ${month}`;
-  }, [isAllServices, currentService, month]);
+  }, [isAllServices, currentService, month, unitLabels, copy.unitLabel]);
 
   const loadData = async () => {
     if (!serviceId && !isAllServices) return;
@@ -203,21 +242,18 @@ export default function Dashboard() {
               }
             });
 
-            acc.by_product.push(
-              ...safeArray(r.stats.by_product).map((p) => ({ ...p, __service_name: r.service?.name }))
-            );
-
             safeArray(r.stats.losses_by_reason).forEach((lr) => {
-              const existing = acc.losses_by_reason.find((x) => x.reason === lr.reason);
+              const reason = normalizeLossReason(lr.reason);
+              const existing = acc.losses_by_reason.find((x) => x.reason === reason);
               if (existing) {
                 existing.total_qty = (existing.total_qty || 0) + (lr.total_qty || 0);
                 existing.total_cost = (existing.total_cost || 0) + (lr.total_cost || 0);
               } else {
-                acc.losses_by_reason.push({ ...lr });
+                acc.losses_by_reason.push({ ...lr, reason });
               }
             });
 
-            acc.productsCount += r.products.length;
+            acc.catalogCount += r.products.length;
             return acc;
           },
           {
@@ -226,10 +262,9 @@ export default function Dashboard() {
             losses_total_cost: 0,
             losses_total_qty: 0,
             by_category: [],
-            by_product: [],
             losses_by_reason: [],
             service_totals: {},
-            productsCount: 0,
+            catalogCount: 0,
           }
         );
 
@@ -240,34 +275,51 @@ export default function Dashboard() {
           losses_cost: aggregated.losses_total_cost,
         };
 
-        setStats(aggregated);
-        setProductsCount(aggregated.productsCount);
+        setStats({
+          total_value: aggregated.total_value,
+          total_selling_value: aggregated.total_selling_value,
+          losses_total_cost: aggregated.losses_total_cost,
+          losses_total_qty: aggregated.losses_total_qty,
+          by_category: aggregated.by_category,
+          losses_by_reason: aggregated.losses_by_reason,
+          service_totals: aggregated.service_totals,
+        });
+
+        setCatalogCount(aggregated.catalogCount);
       } else {
         const [statsRes, listRes] = await Promise.all([
           api.get(`/api/inventory-stats/?month=${month}&service=${serviceId}`),
           api.get(`/api/products/?month=${month}&service=${serviceId}`),
         ]);
 
-        setStats(
-          statsRes.data || {
-            total_value: 0,
-            total_selling_value: 0,
-            losses_total_cost: 0,
-            losses_total_qty: 0,
-            by_category: [],
-            by_product: [],
-            losses_by_reason: [],
-            service_totals: {},
-          }
-        );
+        const s = statsRes.data || {
+          total_value: 0,
+          total_selling_value: 0,
+          losses_total_cost: 0,
+          losses_total_qty: 0,
+          by_category: [],
+          losses_by_reason: [],
+          service_totals: {},
+        };
+
+        // normalize reasons
+        const normalizedReasons = safeArray(s.losses_by_reason).map((lr) => ({
+          ...lr,
+          reason: normalizeLossReason(lr.reason),
+        }));
+
+        setStats({
+          ...s,
+          losses_by_reason: normalizedReasons,
+        });
 
         const list = Array.isArray(listRes.data) ? listRes.data : [];
-        setProductsCount(list.length);
+        setCatalogCount(list.length);
       }
     } catch (e) {
       pushToast?.({
         message:
-          "Oups… impossible de charger le dashboard. Vérifie le service sélectionné et reconnecte-toi si besoin.",
+          "Oups… impossible de charger le dashboard. Vérifie l’unité sélectionnée et reconnecte-toi si besoin.",
         type: "error",
       });
       setStats({
@@ -276,11 +328,10 @@ export default function Dashboard() {
         losses_total_cost: 0,
         losses_total_qty: 0,
         by_category: [],
-        by_product: [],
         losses_by_reason: [],
         service_totals: {},
       });
-      setProductsCount(0);
+      setCatalogCount(0);
     } finally {
       setLoading(false);
     }
@@ -330,11 +381,14 @@ export default function Dashboard() {
   const lossesCost = stats.losses_total_cost || 0;
   const lossesQty = stats.losses_total_qty || 0;
 
+  const itemPluralLabel = (wording?.itemPlural || "Produits").toLowerCase();
+
+  // ✅ KPIs orientés "tableau de bord global"
   const kpis = [
     {
       label: copy.stockLabel,
       value: formatCurrency(purchaseValue, currencyCode),
-      helper: isAllServices ? "Somme sur tous les services" : "Mois et service sélectionnés",
+      helper: isAllServices ? "Somme sur l’ensemble de l’établissement" : "Période et unité sélectionnées",
     },
     {
       label: copy.sellingLabel,
@@ -351,9 +405,11 @@ export default function Dashboard() {
         : "Astuce : activez “Prix de vente” dans Settings → Modules pour estimer la marge.",
     },
     {
-      label: copy.inventoryCountLabel,
-      value: productsCount,
-      helper: copy.productsHelper,
+      label: copy.catalogTitle,
+      value: catalogCount,
+      helper: isAllServices
+        ? `Total des ${itemPluralLabel} suivis sur toutes les unités.`
+        : `Nombre de ${itemPluralLabel} suivis sur l’unité sélectionnée.`,
     },
     {
       label: "Pertes du mois",
@@ -364,7 +420,6 @@ export default function Dashboard() {
 
   const categories = safeArray(stats.by_category);
   const lossesByReason = safeArray(stats.losses_by_reason);
-  const products = safeArray(stats.by_product);
 
   const members = safeArray(membersSummary.members);
   const recentActivity = safeArray(membersSummary.recent_activity);
@@ -386,7 +441,7 @@ export default function Dashboard() {
     return max || 1;
   }, [lossesByReason]);
 
-  const showServiceSelect = (services || []).length > 0;
+  const showUnitSelect = (services || []).length > 0;
 
   useEffect(() => {
     setActivityPage(1);
@@ -396,11 +451,14 @@ export default function Dashboard() {
     <PageTransition>
       <Helmet>
         <title>{copy.title} | StockScan</title>
-        <meta name="description" content={ux.inventoryIntro || "Dashboard inventaire : valeur, catégories, pertes."} />
+        <meta
+          name="description"
+          content={ux.inventoryIntro || "Dashboard : vue générale de l’établissement (valeur, catégories, pertes)."}
+        />
       </Helmet>
 
       <div className="grid gap-4 min-w-0">
-        {/* Dashboard header */}
+        {/* Header */}
         <Card className="p-6 space-y-3 min-w-0">
           <div className="flex flex-wrap gap-3 items-center justify-between min-w-0">
             <div className="flex items-start gap-3 min-w-0">
@@ -416,15 +474,15 @@ export default function Dashboard() {
           <div className="grid sm:grid-cols-3 gap-3 items-end min-w-0">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
 
-            {showServiceSelect && (
+            {showUnitSelect && (
               <Select
-                label="Service"
+                label={copy.unitLabel}
                 value={isAllServices ? "all" : serviceId || ""}
                 onChange={(value) => selectService(value)}
-                ariaLabel="Sélection du service"
+                ariaLabel={`Sélection ${copy.unitLabel.toLowerCase()}`}
                 options={[
                   ...(services || []).map((s) => ({ value: s.id, label: s.name })),
-                  ...(services || []).length > 1 ? [{ value: "all", label: "Tous les services" }] : [],
+                  ...(services || []).length > 1 ? [{ value: "all", label: unitLabels.all }] : [],
                 ]}
               />
             )}
@@ -437,7 +495,7 @@ export default function Dashboard() {
           </div>
 
           <div className="text-xs text-[var(--muted)]">
-            Conseil : démarrez avec un comptage simple (10–20 lignes). Le dashboard devient très parlant dès les premiers cycles.
+            Astuce : le dashboard devient très parlant dès que vous avez des prix d’achat/vente et quelques pertes déclarées.
           </div>
         </Card>
 
@@ -452,9 +510,33 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-4 min-w-0">
+        {/* Alerts + AI compact box */}
+        <div className="grid lg:grid-cols-2 gap-4 min-w-0">
           <AlertsPanel />
-          <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
+
+          <Card className="p-5 min-w-0" hover>
+            <div className="flex items-start justify-between gap-3 min-w-0">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[var(--text)]">Assistant IA</div>
+                <div className="text-xs text-[var(--muted)] mt-1">
+                  Besoin d’un résumé, d’une explication ou d’une action rapide ? Ouvre l’assistant quand tu veux.
+                </div>
+              </div>
+              <Button variant="secondary" onClick={() => setAiOpen((v) => !v)}>
+                {aiOpen ? "Fermer" : "Ouvrir"}
+              </Button>
+            </div>
+
+            {aiOpen ? (
+              <div className="mt-4">
+                <AIAssistantPanel month={month} serviceId={isAllServices ? "all" : serviceId} />
+              </div>
+            ) : (
+              <div className="mt-4 text-xs text-[var(--muted)]">
+                💡 Astuce : demande “résume la situation du mois” ou “quelles catégories pèsent le plus ?”.
+              </div>
+            )}
+          </Card>
         </div>
 
         <div className="grid lg:grid-cols-2 gap-4 min-w-0">
@@ -506,7 +588,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="text-sm text-[var(--muted)]">
-                Pas encore de données sur cette période. Lancez un comptage, ou changez de mois/service ✨
+                Pas encore de données sur cette période. Lance un inventaire, ou change de mois / unité ✨
               </div>
             )}
           </Card>
@@ -531,7 +613,7 @@ export default function Dashboard() {
                   return (
                     <div key={l.reason} className="space-y-1 min-w-0">
                       <div className="flex justify-between gap-3 text-xs font-semibold text-[var(--muted)] min-w-0">
-                        <span className="min-w-0 break-anywhere">{l.reason}</span>
+                        <span className="min-w-0 break-anywhere">{normalizeLossReason(l.reason)}</span>
                         <span className="shrink-0">
                           {formatCurrency(l.total_cost || 0, currencyCode)} — {fmtNumber(l.total_qty || 0)} u.
                         </span>
@@ -548,70 +630,14 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="text-sm text-[var(--muted)]">
-                Aucune perte déclarée sur cette période. (Et ça, c’est une bonne nouvelle 😄)
+                Aucune perte déclarée sur cette période. (Et ça, c’est une très bonne nouvelle 😄)
               </div>
             )}
           </Card>
         </div>
 
-        {/* Products preview */}
-        <Card className="p-5 space-y-3 min-w-0">
-          <div className="flex items-center justify-between gap-3 min-w-0">
-            <div className="text-sm font-semibold text-[var(--text)] min-w-0">{copy.productsTitle}</div>
-            <Badge variant="neutral">{loading ? "Chargement" : `${products.length || 0} lignes`}</Badge>
-          </div>
-
-          {loading ? (
-            <div className="grid gap-2">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
-              ))}
-            </div>
-          ) : products.length ? (
-            <div className="grid sm:grid-cols-2 gap-3 min-w-0">
-              {products.slice(0, 10).map((p, idx) => (
-                <Card key={`${p.name}-${idx}`} className="p-4 space-y-1 min-w-0" hover>
-                  <div className="flex items-start justify-between gap-2 min-w-0">
-                    <div className="text-sm font-semibold text-[var(--text)] min-w-0 break-anywhere">
-                      {p.name}
-                    </div>
-                    <div className="flex gap-2 items-center flex-wrap justify-end">
-                      {isAllServices && <Badge variant="neutral">{p.__service_name || "Service"}</Badge>}
-                      <Badge variant="neutral">{p.category || "—"}</Badge>
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-[var(--muted)]">
-                    Stock : {fmtNumber(p.stock_final || 0)} {p.unit || ""}
-                  </div>
-
-                  <div className="text-xs text-[var(--muted)]">
-                    Valeur achat : {formatCurrency(p.purchase_value_current || 0, currencyCode)}
-                  </div>
-                  <div className="text-xs text-[var(--muted)]">
-                    Valeur vente : {formatCurrency(p.selling_value_current || 0, currencyCode)}
-                  </div>
-
-                  <div className="text-xs text-rose-500 dark:text-rose-300">Pertes : {fmtNumber(p.losses_qty || 0)} u.</div>
-
-                  {p.notes?.length ? (
-                    <div className="text-xs break-anywhere text-[var(--warn-text)] bg-[var(--warn-bg)] border border-[var(--warn-border)] rounded-full px-3 py-1">
-                      {p.notes.join(" ")}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-[var(--muted)]">
-                      Astuce : ajoutez vos prix d’achat/vente pour des stats ultra précises.
-                    </div>
-                  )}
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-[var(--muted)]">
-              Ajoutez des comptages pour voir les valeurs et pertes. Le dashboard devient vraiment parlant dès 10–20 lignes.
-            </div>
-          )}
-        </Card>
+        {/* ✅ SUPPRIMÉ : bloc "Comptages produits" / preview produits
+            (On garde le dashboard “vue générale”, pas une liste de lignes) */}
 
         {/* Admin principal: équipe + traçabilité */}
         {membersVisible ? (
@@ -628,7 +654,7 @@ export default function Dashboard() {
                   <div className="text-sm text-[var(--muted)]">Espace admin</div>
                   <div className="text-2xl font-black tracking-tight text-[var(--text)]">Équipe & activité</div>
                   <div className="text-sm text-[var(--muted)]">
-                    Visualisez les accès par service et gardez un œil sur ce qui bouge.
+                    Visualise les accès par unité et garde un œil sur ce qui bouge.
                   </div>
                 </div>
               </div>
@@ -665,7 +691,9 @@ export default function Dashboard() {
                     ) : members.length ? (
                       <div className="space-y-2 min-w-0">
                         {members.map((m) => {
-                          const scope = m?.service_scope?.name ? `Service : ${m.service_scope.name}` : "Accès : multi-services";
+                          const scope = m?.service_scope?.name
+                            ? `${copy.unitLabel} : ${m.service_scope.name}`
+                            : "Accès : multi-unités";
                           const last = m?.last_action?.action
                             ? `${formatActionLabel(m.last_action.action)} · ${fmtDateTime(m.last_action.at)}`
                             : "—";
@@ -720,10 +748,7 @@ export default function Dashboard() {
                           const obj = formatObjectLabel(a?.object_type, a?.object_id);
 
                           return (
-                            <div
-                              key={`${action}-${idx}`}
-                              className="flex items-start justify-between gap-3 min-w-0"
-                            >
+                            <div key={`${action}-${idx}`} className="flex items-start justify-between gap-3 min-w-0">
                               <div className="min-w-0">
                                 <div className="text-sm font-semibold text-[var(--text)] break-anywhere">
                                   {action} <span className="text-[var(--muted)] font-normal">·</span>{" "}
@@ -769,13 +794,13 @@ export default function Dashboard() {
                 </div>
 
                 <div className="text-xs text-[var(--muted)]">
-                  Astuce : gérez les rôles et le scope service depuis{" "}
+                  Astuce : gère les rôles et les accès par unité depuis{" "}
                   <span className="font-semibold text-[var(--text)]">Settings → Équipe</span>.
                 </div>
               </>
             ) : (
               <div className="text-xs text-[var(--muted)]">
-                Section repliée pour garder le focus sur l’inventaire. Cliquez sur “Afficher” pour voir l’activité.
+                Section repliée pour garder le focus sur la vue générale. Clique sur “Afficher” si besoin.
               </div>
             )}
           </Card>
