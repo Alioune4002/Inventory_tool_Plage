@@ -1116,6 +1116,10 @@ class LossEventViewSet(TenantQuerySetMixin, viewsets.ModelViewSet):
         tenant = get_tenant_for_request(self.request)
         service = get_service_from_request(self.request)
         check_entitlement(tenant, "loss_management")
+        product = serializer.validated_data.get("product")
+        if not product:
+            raise exceptions.ValidationError({"product": "Ce champ est obligatoire."})
+
         serializer.save(
             tenant=tenant,
             service=service,
@@ -1926,9 +1930,13 @@ def catalog_pdf(request):
 @permission_classes([permissions.IsAuthenticated, ProductPermission])
 def search_products(request):
     tenant = get_tenant_for_request(request)
-    service = get_service_from_request(request)
     query = request.query_params.get("q", "")
-    qs = Product.objects.filter(tenant=tenant, service=service)
+    service_param = request.query_params.get("service")
+    if service_param == "all":
+        qs = Product.objects.filter(tenant=tenant)
+    else:
+        service = get_service_from_request(request)
+        qs = Product.objects.filter(tenant=tenant, service=service)
     qs = _apply_retention(qs, tenant)
     if query:
         qs = qs.filter(
@@ -1938,7 +1946,14 @@ def search_products(request):
         )
     results = list(
         qs.order_by("name")[:10].values(
-            "id", "name", "barcode", "internal_sku", "category", "inventory_month"
+            "id",
+            "name",
+            "barcode",
+            "internal_sku",
+            "category",
+            "inventory_month",
+            "service_id",
+            "service__name",
         )
     )
     return Response(results)
