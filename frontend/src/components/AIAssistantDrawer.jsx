@@ -51,9 +51,59 @@ export default function AIAssistantDrawer() {
     scope: "inventory",
   });
 
-  // Floating button state: "pill" (grand) -> "icon" (réduit)
-  const [fabMode, setFabMode] = useState("pill");
+  // Entitlements (needed for icon mode label)
+  const entLoaded = entitlements !== null;
+  const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
+  const planEffective = entitlements?.plan_effective;
+  const aiModeLabel = planEffective === "BOUTIQUE" ? "IA light" : planEffective === "PRO" ? "IA coach" : null;
+  const aiMode = planEffective === "BOUTIQUE" ? "light" : "coach";
+  const canUseAI = !entLoaded || aiAllowed;
+
+  // Floating button UX
+  const [fabMode, setFabMode] = useState("full"); // "full" | "icon"
+  const [justOpened, setJustOpened] = useState(false);
   const fabTimerRef = useRef(null);
+
+  function vibrate(pattern) {
+    try {
+      if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern);
+    } catch {
+      // noop
+    }
+  }
+
+  const startFabTimer = useCallback(() => {
+    if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    fabTimerRef.current = window.setTimeout(() => {
+      setFabMode((prev) => (open ? prev : "icon"));
+    }, 10000);
+  }, [open]);
+
+  // Reset FAB on route changes (in /app)
+  const visibleInApp = isAppPath(location.pathname);
+
+  useEffect(() => {
+    if (!visibleInApp) return;
+
+    setFabMode("full");
+    startFabTimer();
+
+    return () => {
+      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    };
+  }, [visibleInApp, location.pathname, startFabTimer]);
+
+  // If drawer opens, keep full; if it closes, restart timer
+  useEffect(() => {
+    if (!visibleInApp) return;
+
+    if (open) {
+      setFabMode("full");
+      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
+    } else {
+      startFabTimer();
+    }
+  }, [open, startFabTimer, visibleInApp]);
 
   // Chat state
   const [conversationId, setConversationId] = useState(null);
@@ -70,13 +120,6 @@ export default function AIAssistantDrawer() {
 
   const scrollRef = useRef(null);
 
-  const entLoaded = entitlements !== null;
-  const aiAllowed = entitlements?.entitlements?.ai_assistant_basic === true;
-  const planEffective = entitlements?.plan_effective;
-  const aiModeLabel = planEffective === "BOUTIQUE" ? "IA light" : planEffective === "PRO" ? "IA coach" : null;
-
-  const canUseAI = !entLoaded || aiAllowed;
-
   const currentService = useMemo(() => {
     const sid = ctx?.serviceId;
     if (!services?.length) return null;
@@ -86,39 +129,6 @@ export default function AIAssistantDrawer() {
 
   const scopeLabel = ctx.scope === "support" ? "Support" : "Inventaire";
   const suggestions = ctx.scope === "support" ? SUPPORT_SUGGESTIONS : DEFAULT_SUGGESTIONS;
-
-  const visibleInApp = isAppPath(location.pathname);
-
-  // --- FAB auto-shrink après 10s (si drawer fermé) ---
-  const startFabTimer = useCallback(() => {
-    if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
-    fabTimerRef.current = window.setTimeout(() => {
-      // on shrink seulement si le drawer n'est pas ouvert
-      setFabMode((prev) => (open ? prev : "icon"));
-    }, 10000);
-  }, [open]);
-
-  useEffect(() => {
-    if (!visibleInApp) return;
-    // à l'arrivée sur une page /app : on montre le pill puis shrink après 10s
-    setFabMode("pill");
-    startFabTimer();
-    return () => {
-      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, visibleInApp]);
-
-  useEffect(() => {
-    // quand on ouvre le drawer, on repasse pill (et pas de shrink pendant l'ouverture)
-    if (open) {
-      setFabMode("pill");
-      if (fabTimerRef.current) window.clearTimeout(fabTimerRef.current);
-    } else if (visibleInApp) {
-      // drawer fermé: relance le timer
-      startFabTimer();
-    }
-  }, [open, startFabTimer, visibleInApp]);
 
   // Auto-scroll
   useEffect(() => {
@@ -143,6 +153,11 @@ export default function AIAssistantDrawer() {
       setCtx(next);
       setOpen(true);
 
+      // micro animation + haptique
+      setJustOpened(true);
+      vibrate([10, 20, 10]);
+      window.setTimeout(() => setJustOpened(false), 220);
+
       // new context => new thread by default (évite les “mélanges”)
       if (detail.resetThread !== false) {
         setConversationId(null);
@@ -163,7 +178,17 @@ export default function AIAssistantDrawer() {
   }, [authServiceId]);
 
   const openFromButton = () => {
+    // 1er clic si réduit => on repasse en “full” (sans ouvrir)
+    if (fabMode === "icon") {
+      setFabMode("full");
+      vibrate(10);
+      startFabTimer();
+      return;
+    }
+
+    // scope auto selon page
     const scope = location.pathname.startsWith("/app/support") ? "support" : "inventory";
+
     window.dispatchEvent(
       new CustomEvent("stockscan:ai:open", {
         detail: { month: ctx?.month || nowMonth(), serviceId: authServiceId || "all", scope, resetThread: false },
@@ -187,6 +212,7 @@ export default function AIAssistantDrawer() {
         return;
       }
 
+      // message user optimistic
       setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
       setInput("");
       setNotice("");
@@ -243,91 +269,72 @@ export default function AIAssistantDrawer() {
     return currentService?.name || `Service #${ctx.serviceId}`;
   }, [ctx.serviceId, currentService]);
 
-  
+  // ------- UI -------
   if (!visibleInApp) return null;
-
-  const onFabClick = () => {
-    
-    if (fabMode === "icon") {
-      setFabMode("pill");
-      startFabTimer();
-      return;
-    }
-   
-    openFromButton();
-  };
 
   return (
     <>
-      {/* Floating button (auto shrink + safe-area) */}
+      {/* Floating button */}
       <button
         type="button"
-        onClick={onFabClick}
+        onClick={openFromButton}
         className={[
-          "fixed right-5 z-[70] border border-white/10 bg-[var(--surface)] shadow-[0_20px_50px_rgba(0,0,0,0.35)] hover:opacity-95",
-          // safe-area bottom iOS
-          "bottom-[calc(1.25rem+env(safe-area-inset-bottom))]",
-          // transition smooth
+          "fixed bottom-5 right-5 z-[70] border border-white/10 bg-[var(--surface)] shadow-[0_20px_50px_rgba(0,0,0,0.35)] hover:opacity-95",
           "transition-all duration-200",
-          fabMode === "icon" ? "rounded-full p-3" : "rounded-full px-4 py-3",
+          fabMode === "icon" ? "h-12 w-12 rounded-full p-0" : "rounded-full px-4 py-3",
+          open ? "ring-1 ring-blue-500/30" : "",
+          justOpened ? "scale-[1.02]" : "",
         ].join(" ")}
-        aria-label="Assistant IA"
+        aria-label="Ouvrir l’assistant IA"
         title="Assistant IA"
       >
         {fabMode === "icon" ? (
-  <div className="flex items-center justify-center">
-    {/* AI robot head icon */}
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      className="text-[var(--text)]"
-    >
-      {/* antenna */}
-      <path
-        d="M12 2.8v2"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="2.4" r="1" fill="currentColor" />
+          <div className="h-12 w-12 flex items-center justify-center relative">
+            {/* halo discret si open */}
+            {open ? <span className="absolute inset-0 rounded-full bg-blue-500/10 blur-[6px]" /> : null}
 
-      {/* head */}
-      <rect
-        x="4"
-        y="6"
-        width="16"
-        height="12"
-        rx="4"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
+            {/* Robot icon (diff selon mode) */}
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+              className="relative text-[var(--text)]"
+            >
+              {/* antenna */}
+              <path d="M12 2.8v2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              <circle cx="12" cy="2.4" r="1" fill="currentColor" className={open ? "animate-pulse" : ""} />
 
-      {/* eyes */}
-      <circle cx="9" cy="12" r="1.2" fill="currentColor" />
-      <circle cx="15" cy="12" r="1.2" fill="currentColor" />
+              {/* head */}
+              <rect x="4" y="6" width="16" height="12" rx="4" stroke="currentColor" strokeWidth="1.6" />
 
-      {/* mouth */}
-      <path
-        d="M9 15h6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        opacity="0.7"
-      />
-    </svg>
-  </div>
-) : (
-  <>
-    <div className="flex items-center gap-2">
-      <span className="inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
-      <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
-    </div>
-    <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
-  </>
-)}
+              {/* eyes */}
+              <circle cx="9" cy="12" r="1.2" fill="currentColor" />
+              <circle cx="15" cy="12" r="1.2" fill="currentColor" />
+
+              {/* mouth */}
+              <path d="M9 15h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" opacity="0.7" />
+
+              {/* coach spark (si mode coach) */}
+              {aiMode !== "light" ? (
+                <path
+                  d="M19 6.2l.6 1.3 1.4.2-1 .9.3 1.4-1.3-.7-1.3.7.3-1.4-1-.9 1.4-.2.6-1.3z"
+                  fill="currentColor"
+                  opacity="0.9"
+                />
+              ) : null}
+            </svg>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className={["inline-flex h-2.5 w-2.5 rounded-full bg-blue-500", open ? "animate-pulse" : ""].join(" ")} />
+              <span className="text-sm font-semibold text-[var(--text)]">Assistant IA</span>
+            </div>
+            <div className="text-[11px] text-[var(--muted)] -mt-0.5">Chat & support</div>
+          </>
+        )}
       </button>
 
       {/* Drawer */}
@@ -336,9 +343,15 @@ export default function AIAssistantDrawer() {
           {/* overlay */}
           <button type="button" className="absolute inset-0 bg-black/40" aria-label="Fermer" onClick={closeDrawer} />
 
-          {/* panel (fix mobile height + prevent bottom overflow) */}
+          {/* panel (100dvh + safe-area) */}
           <div className="absolute right-0 top-0 h-[100dvh] w-full max-w-[460px]">
-            <Card className="h-full rounded-none sm:rounded-l-[28px] border-l border-[var(--border)] bg-[var(--surface)] p-0 overflow-hidden flex flex-col">
+            <Card
+              className={[
+                "h-full rounded-none sm:rounded-l-[28px] border-l border-[var(--border)] bg-[var(--surface)] p-0 overflow-hidden flex flex-col",
+                "transition-transform duration-200",
+                justOpened ? "scale-[1.005]" : "",
+              ].join(" ")}
+            >
               {/* header */}
               <div className="p-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
                 <div className="min-w-0">
@@ -381,7 +394,7 @@ export default function AIAssistantDrawer() {
                 </div>
               </div>
 
-              {/* content wrapper: IMPORTANT min-h-0 to allow scroll */}
+              {/* content wrapper: min-h-0 important pour le scroll */}
               <div className="flex-1 min-h-0 flex flex-col">
                 {/* quick suggestions */}
                 <div className="p-4 border-b border-[var(--border)]">
@@ -405,7 +418,7 @@ export default function AIAssistantDrawer() {
                   ) : null}
                 </div>
 
-                {/* messages (scroll) */}
+                {/* messages */}
                 <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto p-4 space-y-3">
                   {messages.map((m, idx) => {
                     const isUser = m.role === "user";
@@ -434,11 +447,8 @@ export default function AIAssistantDrawer() {
                   ) : null}
                 </div>
 
-                {/* footer input (safe-area bottom, always visible/clickable) */}
-                <div
-                  className="border-t border-[var(--border)] space-y-2"
-                  style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}
-                >
+                {/* footer input (safe-area bottom) */}
+                <div className="border-t border-[var(--border)]" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
                   <div className="p-4 space-y-2">
                     {notice ? (
                       <div className="rounded-2xl border border-[var(--info-border)] bg-[var(--info-bg)] px-4 py-3 text-sm text-[var(--info-text)]">
@@ -467,7 +477,7 @@ export default function AIAssistantDrawer() {
                         </span>
                         <Button
                           size="sm"
-                          onClick={handleSend}
+                          onClick={() => send(input)}
                           loading={sending}
                           disabled={sending || !input.trim() || (entLoaded && !aiAllowed)}
                         >
