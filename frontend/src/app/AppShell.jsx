@@ -1,4 +1,4 @@
-
+// src/app/AppShell.jsx
 import React, { Suspense, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import AppRoutes from "./routes";
@@ -53,10 +53,8 @@ export default function AppShell() {
 
   const onLogout = () => {
     logout();
-    
   };
 
-  
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     try {
@@ -68,8 +66,9 @@ export default function AppShell() {
 
   useEffect(() => {
     if (mobileNavOpen) setMobileNavOpen(false);
-    
   }, [location.pathname]);
+
+  const userId = me?.id || me?.user?.id || me?.user_id || "";
 
   return (
     <ToastProvider>
@@ -110,12 +109,17 @@ export default function AppShell() {
           </div>
         </div>
 
-        <Suspense fallback={null}>
-          <GuidedTour onRequestMobileNav={setMobileNavOpen} />
-        </Suspense>
+        {/* ✅ Guided tour: userId + ability to open mobile nav */}
+        {isAppSection && isAuthed ? (
+          <Suspense fallback={null}>
+            <GuidedTour userId={userId} onRequestMobileNav={setMobileNavOpen} />
+          </Suspense>
+        ) : null}
+
         <Suspense fallback={null}>
           <Toasts />
         </Suspense>
+
         <Suspense fallback={null}>
           <MobileNav
             open={mobileNavOpen}
