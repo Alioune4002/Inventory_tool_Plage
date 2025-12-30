@@ -715,6 +715,72 @@ export default function Products() {
     return Array.from(map.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [items]);
 
+  const pdfEffectiveService = pdfService || serviceId;
+
+  const pdfPreviewItems = useMemo(() => {
+      const q = (pdfQuery || "").trim().toLowerCase();
+      const cat = (pdfCategory || "").trim().toLowerCase();
+
+      return catalogItems
+        .filter((p) => {
+          
+          if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
+            if (String(p.service) !== String(pdfEffectiveService)) return false;
+          }
+
+          
+          if (cat) {
+            const pc = String(p.category || "").toLowerCase();
+            
+            if (categories.length > 0 && pdfEffectiveService !== "all") {
+              if (pc !== cat) return false;
+            } else {
+              if (!pc.includes(cat)) return false;
+            }
+          }
+
+        
+          if (!q) return true;
+          return (
+            p.name?.toLowerCase().includes(q) ||
+            p.barcode?.toLowerCase().includes(q) ||
+            p.internal_sku?.toLowerCase().includes(q) ||
+            p.brand?.toLowerCase().includes(q) ||
+            p.supplier?.toLowerCase().includes(q) ||
+            p.notes?.toLowerCase().includes(q)
+          );
+        })
+        .slice(0, 8); 
+    }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
+
+  const pdfPreviewCount = useMemo(() => {
+    const q = (pdfQuery || "").trim().toLowerCase();
+    const cat = (pdfCategory || "").trim().toLowerCase();
+
+    return catalogItems.filter((p) => {
+      if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
+        if (String(p.service) !== String(pdfEffectiveService)) return false;
+      }
+      if (cat) {
+        const pc = String(p.category || "").toLowerCase();
+        if (categories.length > 0 && pdfEffectiveService !== "all") {
+          if (pc !== cat) return false;
+        } else {
+          if (!pc.includes(cat)) return false;
+        }
+      }
+      if (!q) return true;
+      return (
+        p.name?.toLowerCase().includes(q) ||
+        p.barcode?.toLowerCase().includes(q) ||
+        p.internal_sku?.toLowerCase().includes(q) ||
+        p.brand?.toLowerCase().includes(q) ||
+        p.supplier?.toLowerCase().includes(q) ||
+        p.notes?.toLowerCase().includes(q)
+      );
+    }).length;
+  }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
+
   const filteredItems = useMemo(() => {
     if (!search) return catalogItems;
     const q = search.toLowerCase();

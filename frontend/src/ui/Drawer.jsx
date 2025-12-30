@@ -30,10 +30,7 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
 
   return (
     <div
-      className={cn(
-        "fixed inset-0 z-[90] transition",
-        open ? "pointer-events-auto" : "pointer-events-none"
-      )}
+      className={cn("fixed inset-0 z-[90] transition", open ? "pointer-events-auto" : "pointer-events-none")}
       aria-hidden={!open}
     >
       <div
@@ -47,8 +44,9 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
       <div
         ref={panelRef}
         className={cn(
-          "absolute inset-x-0 bottom-0 max-h-[85vh] rounded-t-3xl bg-[var(--surface)] shadow-soft border border-[var(--border)]",
-          "sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:max-h-full sm:w-[520px] sm:rounded-l-3xl sm:rounded-tr-none",
+          
+          "absolute inset-x-0 bottom-0 h-[85vh] rounded-t-3xl bg-[var(--surface)] shadow-soft border border-[var(--border)] flex flex-col",
+          "sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[520px] sm:rounded-l-3xl sm:rounded-tr-none",
           "transition-transform duration-200",
           open ? "translate-y-0 sm:translate-x-0" : "translate-y-full sm:translate-x-full",
           className
@@ -59,7 +57,8 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
         aria-labelledby={title ? titleId : undefined}
         tabIndex={-1}
       >
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+        {/* Header */}
+        <div className="shrink-0 flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
           <div id={titleId} className="text-base font-semibold text-[var(--text)]">
             {title}
           </div>
@@ -73,11 +72,21 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
           </button>
         </div>
 
-        <div className="px-5 py-4 overflow-auto max-h-[calc(85vh-130px)] sm:max-h-[calc(100vh-130px)]">
-          {children}
-        </div>
+        {/* Content */}
+        <div className="flex-1 overflow-auto px-5 py-4">{children}</div>
 
-        {footer && <div className="border-t border-[var(--border)] px-5 py-4">{footer}</div>}
+        {/* Footer */}
+        {footer ? (
+          <div
+            className={cn(
+              "shrink-0 border-t border-[var(--border)] px-5 py-4",
+              /
+              "pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+            )}
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -28,6 +28,8 @@ export default function CatalogPdfSection({
   pdfLogo,
   setPdfLogo,
   templateOptions,
+  pdfPreviewCount = 0,
+  pdfPreviewItems = [],
   generateCatalogPdf,
   pdfLoading,
   pdfError,
@@ -72,6 +74,7 @@ export default function CatalogPdfSection({
                 options={pdfServiceOptions}
               />
             )}
+
             <Input
               label="Recherche"
               placeholder="Nom, code-barres, SKU…"
@@ -80,7 +83,13 @@ export default function CatalogPdfSection({
                 setPdfQuery(e.target.value);
                 clearPdfError();
               }}
+              helper={
+                pdfQuery?.trim()
+                  ? `${pdfPreviewCount} produit(s) correspondent (aperçu live ci-dessous).`
+                  : `${pdfPreviewCount} produit(s) dans ce filtre (aperçu live ci-dessous).`
+              }
             />
+
             {categories.length > 0 && pdfService !== "all" ? (
               <Select
                 label={wording.categoryLabel}
@@ -101,6 +110,31 @@ export default function CatalogPdfSection({
                   clearPdfError();
                 }}
               />
+            )}
+          </div>
+
+          {/* ✅ Preview live */}
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Aperçu</div>
+              <div className="text-xs text-[var(--muted)]">{pdfPreviewCount} match(s)</div>
+            </div>
+
+            {pdfPreviewItems?.length ? (
+              <div className="mt-2 divide-y divide-[var(--border)]">
+                {pdfPreviewItems.map((p) => (
+                  <div key={p.id} className="py-2 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[var(--text)] truncate">{p.name}</div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {(p.barcode || p.internal_sku || "—") + (p.category ? ` · ${p.category}` : "")}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-[var(--muted)]">Aucun produit ne correspond à ces filtres.</div>
             )}
           </div>
 
@@ -189,13 +223,12 @@ export default function CatalogPdfSection({
                 clearPdfError();
               }}
             />
-            {pdfLogo ? (
-              <span className="text-xs text-[var(--muted)]">Fichier sélectionné : {pdfLogo.name}</span>
-            ) : null}
+            {pdfLogo ? <span className="text-xs text-[var(--muted)]">Fichier sélectionné : {pdfLogo.name}</span> : null}
             <span className="text-xs text-[var(--muted)]">
               Utilisé en couverture pour un rendu premium. Formats PNG/JPG recommandés.
             </span>
           </label>
+
           <Button onClick={generateCatalogPdf} loading={pdfLoading} disabled={!canPdfCatalog || pdfLoading}>
             Générer le PDF
           </Button>
