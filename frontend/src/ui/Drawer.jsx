@@ -44,7 +44,6 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
       <div
         ref={panelRef}
         className={cn(
-          
           "absolute inset-x-0 bottom-0 h-[85vh] rounded-t-3xl bg-[var(--surface)] shadow-soft border border-[var(--border)] flex flex-col",
           "sm:inset-y-0 sm:right-0 sm:left-auto sm:h-full sm:w-[520px] sm:rounded-l-3xl sm:rounded-tr-none",
           "transition-transform duration-200",
@@ -80,7 +79,6 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
           <div
             className={cn(
               "shrink-0 border-t border-[var(--border)] px-5 py-4",
-              /
               "pb-[calc(env(safe-area-inset-bottom)+1rem)]"
             )}
           >
