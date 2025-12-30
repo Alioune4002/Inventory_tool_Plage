@@ -141,7 +141,7 @@ export default function Losses() {
     }
     try {
       const res = await api.get(
-        `/api/search-products/?q=${encodeURIComponent(query)}&service=${serviceId}`
+        `/api/products/search/?service=${serviceId}&q=${encodeURIComponent(query)}`
       );
       setProductResults(Array.isArray(res.data) ? res.data : []);
     } catch {

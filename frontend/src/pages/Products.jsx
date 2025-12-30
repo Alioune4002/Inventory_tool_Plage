@@ -1009,8 +1009,9 @@ export default function Products() {
                       onClick={() => setScanOpen(true)}
                       title="Scanner un code-barres"
                     >
-                      <ScanLine className="w-4 h-4" />
-                      Scanner
+                      <ScanLine className="inline-flex items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--accent)]/10
+           p-2 sm:px-2 sm:py-1 sm:rounded-full sm:text-xs sm:font-semibold sm:gap-1" />
+                      <span className="hidden sm:inline">Scanner</span>
                     </button>
                   ) : null
                 }
@@ -1342,8 +1343,9 @@ export default function Products() {
                       onClick={() => setScanOpen(true)}
                       title="Scanner un code-barres"
                     >
-                      <ScanLine className="w-4 h-4" />
-                      Scanner
+                      <ScanLine className="inline-flex items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--accent)]/10
+           p-2 sm:px-2 sm:py-1 sm:rounded-full sm:text-xs sm:font-semibold sm:gap-1" />
+                      <span className="hidden sm:inline">Scanner</span>
                     </button>
                   }
                 />

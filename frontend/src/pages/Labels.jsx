@@ -171,11 +171,60 @@ export default function Labels() {
     setSelected((prev) => prev.map((p) => (p.id === id ? { ...p, count: Math.min(parsed, 50) } : p)));
   };
 
+  const getPriceValue = (p) => {
+  
+  const v =
+    p?.selling_price ??
+    p?.price ??
+    p?.sellingPrice ??
+    p?.sale_price ??
+    p?.unit_price ??
+    null;
+
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return n;
+};
+
+const requiresPrice = useMemo(() => {
+  
+  return fields.includes("price") || fields.includes("price_unit") || promoEnabled;
+}, [fields, promoEnabled]);
+
+const missingPriceProducts = useMemo(() => {
+  if (!requiresPrice) return [];
+  return selected.filter((p) => {
+    const val = getPriceValue(p);
+   
+    return val === null || val <= 0;
+  });
+}, [selected, requiresPrice]);
+
   const generateLabels = async () => {
     if (!selected.length) {
       pushToast?.({ message: "Sélectionnez au moins un produit.", type: "warn" });
       return;
     }
+
+    if (missingPriceProducts.length) {
+        const names = missingPriceProducts
+          .slice(0, 4)
+          .map((p) => p.name)
+          .filter(Boolean)
+          .join(", ");
+        const more = missingPriceProducts.length > 4 ? ` (+${missingPriceProducts.length - 4})` : "";
+        pushToast?.({
+          type: "error",
+          message:
+            `Prix obligatoire pour imprimer des étiquettes prix. ` +
+            `Ajoutez un prix à : ${names}${more}.`,
+        });
+        
+        setDrawerOpen(true);
+        return;
+      }
+  
     setLoading(true);
     try {
       const ids = selected.map((p) => p.id).join(",");
@@ -295,17 +344,20 @@ export default function Labels() {
               onClose={() => setDrawerOpen(false)}
               title="Sélection & options"
               footer={
-                <div className="flex justify-end gap-2">
-                  <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>
-                    Fermer
-                  </Button>
-                  <Button onClick={generateLabels} loading={loading} disabled={loading || !selected.length}>
-                    Générer le PDF
-                  </Button>
+                <div className="flex justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
+                  <div className="flex justify-end gap-2">
+                    <Button variant="secondary" type="button" onClick={() => setDrawerOpen(false)}>
+                      Fermer
+                    </Button>
+                    <Button onClick={generateLabels} loading={loading} disabled={loading || !selected.length}>
+                      Générer le PDF
+                    </Button>
+                  </div>
+
                 </div>
-              }
+                }
             >
-              <div className="space-y-5">
+              <div className="space-y-5 pb-24">
                 <div className="space-y-3">
                   <div className="text-sm font-semibold text-[var(--text)]">Recherche produits</div>
                   <div className="grid gap-3 sm:grid-cols-3 items-end">
@@ -319,7 +371,7 @@ export default function Labels() {
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       rightSlot={
-                        // ✅ ICON ONLY (compact)
+                        
                         <button
                           type="button"
                           className="inline-flex items-center justify-center rounded-full border border-[var(--border)] p-2 text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
@@ -371,6 +423,14 @@ export default function Labels() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-semibold text-[var(--text)]">Produits sélectionnés</div>
+                  {missingPriceProducts.length > 0 && (
+                    <div className="rounded-2xl border border-red-200/70 dark:border-red-400/25 bg-red-50/70 dark:bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-200">
+                      Prix obligatoire : {missingPriceProducts.length} produit(s) n’ont pas de prix.
+                      <div className="text-xs mt-1 opacity-80">
+                        Va dans “Produits” pour compléter le prix de vente, puis reviens ici.
+                      </div>
+                    </div>
+                  )}
                   {selected.length === 0 ? (
                     <div className="text-sm text-[var(--muted)]">Aucun produit sélectionné.</div>
                   ) : (
