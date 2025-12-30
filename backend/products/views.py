@@ -2,6 +2,9 @@ from datetime import timedelta, datetime
 import difflib
 import unicodedata
 
+import os
+import requests
+
 from rest_framework import status, viewsets, permissions, exceptions
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
@@ -82,6 +85,11 @@ OFF_CACHE_TTL_SECONDS = 60 * 60 * 48
 CATALOG_PDF_MAX_PRODUCTS = 500
 LABELS_PDF_MAX_PRODUCTS = 400
 RECEIPT_IMPORT_MAX_LINES = 500
+RECEIPTS_OCR_PROVIDER_DEFAULT = "ocrspace"
+RECEIPTS_OCR_MIN_TEXT_LEN = 30  # en dessous => on considère que le PDF est scanné / vide
+RECEIPTS_OCR_MAX_PAGES_DEFAULT = 3
+RECEIPTS_OCR_TIMEOUT_DEFAULT = 25
+RECEIPTS_OCR_CACHE_TTL_DEFAULT = 60 * 60 * 24  # 24h
 DUPLICATE_NAME_SIMILARITY = 0.985
 CATALOG_TEMPLATES = {
     "classic": {"accent": "#1E3A8A", "muted": "#475569"},
@@ -2665,7 +2673,116 @@ def rituals(request):
 
     return Response({"month": month, "rituals": rituals_payload})
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        v = int(str(os.getenv(name, "")).strip() or default)
+        return v if v > 0 else default
+    except Exception:
+        return default
 
+
+def _env_str(name: str, default: str) -> str:
+    return (os.getenv(name, "") or default).strip()
+
+
+def _sha256_hex(data: bytes) -> str:
+    try:
+        return hashlib.sha256(data or b"").hexdigest()
+    except Exception:
+        return ""
+
+
+def _ocrspace_extract_text_from_pdf_bytes(pdf_bytes: bytes, *, language="fre", timeout_seconds=25) -> str:
+    """
+    OCR.Space - envoie le PDF et récupère le texte OCR.
+    Retourne "" si échec.
+    """
+    api_key = _env_str("OCR_SPACE_API_KEY", "")
+    if not api_key or not pdf_bytes:
+        return ""
+
+    try:
+        resp = requests.post(
+            "https://api.ocr.space/parse/image",
+            files={"file": ("document.pdf", pdf_bytes, "application/pdf")},
+            data={
+                "apikey": api_key,
+                "language": language,          # "fre" ou "eng" ou "fre,eng" (OCR.Space)
+                "isOverlayRequired": "false",
+                "OCREngine": "2",
+                # On force un parsing “texte” simple
+                "detectOrientation": "true",
+                "scale": "true",
+            },
+            timeout=timeout_seconds,
+        )
+
+        # OCR.Space peut renvoyer 200 même en erreur => inspect JSON
+        try:
+            data = resp.json()
+        except Exception:
+            return ""
+
+        if not isinstance(data, dict):
+            return ""
+
+        if data.get("IsErroredOnProcessing"):
+            # Ex: quota / file not supported
+            return ""
+
+        parsed = data.get("ParsedResults") or []
+        if not parsed:
+            return ""
+
+        # Concat pages
+        text_parts = []
+        for p in parsed:
+            t = (p.get("ParsedText") or "").strip()
+            if t:
+                text_parts.append(t)
+
+        return "\n".join(text_parts).strip()
+
+    except requests.Timeout:
+        return ""
+    except Exception:
+        logger.exception("OCR_SPACE_FAILED")
+        return ""
+
+
+def _ocr_receipt_text(pdf_bytes: bytes) -> str:
+    """
+    Wrapper avec cache pour éviter de repayer plusieurs fois le même PDF.
+    """
+    provider = _env_str("RECEIPTS_OCR_PROVIDER", RECEIPTS_OCR_PROVIDER_DEFAULT).lower()
+    timeout_seconds = _env_int("RECEIPTS_OCR_TIMEOUT_SECONDS", RECEIPTS_OCR_TIMEOUT_DEFAULT)
+    ttl = _env_int("RECEIPTS_OCR_CACHE_TTL_SECONDS", RECEIPTS_OCR_CACHE_TTL_DEFAULT)
+
+    # Cache key coûts
+    h = _sha256_hex(pdf_bytes)[:16]
+    cache_key = f"receipts:ocr:{provider}:{h}"
+    try:
+        cached = cache.get(cache_key)
+        if isinstance(cached, str) and cached.strip():
+            return cached.strip()
+    except Exception:
+        cached = None
+
+    if provider == "ocrspace":
+        txt = _ocrspace_extract_text_from_pdf_bytes(pdf_bytes, language="fre", timeout_seconds=timeout_seconds)
+    else:
+        # provider inconnu -> pas d’OCR
+        txt = ""
+
+    txt = _normalize_receipt_text(txt).strip()
+
+    try:
+        if txt:
+            cache.set(cache_key, txt, ttl)
+    except Exception:
+        pass
+
+    return txt
 def _parse_receipt_rows(file_obj, file_name):
     file_name = file_name or "import"
     if file_name.lower().endswith(".csv"):
@@ -2680,14 +2797,30 @@ def _parse_receipt_rows(file_obj, file_name):
             from pypdf import PdfReader
         except Exception as exc:
             raise exceptions.ValidationError("PDF non supporté sur ce déploiement.") from exc
-        reader = PdfReader(file_obj)
+
+        # Lire une seule fois pour:
+        # - pypdf via BytesIO
+        # - OCR fallback si besoin
+        pdf_bytes = file_obj.read()
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+        max_pages = _env_int("RECEIPTS_OCR_MAX_PAGES", RECEIPTS_OCR_MAX_PAGES_DEFAULT)
+
+        reader = PdfReader(io.BytesIO(pdf_bytes))
         page_texts = []
-        for page in reader.pages:
+        for idx, page in enumerate(reader.pages):
+            if max_pages and idx >= max_pages:
+                break
             text = ""
             try:
                 text = page.extract_text(extraction_mode="layout") or ""
             except TypeError:
                 text = page.extract_text() or ""
+            except Exception:
+                text = ""
             if not text:
                 try:
                     text = page.extract_text() or ""
@@ -2697,12 +2830,23 @@ def _parse_receipt_rows(file_obj, file_name):
                 page_texts.append(text)
 
         raw_text = "\n".join(page_texts)
+        raw_text = _normalize_receipt_text(raw_text).strip()
+
+        # ✅ Fallback OCR si PDF scanné / vide
+        if not raw_text or len(raw_text) < RECEIPTS_OCR_MIN_TEXT_LEN:
+            ocr_text = _ocr_receipt_text(pdf_bytes)
+            if ocr_text and len(ocr_text) >= RECEIPTS_OCR_MIN_TEXT_LEN:
+                raw_text = ocr_text
+                logger.info("receipts_ocr_used", extra={"file": file_name, "pages": max_pages})
+
         raw_text = _normalize_receipt_text(raw_text)
         meta = _extract_invoice_meta_from_text(raw_text)
+
         lines = [_normalize_receipt_text(line).strip() for line in raw_text.splitlines() if line.strip()]
         lines = _merge_receipt_lines(lines)
         if not lines:
             return [], "pdf", meta
+
         header = lines[0].lower()
         header_idx = None
         for idx, line in enumerate(lines[:20]):
@@ -2713,6 +2857,7 @@ def _parse_receipt_rows(file_obj, file_name):
                 header_idx = idx
                 header = lower
                 break
+
         has_delim = ";" in header or "," in header or "\t" in header or "|" in header
         if has_delim and any(k in header for k in ("produit", "designation", "libelle", "qty", "quantite", "qte", "prix")):
             delimiter = ";" if ";" in header else "," if "," in header else "\t" if "\t" in header else "|"

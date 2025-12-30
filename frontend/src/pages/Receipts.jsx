@@ -27,7 +27,7 @@ function getReceiptErrorMessage(error) {
     return "Aucune ligne exploitable n’a été trouvée dans ce fichier.";
   }
   if (code === "UNSUPPORTED_FILE") {
-    return "Format non supporté. Importez un CSV ou PDF structuré (sans OCR).";
+    return "CSV structuré ou PDF fournisseur (OCR automatique si besoin).";
   }
   return error?.detail || error?.message || "Impossible d’importer ce fichier.";
 }
@@ -484,7 +484,7 @@ export default function Receipts() {
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     className="mt-2 block w-full text-sm text-[var(--muted)] file:rounded-full file:border-0 file:bg-[var(--primary)] file:px-4 file:py-2 file:text-white"
                   />
-                  <div className="text-xs text-[var(--muted)] mt-2">CSV structuré ou PDF fournisseur (sans OCR).</div>
+                  <div className="text-xs text-[var(--muted)] mt-2">CSV structuré ou PDF fournisseur (OCR automatique si besoin).</div>
                 </div>
               </form>
             </Drawer>
