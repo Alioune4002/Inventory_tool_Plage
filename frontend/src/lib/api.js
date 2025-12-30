@@ -1,4 +1,3 @@
-
 import axios from "axios";
 import { clearToken, getStoredToken } from "./auth";
 
@@ -48,21 +47,44 @@ function setLastConcreteServiceId(id) {
   }
 }
 
-function resolveServiceHeaderValue() {
-  const current = String(getStoredServiceIdSafe() || "").trim();
-  if (!current) return "";
-  if (current === "all") return String(getLastConcreteServiceId() || "").trim();
-  return current;
+/**
+ * Returns { mode, serviceIdToSend, shouldSendServiceId }
+ * - mode: raw stored value (ex: "12" or "all")
+ * - serviceIdToSend: concrete id (string) if applicable
+ * - shouldSendServiceId: false when mode === "all" (important!)
+ */
+function resolveServiceContext() {
+  const mode = String(getStoredServiceIdSafe() || "").trim();
+  if (!mode) return { mode: "", serviceIdToSend: "", shouldSendServiceId: false };
+
+  if (mode === "all") {
+    // IMPORTANT: for "all", do not send X-Service-Id (let backend know it's "all")
+    return { mode, serviceIdToSend: "", shouldSendServiceId: false };
+  }
+
+  return { mode, serviceIdToSend: mode, shouldSendServiceId: true };
 }
 
 api.interceptors.request.use((config) => {
-  const svc = resolveServiceHeaderValue();
-  if (svc) {
-    config.headers = config.headers || {};
-    config.headers["X-Service-Id"] = svc;
-    config.headers["X-Service-Mode"] = String(getStoredServiceIdSafe() || "");
-    setLastConcreteServiceId(svc);
+  // Allow opt-out per request (useful when querystring explicitly drives "service")
+  if (config?.skipServiceContext) return config;
+
+  // If caller explicitly set service headers, do not override
+  const alreadySetMode = Boolean(config?.headers && "X-Service-Mode" in config.headers);
+  const alreadySetId = Boolean(config?.headers && "X-Service-Id" in config.headers);
+  if (alreadySetMode || alreadySetId) return config;
+
+  const { mode, serviceIdToSend, shouldSendServiceId } = resolveServiceContext();
+  if (!mode) return config;
+
+  config.headers = config.headers || {};
+  config.headers["X-Service-Mode"] = mode;
+
+  if (shouldSendServiceId && serviceIdToSend) {
+    config.headers["X-Service-Id"] = serviceIdToSend;
+    setLastConcreteServiceId(serviceIdToSend);
   }
+
   return config;
 });
 

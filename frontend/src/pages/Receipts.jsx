@@ -126,9 +126,7 @@ export default function Receipts() {
     setReceiptMeta(null);
 
     try {
-      const res = await api.post(`/api/receipts/import/?service=${serviceId}`, formData, {
-  
-});
+      const res = await api.post(`/api/receipts/import/?service=${serviceId}`, formData);
 
       setReceiptId(res.data?.receipt_id || null);
       const newLines = res.data?.lines || [];
@@ -223,7 +221,11 @@ export default function Receipts() {
       params.set("service", serviceValue);
       if (historyQuery.trim()) params.set("q", historyQuery.trim());
       if (historyDate) params.set("date", historyDate);
-      const res = await api.get(`/api/receipts/history/?${params.toString()}`);
+
+      // IMPORTANT: history peut être "all" => on veut que ce soit le querystring qui drive,
+      // et ne pas injecter X-Service-Id via l'interceptor.
+      const res = await api.get(`/api/receipts/history/?${params.toString()}`, { skipServiceContext: true });
+
       setHistoryResults(res.data?.results || []);
     } catch {
       setHistoryResults([]);
