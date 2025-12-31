@@ -1,4 +1,3 @@
-// frontend/src/pages/Products.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
@@ -87,6 +86,20 @@ function getPdfErrorMessage(error) {
   return error?.message || "Impossible de générer le catalogue PDF. Réessaie dans un instant.";
 }
 
+function ScannerButton({ onClick, label = "Scanner" }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center justify-center rounded-full border border-[var(--border)] p-2 text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
+      title={label}
+      aria-label={label}
+    >
+      <ScanLine className="h-4 w-4" />
+    </button>
+  );
+}
+
 export default function Products() {
   const { serviceId, services, selectService, serviceFeatures, countingMode, tenant, serviceProfile } = useAuth();
   const currencyCode = tenant?.currency_code || "EUR";
@@ -142,6 +155,9 @@ export default function Products() {
   const [scanErr, setScanErr] = useState("");
   const [scanLoading, setScanLoading] = useState(false);
   const [scanManual, setScanManual] = useState("");
+
+  // 👇 Nouveau : où injecter le scan
+  const [scanTarget, setScanTarget] = useState("search"); // "search" | "pdfQuery" | "barcode" | "sku"
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -263,10 +279,7 @@ export default function Products() {
     if (!categories.length) return [];
     return [{ value: "", label: "Aucune" }, ...categories.map((c) => ({ value: c.name, label: c.name }))];
   }, [categories]);
-  const unitSelectOptions = useMemo(
-    () => unitOptions.map((u) => ({ value: u, label: u })),
-    [unitOptions]
-  );
+  const unitSelectOptions = useMemo(() => unitOptions.map((u) => ({ value: u, label: u })), [unitOptions]);
   const conversionSelectOptions = useMemo(
     () => [{ value: "", label: "—" }, ...conversionUnitOptions.map((u) => ({ value: u, label: u }))],
     [conversionUnitOptions]
@@ -275,14 +288,12 @@ export default function Products() {
     () => productRoleOptions.map((r) => ({ value: r.value, label: r.label })),
     [productRoleOptions]
   );
-  const tvaSelectOptions = useMemo(
-    () => vatOptions.map((rate) => ({ value: rate, label: `${rate}%` })),
-    [vatOptions]
-  );
+  const tvaSelectOptions = useMemo(() => vatOptions.map((rate) => ({ value: rate, label: `${rate}%` })), [vatOptions]);
   const containerStatusOptions = [
     { value: "SEALED", label: "Non entamé" },
     { value: "OPENED", label: "Entamé" },
   ];
+
   const pdfFieldOptions = useMemo(() => {
     const options = [];
     if (barcodeEnabled) options.push({ key: "barcode", label: "Code-barres" });
@@ -313,6 +324,7 @@ export default function Products() {
     supplierLabel,
     currencyText,
   ]);
+
   const pdfDefaultFields = useMemo(() => {
     const base = [];
     if (barcodeEnabled) base.push("barcode");
@@ -320,6 +332,7 @@ export default function Products() {
     base.push("unit");
     return base;
   }, [barcodeEnabled, skuEnabled]);
+
   const templateOptions = useMemo(
     () => [
       { value: "classic", label: "Classique" },
@@ -333,7 +346,6 @@ export default function Products() {
     if (!serviceId) return;
     setLoading(true);
     setErr("");
-
     try {
       if (isAllServices) {
         const calls = services.map((s) =>
@@ -349,7 +361,7 @@ export default function Products() {
         const res = await api.get(`/api/products/?service=${serviceId}`);
         setItems(Array.isArray(res.data) ? res.data : []);
       }
-    } catch (e) {
+    } catch {
       setErr("Impossible de charger la liste. Vérifiez votre connexion et vos droits.");
       setItems([]);
     } finally {
@@ -371,7 +383,7 @@ export default function Products() {
       try {
         const res = await api.get(`/api/categories/?service=${serviceId}`);
         setCategories(Array.isArray(res.data) ? res.data : []);
-      } catch (e) {
+      } catch {
         setCategories([]);
       }
     };
@@ -407,6 +419,7 @@ export default function Products() {
     });
   }, [pdfFieldOptions, pdfDefaultFields]);
 
+  // --- ✅ IMPORTANT : Live sync par défaut (si tu utilises la recherche produits, on pré-remplit le filtre PDF)
   useEffect(() => {
     if (!pdfQuery && search) setPdfQuery(search);
   }, [search, pdfQuery]);
@@ -524,6 +537,7 @@ export default function Products() {
       }
       if (lotEnabled) payload.lot_number = form.lot_number || null;
       if (dlcEnabled) payload.dlc = form.dlc || null;
+
       if (openEnabled) {
         payload.container_status = form.container_status || "SEALED";
         payload.pack_size = form.pack_size || null;
@@ -557,25 +571,17 @@ export default function Products() {
       else res = await api.post("/api/products/", payload);
 
       const warnings = res?.data?.warnings || [];
-      const generatedSku =
-        !editId && skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
+      const generatedSku = !editId && skuEnabled && !cleanedSku && res?.data?.internal_sku ? res.data.internal_sku : "";
       if (warnings.length) pushToast?.({ message: warnings.join(" "), type: "warn" });
       else {
-        pushToast?.({
-          message: editId ? `${itemLabel} mis à jour.` : `${itemLabel} ajouté.`,
-          type: "success",
-        });
+        pushToast?.({ message: editId ? `${itemLabel} mis à jour.` : `${itemLabel} ajouté.`, type: "success" });
       }
-      if (generatedSku) {
-        pushToast?.({ message: `SKU généré : ${generatedSku} (modifiable).`, type: "info" });
-      }
+      if (generatedSku) pushToast?.({ message: `SKU généré : ${generatedSku} (modifiable).`, type: "info" });
 
       resetForm();
-      if (keepOpen && !editId) {
-        setDrawerOpen(true);
-      } else {
-        setDrawerOpen(false);
-      }
+      if (keepOpen && !editId) setDrawerOpen(true);
+      else setDrawerOpen(false);
+
       await load();
     } catch (e2) {
       const apiMsg =
@@ -592,9 +598,7 @@ export default function Products() {
 
   const deleteProduct = async () => {
     if (!editId) return;
-    const confirmDelete = window.confirm(
-      "Supprimer ce produit ? Il sera archivé et pourra être restauré par support si besoin."
-    );
+    const confirmDelete = window.confirm("Supprimer ce produit ? Il sera archivé et pourra être restauré par support si besoin.");
     if (!confirmDelete) return;
 
     setDeleteLoading(true);
@@ -604,7 +608,7 @@ export default function Products() {
       setDrawerOpen(false);
       resetForm();
       await load();
-    } catch (error) {
+    } catch {
       pushToast?.({ message: "Suppression impossible. Vérifiez vos droits.", type: "error" });
     } finally {
       setDeleteLoading(false);
@@ -658,9 +662,7 @@ export default function Products() {
       if (pdfLogo) {
         const formData = new FormData();
         formData.append("logo", pdfLogo);
-        for (const [key, value] of params.entries()) {
-          formData.append(key, value);
-        }
+        for (const [key, value] of params.entries()) formData.append(key, value);
         res = await api.post("/api/catalog/pdf/", formData, {
           headers: { "Content-Type": "multipart/form-data" },
           responseType: "blob",
@@ -668,10 +670,8 @@ export default function Products() {
       } else {
         res = await api.get(`/api/catalog/pdf/?${params.toString()}`, { responseType: "blob" });
       }
-      const filename = parseFilenameFromContentDisposition(
-        res?.headers?.["content-disposition"],
-        "stockscan_catalogue.pdf"
-      );
+
+      const filename = parseFilenameFromContentDisposition(res?.headers?.["content-disposition"], "stockscan_catalogue.pdf");
       downloadBlob({ blob: res.data, filename });
       pushToast?.({ message: "Catalogue PDF généré.", type: "success" });
     } catch (e) {
@@ -717,41 +717,38 @@ export default function Products() {
 
   const pdfEffectiveService = pdfService || serviceId;
 
+  // ✅ Preview live (client-side) : ça rend la recherche “catalogue” instantanée
   const pdfPreviewItems = useMemo(() => {
-      const q = (pdfQuery || "").trim().toLowerCase();
-      const cat = (pdfCategory || "").trim().toLowerCase();
+    const q = (pdfQuery || "").trim().toLowerCase();
+    const cat = (pdfCategory || "").trim().toLowerCase();
 
-      return catalogItems
-        .filter((p) => {
-          
-          if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
-            if (String(p.service) !== String(pdfEffectiveService)) return false;
+    return catalogItems
+      .filter((p) => {
+        if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
+          if (String(p.service) !== String(pdfEffectiveService)) return false;
+        }
+
+        if (cat) {
+          const pc = String(p.category || "").toLowerCase();
+          if (categories.length > 0 && pdfEffectiveService !== "all") {
+            if (pc !== cat) return false;
+          } else {
+            if (!pc.includes(cat)) return false;
           }
+        }
 
-          
-          if (cat) {
-            const pc = String(p.category || "").toLowerCase();
-            
-            if (categories.length > 0 && pdfEffectiveService !== "all") {
-              if (pc !== cat) return false;
-            } else {
-              if (!pc.includes(cat)) return false;
-            }
-          }
-
-        
-          if (!q) return true;
-          return (
-            p.name?.toLowerCase().includes(q) ||
-            p.barcode?.toLowerCase().includes(q) ||
-            p.internal_sku?.toLowerCase().includes(q) ||
-            p.brand?.toLowerCase().includes(q) ||
-            p.supplier?.toLowerCase().includes(q) ||
-            p.notes?.toLowerCase().includes(q)
-          );
-        })
-        .slice(0, 8); 
-    }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
+        if (!q) return true;
+        return (
+          p.name?.toLowerCase().includes(q) ||
+          p.barcode?.toLowerCase().includes(q) ||
+          p.internal_sku?.toLowerCase().includes(q) ||
+          p.brand?.toLowerCase().includes(q) ||
+          p.supplier?.toLowerCase().includes(q) ||
+          p.notes?.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 8);
+  }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
 
   const pdfPreviewCount = useMemo(() => {
     const q = (pdfQuery || "").trim().toLowerCase();
@@ -838,20 +835,22 @@ export default function Products() {
     const code = normalizeScannedCode(raw);
     if (!code) return;
 
-    setSearch(code);
-
-    if (barcodeEnabled) {
+    // ✅ injection selon target
+    if (scanTarget === "pdfQuery") {
+      setPdfQuery(code);
+      pushToast?.({ message: `Scan → filtre catalogue : ${code}`, type: "success" });
+    } else if (scanTarget === "barcode") {
       setForm((p) => ({ ...p, barcode: code }));
-      window.setTimeout(() => {
-        try {
-          barcodeInputRef.current?.focus?.();
-        } catch (_) {}
-      }, 50);
+      pushToast?.({ message: `Scan → code-barres : ${code}`, type: "success" });
+      window.setTimeout(() => barcodeInputRef.current?.focus?.(), 50);
+    } else if (scanTarget === "sku") {
+      setForm((p) => ({ ...p, internal_sku: code }));
+      pushToast?.({ message: `Scan → SKU : ${code}`, type: "success" });
     } else {
-      if (skuEnabled) setForm((p) => ({ ...p, internal_sku: code }));
+      setSearch(code);
+      pushToast?.({ message: `Scan → recherche : ${code}`, type: "success" });
+      window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
     }
-
-    pushToast?.({ message: `Scan détecté : ${code}`, type: "success" });
 
     window.setTimeout(() => {
       try {
@@ -877,7 +876,7 @@ export default function Products() {
           return;
         }
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
 
@@ -925,13 +924,9 @@ export default function Products() {
       setScanLoading(false);
 
       const name = e?.name || "";
-      if (name === "NotAllowedError") {
-        setScanErr("Permission caméra refusée. Autorisez la caméra puis réessayez.");
-      } else if (name === "NotFoundError") {
-        setScanErr("Aucune caméra détectée sur cet appareil.");
-      } else {
-        setScanErr("Impossible de démarrer la caméra. Réessayez ou utilisez la saisie manuelle.");
-      }
+      if (name === "NotAllowedError") setScanErr("Permission caméra refusée. Autorisez la caméra puis réessayez.");
+      else if (name === "NotFoundError") setScanErr("Aucune caméra détectée sur cet appareil.");
+      else setScanErr("Impossible de démarrer la caméra. Réessayez ou utilisez la saisie manuelle.");
     }
   };
 
@@ -941,10 +936,14 @@ export default function Products() {
       return;
     }
     startScanner();
-
     return () => stopScanner();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanOpen]);
+
+  const openScannerFor = (target) => {
+    setScanTarget(target);
+    setScanOpen(true);
+  };
 
   // ---------------------------------------
 
@@ -994,11 +993,10 @@ export default function Products() {
                 </div>
               ) : (
                 <div className="text-xs text-[var(--muted)]">
-                  Astuce : place le code-barres dans le cadre, bien éclairé. Le scan se fait automatiquement.
+                  Place le code-barres dans le cadre. Le scan se fait automatiquement.
                 </div>
               )}
 
-              {/* fallback manuel */}
               <div className="grid gap-2">
                 <Input
                   label="Ou saisir le code manuellement"
@@ -1027,7 +1025,7 @@ export default function Products() {
 
               {!isBarcodeDetectorSupported() && (
                 <div className="text-xs text-[var(--muted)]">
-                  Note : sur iPhone Safari, le scan caméra peut ne pas être supporté. (Android Chrome = OK)
+                  Note : sur iPhone Safari, le scan caméra peut ne pas être supporté.
                 </div>
               )}
             </div>
@@ -1036,6 +1034,7 @@ export default function Products() {
       )}
 
       <div className="space-y-4">
+        {/* Intro claire */}
         <Card className="p-6 space-y-2">
           <div className="text-sm text-[var(--muted)]">{wording.itemPlural}</div>
           <h1 className="text-2xl font-black text-[var(--text)]">{ux.productsTitle}</h1>
@@ -1043,9 +1042,23 @@ export default function Products() {
           <div className="text-xs text-[var(--muted)]">{catalogueNote}</div>
         </Card>
 
-        <Card className="p-6 space-y-4">
-          <div className="flex flex-wrap gap-3 items-end justify-between">
-            <div className="grid md:grid-cols-2 gap-3 items-end min-w-0 flex-1">
+        {/* ✅ PRODUITS : recherche + liste + CRUD */}
+        <Card className="p-6 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold text-[var(--text)]">Produits</div>
+              <div className="text-xs text-[var(--muted)]">
+                Recherche / modification / création. (Le Catalogue PDF est plus bas)
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={load} loading={loading}>Rafraîchir</Button>
+              <Button onClick={openNewProduct} disabled={isAllServices}>Nouveau produit</Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3 items-end">
+            <div className="min-w-[220px] flex-1">
               {services?.length > 0 && (
                 <Select
                   label="Service"
@@ -1057,9 +1070,11 @@ export default function Products() {
                   ]}
                 />
               )}
+            </div>
 
+            <div className="min-w-[220px] flex-[2]">
               <Input
-                label="Recherche"
+                label="Recherche produit"
                 placeholder={ux.searchHint}
                 value={search}
                 inputRef={searchInputRef}
@@ -1068,42 +1083,23 @@ export default function Products() {
                   if (err) setErr("");
                 }}
                 rightSlot={
-                  barcodeEnabled ? (
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
-                      onClick={() => setScanOpen(true)}
-                      title="Scanner un code-barres"
-                    >
-                      <ScanLine className="inline-flex items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--accent)]/10
-           p-2 sm:px-2 sm:py-1 sm:rounded-full sm:text-xs sm:font-semibold sm:gap-1" />
-                      <span className="hidden sm:inline">Scanner</span>
-                    </button>
-                  ) : null
+                  barcodeEnabled ? <ScannerButton onClick={() => openScannerFor("search")} label="Scanner (recherche)" /> : null
                 }
               />
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={load} loading={loading}>
-                Rafraîchir
-              </Button>
-              <Button
-                variant="secondary"
-                type="button"
-                onClick={() => {
-                  setSearch("");
-                  pushToast?.({ message: "Recherche réinitialisée.", type: "info" });
-                  window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
-                }}
-                disabled={loading}
-              >
-                Réinitialiser
-              </Button>
-              <Button onClick={openNewProduct} disabled={isAllServices}>
-                Nouveau produit
-              </Button>
-            </div>
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => {
+                setSearch("");
+                pushToast?.({ message: "Recherche réinitialisée.", type: "info" });
+                window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
+              }}
+              disabled={loading}
+            >
+              Réinitialiser
+            </Button>
           </div>
 
           {isAllServices && (
@@ -1111,7 +1107,6 @@ export default function Products() {
               Mode lecture multi-services : sélectionnez un service précis pour ajouter ou modifier.
             </div>
           )}
-
           {err && <div className="text-sm text-red-700 dark:text-red-200">{err}</div>}
         </Card>
 
@@ -1122,12 +1117,8 @@ export default function Products() {
               <div className="text-lg font-semibold text-[var(--text)]">{filteredItems.length} élément(s)</div>
             </div>
             <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-              <span>
-                Page {page} / {totalPages}
-              </span>
-              <span>
-                Affichage {paginatedItems.length} / {filteredItems.length}
-              </span>
+              <span>Page {page} / {totalPages}</span>
+              <span>Affichage {paginatedItems.length} / {filteredItems.length}</span>
             </div>
           </div>
 
@@ -1193,10 +1184,7 @@ export default function Products() {
 
                   <tbody>
                     {paginatedItems.map((p, idx) => (
-                      <tr
-                        key={p.id}
-                        className={idx % 2 === 0 ? "bg-[var(--surface)]" : "bg-[var(--accent)]/10"}
-                      >
+                      <tr key={p.id} className={idx % 2 === 0 ? "bg-[var(--surface)]" : "bg-[var(--accent)]/10"}>
                         <td className="px-4 py-3">
                           <div className="font-semibold text-[var(--text)]">{p.name}</div>
                           {p.product_role && (
@@ -1237,11 +1225,7 @@ export default function Products() {
                         {(purchaseEnabled || sellingEnabled) && (
                           <td className="px-4 py-3 text-[var(--muted)]">
                             <div className="space-y-1">
-                              {purchaseEnabled && (
-                                <div>
-                                  Achat: {formatCurrency(p.purchase_price, currencyCode)}
-                                </div>
-                              )}
+                              {purchaseEnabled && <div>Achat: {formatCurrency(p.purchase_price, currencyCode)}</div>}
                               {sellingEnabled && (
                                 <div className="text-xs text-[var(--muted)]">
                                   Vente: {formatCurrency(p.selling_price, currencyCode)}
@@ -1271,26 +1255,17 @@ export default function Products() {
 
           {filteredItems.length > PAGE_SIZE && (
             <div className="flex items-center justify-end gap-2 text-sm text-[var(--muted)]">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                disabled={page === 1}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
                 ← Précédent
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                disabled={page === totalPages}
-              >
+              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
                 Suivant →
               </Button>
             </div>
           )}
         </Card>
 
+        {/* ✅ CATALOGUE PDF : section claire + live preview */}
         <CatalogPdfSection
           canPdfCatalog={canPdfCatalog}
           pdfLimit={pdfLimit}
@@ -1300,6 +1275,8 @@ export default function Products() {
           pdfServiceOptions={pdfServiceOptions}
           pdfQuery={pdfQuery}
           setPdfQuery={setPdfQuery}
+          pdfPreviewItems={pdfPreviewItems}
+          pdfPreviewCount={pdfPreviewCount}
           categories={categories}
           pdfCategory={pdfCategory}
           setPdfCategory={setPdfCategory}
@@ -1323,8 +1300,12 @@ export default function Products() {
             setPdfError("");
             setPdfErrorCode("");
           }}
+          // ✅ bouton scanner "vrai icon"
+          onOpenScanner={() => openScannerFor("pdfQuery")}
+          barcodeEnabled={barcodeEnabled}
         />
 
+        {/* Drawer ajout/modif produit */}
         <Drawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1343,12 +1324,7 @@ export default function Products() {
                   Annuler
                 </Button>
                 {!isEditing && (
-                  <Button
-                    variant="secondary"
-                    type="button"
-                    onClick={() => submit(null, { keepOpen: true })}
-                    disabled={isAllServices}
-                  >
+                  <Button variant="secondary" type="button" onClick={() => submit(null, { keepOpen: true })} disabled={isAllServices}>
                     Enregistrer + nouveau
                   </Button>
                 )}
@@ -1402,18 +1378,7 @@ export default function Products() {
                   inputRef={barcodeInputRef}
                   onChange={(e) => setForm((p) => ({ ...p, barcode: e.target.value }))}
                   helper={helpers.barcode}
-                  rightSlot={
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-[var(--text)] px-2 py-1 rounded-full border border-[var(--border)] hover:bg-[var(--accent)]/10 inline-flex items-center gap-1"
-                      onClick={() => setScanOpen(true)}
-                      title="Scanner un code-barres"
-                    >
-                      <ScanLine className="inline-flex items-center justify-center rounded-full border border-[var(--border)] text-[var(--text)] hover:bg-[var(--accent)]/10
-           p-2 sm:px-2 sm:py-1 sm:rounded-full sm:text-xs sm:font-semibold sm:gap-1" />
-                      <span className="hidden sm:inline">Scanner</span>
-                    </button>
-                  }
+                  rightSlot={<ScannerButton onClick={() => openScannerFor("barcode")} label="Scanner (code-barres)" />}
                 />
               )}
 
@@ -1424,6 +1389,9 @@ export default function Products() {
                   value={form.internal_sku}
                   onChange={(e) => setForm((p) => ({ ...p, internal_sku: e.target.value }))}
                   helper={!form.barcode && !form.internal_sku ? helpers.sku : "Optionnel"}
+                  rightSlot={
+                    barcodeEnabled ? <ScannerButton onClick={() => openScannerFor("sku")} label="Scanner (SKU)" /> : null
+                  }
                 />
               )}
 

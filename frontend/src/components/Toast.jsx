@@ -19,7 +19,7 @@ export default function Toasts() {
     <AnimatePresence>
       {toast ? (
         <motion.div
-          className="fixed bottom-4 left-0 right-0 z-50 px-4"
+          className="fixed bottom-4 left-0 right-0 z-[250] px-4"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 10 }}
