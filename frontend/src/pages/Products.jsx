@@ -105,24 +105,51 @@ function TemplateCard({ active, title, meta, onSelect }) {
       type="button"
       onClick={onSelect}
       className={[
-        "w-full text-left rounded-2xl border p-3 transition",
-        active ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/20" : "border-[var(--border)] hover:bg-black/5 dark:hover:bg-white/10",
+        "group relative w-full text-left rounded-2xl border p-3 transition-all",
+        "hover:-translate-y-0.5 hover:shadow-lg",
+        active
+          ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/25"
+          : "border-[var(--border)] hover:bg-black/5 dark:hover:bg-white/10",
       ].join(" ")}
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-[var(--text)] truncate">{title}</div>
-          <div className="text-xs text-[var(--muted)]">Aperçu des couleurs</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold text-[var(--text)] truncate">{title}</div>
+
+            {meta?.badge ? (
+              <span
+                className={[
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border",
+                  active
+                    ? "border-[var(--primary)]/40 text-[var(--text)] bg-[var(--primary)]/10"
+                    : "border-[var(--border)] text-[var(--muted)] bg-black/5 dark:bg-white/10",
+                ].join(" ")}
+              >
+                {meta.badge}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="text-xs text-[var(--muted)] mt-0.5">{meta?.hint || "Aperçu des couleurs"}</div>
         </div>
 
-        {/* palette swatches */}
+        {/* Selected check */}
+        <div
+          className={[
+            "h-6 w-6 rounded-full border flex items-center justify-center transition",
+            active ? "border-[var(--primary)] bg-[var(--primary)]/10" : "border-[var(--border)]",
+          ].join(" ")}
+          aria-hidden="true"
+        >
+          {active ? <span className="text-xs font-black text-[var(--text)]">✓</span> : null}
+        </div>
+      </div>
+
+      {/* palette */}
+      <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
-          {[
-            meta.bg,
-            meta.surface,
-            meta.primary,
-            meta.accent,
-          ].map((c, idx) => (
+          {[meta.bg, meta.surface, meta.primary, meta.accent].map((c, idx) => (
             <span
               key={idx}
               className="h-4 w-4 rounded-full border border-black/10 dark:border-white/10"
@@ -131,26 +158,46 @@ function TemplateCard({ active, title, meta, onSelect }) {
             />
           ))}
         </div>
+
+        {/* tiny indicator bar */}
+        <div className="h-2 w-20 rounded-full border border-black/10 dark:border-white/10 overflow-hidden">
+          <div className="h-full w-1/2" style={{ background: meta.primary }} />
+        </div>
       </div>
 
-      {/* mini mock header */}
-      <div
-        className="mt-3 rounded-xl border overflow-hidden"
-        style={{ borderColor: "rgba(0,0,0,0.08)" }}
-      >
-        <div
-          className="px-3 py-2 text-xs font-semibold"
-          style={{ background: meta.primary, color: meta.bg }}
-        >
+      {/* mini mock */}
+      <div className="mt-3 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
+        <div className="px-3 py-2 text-xs font-semibold" style={{ background: meta.primary, color: meta.bg }}>
           Catalogue PDF
         </div>
-        <div className="px-3 py-2" style={{ background: meta.surface, color: meta.text }}>
-          <div className="text-xs" style={{ color: meta.muted }}>
-            Références · Prix · TVA
+
+        <div className="px-3 py-2 space-y-2" style={{ background: meta.surface, color: meta.text }}>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px]" style={{ color: meta.muted }}>
+              Références
+            </span>
+            <span className="text-[11px]" style={{ color: meta.muted }}>
+              Prix
+            </span>
           </div>
-          <div className="mt-1 h-2 rounded" style={{ background: meta.accent }} />
+
+          <div className="h-2 rounded" style={{ background: meta.accent }} />
+          <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.75 }} />
+          <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.55 }} />
         </div>
       </div>
+
+      {/* subtle glow */}
+      <div
+        className={[
+          "pointer-events-none absolute opacity-0 group-hover:opacity-100 transition-opacity",
+          "inset-0 rounded-2xl",
+        ].join(" ")}
+        style={{
+          boxShadow: active ? "none" : `0 0 0 1px ${meta.primary}22, 0 12px 40px ${meta.primary}14`,
+        }}
+        aria-hidden="true"
+      />
     </button>
   );
 }
@@ -420,39 +467,43 @@ export default function Products() {
     []
   );
   const templateMeta = useMemo(
-    () => ({
-      classic: {
-        name: "Classique",
-        // preview palette
-        bg: "#ffffff",
-        surface: "#f5f5f5",
-        text: "#111827",
-        muted: "#6b7280",
-        primary: "#111827",
-        accent: "#e5e7eb",
-      },
-      midnight: {
-        name: "Minuit",
-        bg: "#0b1220",
-        surface: "#111a2e",
-        text: "#e5e7eb",
-        muted: "#94a3b8",
-        primary: "#60a5fa",
-        accent: "#1f2a44",
-      },
-      emerald: {
-        name: "Émeraude",
-        bg: "#07130f",
-        surface: "#0b1f17",
-        text: "#e7f7ef",
-        muted: "#93c5aa",
-        primary: "#34d399",
-        accent: "#123326",
-      },
-    }),
-    []
-  );
-
+  () => ({
+    classic: {
+      name: "Classique",
+      badge: "Recommandé",
+      hint: "Propre & lisible",
+      bg: "#ffffff",
+      surface: "#f5f5f5",
+      text: "#111827",
+      muted: "#6b7280",
+      primary: "#111827",
+      accent: "#e5e7eb",
+    },
+    midnight: {
+      name: "Minuit",
+      badge: "Nocturne",
+      hint: "Contraste premium",
+      bg: "#0b1220",
+      surface: "#111a2e",
+      text: "#e5e7eb",
+      muted: "#94a3b8",
+      primary: "#60a5fa",
+      accent: "#1f2a44",
+    },
+    emerald: {
+      name: "Émeraude",
+      badge: "Nouveau",
+      hint: "Signature élégante",
+      bg: "#07130f",
+      surface: "#0b1f17",
+      text: "#e7f7ef",
+      muted: "#93c5aa",
+      primary: "#34d399",
+      accent: "#123326",
+    },
+  }),
+  []
+);
   const togglePdfField = (key) => {
     setPdfFields((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
@@ -1076,7 +1127,7 @@ export default function Products() {
       const params = new URLSearchParams();
       params.set("service", selection.effectiveService);
 
-      // ✅ Selection by IDs (custom mode) — may need backend support
+      // Selection by IDs (custom mode) — may need backend support
       if (selection.mode === "ids") {
         if (selection.ids?.length) params.set("ids", selection.ids.join(","));
       } else {
@@ -1110,7 +1161,7 @@ export default function Products() {
       downloadBlob({ blob: res.data, filename });
       pushToast?.({ message: "Catalogue PDF généré.", type: "success" });
     } catch (e) {
-      // ✅ Fallback: if backend rejects ids=..., retry without ids
+      // Fallback: if backend rejects ids=..., retry without ids
       const payload = await blobToJsonSafe(e?.response?.data);
       const detail = payload?.detail || e?.response?.data?.detail;
       const msg = getPdfErrorMessage({ code: payload?.code, detail, message: e?.message });
@@ -1516,7 +1567,7 @@ export default function Products() {
           )}
         </Card>
 
-        {/* ✅ Catalogue PDF Drawer */}
+        {/* Catalogue PDF Drawer */}
         <Drawer
           open={catalogDrawerOpen}
           onClose={() => setCatalogDrawerOpen(false)}
@@ -1753,6 +1804,12 @@ export default function Products() {
                     onSelect={() => setPdfTemplate(opt.value)}
                   />
                 ))}
+              </div>
+              <div className="text-xs text-[var(--muted)]">
+                Template sélectionné :{" "}
+                <span className="font-semibold text-[var(--text)]">
+                  {templateMeta[pdfTemplate]?.name || pdfTemplate}
+                </span>
               </div>
 
               {/* Logo */}
