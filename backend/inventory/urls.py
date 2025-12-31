@@ -19,6 +19,7 @@ from products.views import (
     labels_pdf,
     home,
     alerts,
+    catalog_templates,
     search_products,
     lookup_product,
     product_duplicates,
@@ -67,6 +68,7 @@ urlpatterns = [
     path("api/alerts/", alerts),
 
     path("api/products/lookup/", lookup_product),
+    path("catalog/templates/", catalog_templates, name="catalog_templates"),
     path("api/products/search/", search_products),
     path("api/products/duplicates/", product_duplicates),
     path("api/products/merge/", merge_products),

@@ -92,9 +92,36 @@ RECEIPTS_OCR_TIMEOUT_DEFAULT = 25
 RECEIPTS_OCR_CACHE_TTL_DEFAULT = 60 * 60 * 24  # 24h
 DUPLICATE_NAME_SIMILARITY = 0.985
 CATALOG_TEMPLATES = {
-    "classic": {"accent": "#1E3A8A", "muted": "#475569"},
+   
+    "classic":  {"accent": "#1E3A8A", "muted": "#475569"},
     "midnight": {"accent": "#0F172A", "muted": "#334155"},
-    "emerald": {"accent": "#047857", "muted": "#475569"},
+    "emerald":  {"accent": "#047857", "muted": "#475569"},
+
+    # nouveaux templates (premium + variés)
+    "royal":    {"accent": "#4F46E5", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "sunset":   {"accent": "#F97316", "muted": "#7C2D12", "header_bg": "#111827", "header_text": "#FFFFFF"},
+    "rose":     {"accent": "#E11D48", "muted": "#64748B", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "ocean":    {"accent": "#0284C7", "muted": "#475569", "header_bg": "#082F49", "header_text": "#FFFFFF"},
+    "lime":     {"accent": "#65A30D", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "amber":    {"accent": "#D97706", "muted": "#475569", "header_bg": "#111827", "header_text": "#FFFFFF"},
+    "violet":   {"accent": "#7C3AED", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "copper":   {"accent": "#B45309", "muted": "#57534E", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+
+    # sobres / industries
+    "slate":    {"accent": "#334155", "muted": "#475569", "header_bg": "#0F172A", "header_text": "#FFFFFF"},
+    "graphite": {"accent": "#111827", "muted": "#6B7280", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "sand":     {"accent": "#A16207", "muted": "#57534E", "header_bg": "#1C1917", "header_text": "#FFFFFF"},
+    "ink":      {"accent": "#0EA5E9", "muted": "#64748B", "header_bg": "#020617", "header_text": "#FFFFFF"},
+
+    # beauty / luxe
+    "champagne":{"accent": "#C8A97E", "muted": "#6B7280", "header_bg": "#111827", "header_text": "#FFFFFF"},
+    "noir_gold":{"accent": "#D4AF37", "muted": "#9CA3AF", "header_bg": "#050505", "header_text": "#FFFFFF"},
+    "plum":     {"accent": "#6D28D9", "muted": "#6B7280", "header_bg": "#1F2937", "header_text": "#FFFFFF"},
+
+    # nature / bio
+    "forest":   {"accent": "#166534", "muted": "#475569", "header_bg": "#052E16", "header_text": "#FFFFFF"},
+    "mint":     {"accent": "#10B981", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
+    "earth":    {"accent": "#92400E", "muted": "#57534E", "header_bg": "#1C1917", "header_text": "#FFFFFF"},
 }
 NAME_STOPWORDS = {
     "produit",
@@ -628,8 +655,13 @@ def _build_catalog_pdf(
     width, height = A4
 
     theme = CATALOG_TEMPLATES.get((template or "").lower(), CATALOG_TEMPLATES["classic"])
-    accent = HexColor(theme["accent"])
-    muted = HexColor(theme["muted"])
+
+    accent = HexColor(theme.get("accent", "#1E3A8A"))
+    muted = HexColor(theme.get("muted", "#475569"))
+
+    header_bg = HexColor(theme.get("header_bg", "#0B1220"))      
+    header_text = HexColor(theme.get("header_text", "#FFFFFF")) 
+
     ink = HexColor("#0F172A")
     paper = HexColor("#FFFFFF")
     soft = HexColor("#F1F5F9")
@@ -640,7 +672,7 @@ def _build_catalog_pdf(
 
     def draw_top_header(title_left=None):
         # Dark premium bar
-        c.setFillColor(HexColor("#0B1220"))
+        c.setFillColor(header_bg)
         c.rect(0, height - top_header_h, width, top_header_h, fill=1, stroke=0)
 
         # Accent line
@@ -652,7 +684,7 @@ def _build_catalog_pdf(
             _draw_circle_logo(c, logo_bytes, margin_x, height - top_header_h + 0.35 * cm, 1.5 * cm)
 
         # Company name
-        c.setFillColor(paper)
+        c.setFillColor(header_text)
         c.setFont("Helvetica-Bold", 14)
         name_x = margin_x + (1.75 * cm if logo_bytes else 0)
         c.drawString(name_x, height - 1.35 * cm, _truncate_text(c, company_name or tenant.name or "StockScan", "Helvetica-Bold", 14, width - name_x - margin_x))
@@ -660,12 +692,12 @@ def _build_catalog_pdf(
         # subtitle
         c.setFont("Helvetica", 9.5)
         subtitle = title_left or "Catalogue produits"
-        c.setFillColor(HexColor("#CBD5E1"))
+        c.setFillColor(HexColor(theme.get("header_subtext", "#CBD5E1")))
         c.drawString(name_x, height - 1.90 * cm, _truncate_text(c, subtitle, "Helvetica", 9.5, width - name_x - margin_x))
 
         # date right
         c.setFont("Helvetica", 9.5)
-        c.setFillColor(HexColor("#CBD5E1"))
+        c.setFillColor(HexColor(theme.get("header_subtext", "#CBD5E1")))
         c.drawRightString(width - margin_x, height - 1.85 * cm, timezone.now().strftime("%d/%m/%Y"))
 
     def draw_cover():
@@ -2124,7 +2156,17 @@ def catalog_pdf(request):
     resp["Content-Disposition"] = 'attachment; filename="stockscan_catalogue.pdf"'
     return resp
 
-
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated, ManagerPermission])
+def catalog_templates(request):
+    return Response(
+        {
+            "templates": [
+                {"key": k, "accent": v.get("accent"), "header_bg": v.get("header_bg")}
+                for k, v in sorted(CATALOG_TEMPLATES.items())
+            ]
+        }
+    )
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated, ProductPermission])
 def search_products(request):
