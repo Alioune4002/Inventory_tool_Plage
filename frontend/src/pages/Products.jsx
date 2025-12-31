@@ -1,3 +1,4 @@
+// frontend/src/pages/Products.jsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import PageTransition from "../components/PageTransition";
@@ -86,16 +87,22 @@ function getPdfErrorMessage(error) {
   return error?.message || "Impossible de générer le catalogue PDF. Réessaie dans un instant.";
 }
 
-function ScannerButton({ onClick, label = "Scanner" }) {
+function ScanButton({ onClick, className = "", label = "Scanner", title = "Scanner un code-barres" }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center justify-center rounded-full border border-[var(--border)] p-2 text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
-      title={label}
-      aria-label={label}
+      title={title}
+      aria-label={title}
+      className={[
+        "inline-flex items-center gap-2 rounded-full border border-[var(--border)]",
+        "px-3 py-2 text-sm font-semibold text-[var(--text)]",
+        "hover:bg-[var(--accent)]/10 active:scale-[0.99]",
+        className,
+      ].join(" ")}
     >
       <ScanLine className="h-4 w-4" />
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
@@ -156,10 +163,9 @@ export default function Products() {
   const [scanLoading, setScanLoading] = useState(false);
   const [scanManual, setScanManual] = useState("");
 
-  // 👇 Nouveau : où injecter le scan
-  const [scanTarget, setScanTarget] = useState("search"); // "search" | "pdfQuery" | "barcode" | "sku"
-
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // PDF state
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState("");
   const [pdfErrorCode, setPdfErrorCode] = useState("");
@@ -176,11 +182,13 @@ export default function Products() {
   const [pdfTemplate, setPdfTemplate] = useState("classic");
   const [pdfLogo, setPdfLogo] = useState(null);
 
+  // ✅ catalogue selection state (composer)
+  const [catalogSelectedIds, setCatalogSelectedIds] = useState([]); // ids sélectionnés pour le PDF
+
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const rafRef = useRef(null);
   const detectorRef = useRef(null);
-
   const resultsRef = useRef(null);
 
   const isAllServices = services?.length > 1 && String(serviceId) === "all";
@@ -266,19 +274,19 @@ export default function Products() {
   const showUnit = multiUnitEnabled || countingMode !== "unit";
   const readableServiceName = (id) => services?.find((s) => String(s.id) === String(id))?.name || id;
   const isEditing = Boolean(editId);
-  const serviceOptions = useMemo(
-    () => (services || []).map((s) => ({ value: s.id, label: s.name })),
-    [services]
-  );
+  const serviceOptions = useMemo(() => (services || []).map((s) => ({ value: s.id, label: s.name })), [services]);
+
   const pdfServiceOptions = useMemo(() => {
     const base = (services || []).map((s) => ({ value: s.id, label: s.name }));
     if (services?.length > 1) base.push({ value: "all", label: "Tous les services" });
     return base;
   }, [services]);
+
   const categoryOptions = useMemo(() => {
     if (!categories.length) return [];
     return [{ value: "", label: "Aucune" }, ...categories.map((c) => ({ value: c.name, label: c.name }))];
   }, [categories]);
+
   const unitSelectOptions = useMemo(() => unitOptions.map((u) => ({ value: u, label: u })), [unitOptions]);
   const conversionSelectOptions = useMemo(
     () => [{ value: "", label: "—" }, ...conversionUnitOptions.map((u) => ({ value: u, label: u }))],
@@ -289,6 +297,7 @@ export default function Products() {
     [productRoleOptions]
   );
   const tvaSelectOptions = useMemo(() => vatOptions.map((rate) => ({ value: rate, label: `${rate}%` })), [vatOptions]);
+
   const containerStatusOptions = [
     { value: "SEALED", label: "Non entamé" },
     { value: "OPENED", label: "Entamé" },
@@ -419,10 +428,7 @@ export default function Products() {
     });
   }, [pdfFieldOptions, pdfDefaultFields]);
 
-  // --- ✅ IMPORTANT : Live sync par défaut (si tu utilises la recherche produits, on pré-remplit le filtre PDF)
-  useEffect(() => {
-    if (!pdfQuery && search) setPdfQuery(search);
-  }, [search, pdfQuery]);
+  // ---- Catalogue: on garde pdfQuery indépendant de search (plus clair) ----
 
   const resetForm = () => {
     setForm({
@@ -537,7 +543,6 @@ export default function Products() {
       }
       if (lotEnabled) payload.lot_number = form.lot_number || null;
       if (dlcEnabled) payload.dlc = form.dlc || null;
-
       if (openEnabled) {
         payload.container_status = form.container_status || "SEALED";
         payload.pack_size = form.pack_size || null;
@@ -619,7 +624,7 @@ export default function Products() {
     setPdfFields((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
 
-  const generateCatalogPdf = async () => {
+  const generateCatalogPdf = async ({ selectedIdsOverride } = {}) => {
     setPdfError("");
     setPdfErrorCode("");
 
@@ -638,7 +643,6 @@ export default function Products() {
       setPdfError("Sélectionnez au moins un champ à inclure.");
       return;
     }
-
     if (pdfLogo && pdfLogo.size > 2 * 1024 * 1024) {
       setPdfError("Logo trop lourd. Limitez à 2 Mo.");
       setPdfErrorCode("LOGO_TOO_LARGE");
@@ -649,9 +653,16 @@ export default function Products() {
     try {
       const params = new URLSearchParams();
       params.set("service", effectiveService);
+
+      // ✅ live filters
       if (pdfQuery.trim()) params.set("q", pdfQuery.trim());
       if (pdfCategory) params.set("category", pdfCategory);
       if (pdfFields.length) params.set("fields", pdfFields.join(","));
+
+      // ✅ selection mode (si backend ignore, pas de casse)
+      const ids = selectedIdsOverride || catalogSelectedIds;
+      if (Array.isArray(ids) && ids.length) params.set("ids", ids.join(","));
+
       if (pdfBranding.company_name) params.set("company_name", pdfBranding.company_name);
       if (pdfBranding.company_email) params.set("company_email", pdfBranding.company_email);
       if (pdfBranding.company_phone) params.set("company_phone", pdfBranding.company_phone);
@@ -687,6 +698,7 @@ export default function Products() {
     }
   };
 
+  // ✅ catalogItems (référentiel)
   const catalogItems = useMemo(() => {
     const map = new Map();
     items.forEach((item) => {
@@ -715,69 +727,6 @@ export default function Products() {
     return Array.from(map.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [items]);
 
-  const pdfEffectiveService = pdfService || serviceId;
-
-  // ✅ Preview live (client-side) : ça rend la recherche “catalogue” instantanée
-  const pdfPreviewItems = useMemo(() => {
-    const q = (pdfQuery || "").trim().toLowerCase();
-    const cat = (pdfCategory || "").trim().toLowerCase();
-
-    return catalogItems
-      .filter((p) => {
-        if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
-          if (String(p.service) !== String(pdfEffectiveService)) return false;
-        }
-
-        if (cat) {
-          const pc = String(p.category || "").toLowerCase();
-          if (categories.length > 0 && pdfEffectiveService !== "all") {
-            if (pc !== cat) return false;
-          } else {
-            if (!pc.includes(cat)) return false;
-          }
-        }
-
-        if (!q) return true;
-        return (
-          p.name?.toLowerCase().includes(q) ||
-          p.barcode?.toLowerCase().includes(q) ||
-          p.internal_sku?.toLowerCase().includes(q) ||
-          p.brand?.toLowerCase().includes(q) ||
-          p.supplier?.toLowerCase().includes(q) ||
-          p.notes?.toLowerCase().includes(q)
-        );
-      })
-      .slice(0, 8);
-  }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
-
-  const pdfPreviewCount = useMemo(() => {
-    const q = (pdfQuery || "").trim().toLowerCase();
-    const cat = (pdfCategory || "").trim().toLowerCase();
-
-    return catalogItems.filter((p) => {
-      if (pdfEffectiveService && String(pdfEffectiveService) !== "all") {
-        if (String(p.service) !== String(pdfEffectiveService)) return false;
-      }
-      if (cat) {
-        const pc = String(p.category || "").toLowerCase();
-        if (categories.length > 0 && pdfEffectiveService !== "all") {
-          if (pc !== cat) return false;
-        } else {
-          if (!pc.includes(cat)) return false;
-        }
-      }
-      if (!q) return true;
-      return (
-        p.name?.toLowerCase().includes(q) ||
-        p.barcode?.toLowerCase().includes(q) ||
-        p.internal_sku?.toLowerCase().includes(q) ||
-        p.brand?.toLowerCase().includes(q) ||
-        p.supplier?.toLowerCase().includes(q) ||
-        p.notes?.toLowerCase().includes(q)
-      );
-    }).length;
-  }, [catalogItems, pdfQuery, pdfCategory, pdfEffectiveService, categories.length]);
-
   const filteredItems = useMemo(() => {
     if (!search) return catalogItems;
     const q = search.toLowerCase();
@@ -794,6 +743,7 @@ export default function Products() {
 
   const PAGE_SIZE = 12;
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
@@ -835,22 +785,18 @@ export default function Products() {
     const code = normalizeScannedCode(raw);
     if (!code) return;
 
-    // ✅ injection selon target
-    if (scanTarget === "pdfQuery") {
-      setPdfQuery(code);
-      pushToast?.({ message: `Scan → filtre catalogue : ${code}`, type: "success" });
-    } else if (scanTarget === "barcode") {
+    // ✅ on remplit la recherche produit
+    setSearch(code);
+
+    // ✅ et si un formulaire produit est ouvert, on remplit barcode/sku
+    if (barcodeEnabled) {
       setForm((p) => ({ ...p, barcode: code }));
-      pushToast?.({ message: `Scan → code-barres : ${code}`, type: "success" });
       window.setTimeout(() => barcodeInputRef.current?.focus?.(), 50);
-    } else if (scanTarget === "sku") {
-      setForm((p) => ({ ...p, internal_sku: code }));
-      pushToast?.({ message: `Scan → SKU : ${code}`, type: "success" });
     } else {
-      setSearch(code);
-      pushToast?.({ message: `Scan → recherche : ${code}`, type: "success" });
-      window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
+      if (skuEnabled) setForm((p) => ({ ...p, internal_sku: code }));
     }
+
+    pushToast?.({ message: `Scan détecté : ${code}`, type: "success" });
 
     window.setTimeout(() => {
       try {
@@ -940,11 +886,6 @@ export default function Products() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanOpen]);
 
-  const openScannerFor = (target) => {
-    setScanTarget(target);
-    setScanOpen(true);
-  };
-
   // ---------------------------------------
 
   return (
@@ -956,7 +897,7 @@ export default function Products() {
 
       {/* Modal scanner */}
       {scanOpen && (
-        <div className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+        <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
           <div className="w-full max-w-lg rounded-2xl bg-[var(--surface)] shadow-xl overflow-hidden border border-[var(--border)]">
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
               <div className="font-semibold text-[var(--text)] flex items-center gap-2">
@@ -993,7 +934,7 @@ export default function Products() {
                 </div>
               ) : (
                 <div className="text-xs text-[var(--muted)]">
-                  Place le code-barres dans le cadre. Le scan se fait automatiquement.
+                  Place le code-barres dans le cadre (bien éclairé). Le scan se fait automatiquement.
                 </div>
               )}
 
@@ -1007,7 +948,6 @@ export default function Products() {
                 <div className="flex gap-2">
                   <Button
                     type="button"
-                    className="justify-center"
                     onClick={() => {
                       const v = normalizeScannedCode(scanManual);
                       if (!v) return setScanErr("Veuillez saisir un code valide.");
@@ -1025,7 +965,7 @@ export default function Products() {
 
               {!isBarcodeDetectorSupported() && (
                 <div className="text-xs text-[var(--muted)]">
-                  Note : sur iPhone Safari, le scan caméra peut ne pas être supporté.
+                  Note : sur iPhone Safari, le scan caméra peut ne pas être supporté (Android Chrome = OK).
                 </div>
               )}
             </div>
@@ -1034,7 +974,7 @@ export default function Products() {
       )}
 
       <div className="space-y-4">
-        {/* Intro claire */}
+        {/* Intro */}
         <Card className="p-6 space-y-2">
           <div className="text-sm text-[var(--muted)]">{wording.itemPlural}</div>
           <h1 className="text-2xl font-black text-[var(--text)]">{ux.productsTitle}</h1>
@@ -1042,23 +982,67 @@ export default function Products() {
           <div className="text-xs text-[var(--muted)]">{catalogueNote}</div>
         </Card>
 
-        {/* ✅ PRODUITS : recherche + liste + CRUD */}
+        {/* ✅ CATALOGUE SECTION (clair) */}
+        <Card className="p-6 space-y-2">
+          <div className="text-sm text-[var(--muted)]">Catalogue</div>
+          <div className="text-lg font-semibold text-[var(--text)]">Composer & générer un catalogue PDF</div>
+          <div className="text-sm text-[var(--muted)]">
+            Ici, tu choisis quels produits doivent apparaître dans le PDF (recherche live, sélection par catégorie/rayon,
+            multi-services).
+          </div>
+        </Card>
+
+        <CatalogPdfSection
+          // existing props
+          canPdfCatalog={canPdfCatalog}
+          pdfLimit={pdfLimit}
+          services={services}
+          pdfService={pdfService}
+          setPdfService={setPdfService}
+          pdfServiceOptions={pdfServiceOptions}
+          pdfQuery={pdfQuery}
+          setPdfQuery={setPdfQuery}
+          categories={categories}
+          pdfCategory={pdfCategory}
+          setPdfCategory={setPdfCategory}
+          categoryOptions={categoryOptions}
+          wording={wording}
+          pdfFieldOptions={pdfFieldOptions}
+          pdfFields={pdfFields}
+          togglePdfField={togglePdfField}
+          pdfBranding={pdfBranding}
+          setPdfBranding={setPdfBranding}
+          pdfTemplate={pdfTemplate}
+          setPdfTemplate={setPdfTemplate}
+          pdfLogo={pdfLogo}
+          setPdfLogo={setPdfLogo}
+          templateOptions={templateOptions}
+          generateCatalogPdf={generateCatalogPdf}
+          pdfLoading={pdfLoading}
+          pdfError={pdfError}
+          pdfErrorCode={pdfErrorCode}
+          clearPdfError={() => {
+            setPdfError("");
+            setPdfErrorCode("");
+          }}
+          // ✅ new props for selection + live add
+          allProducts={catalogItems}
+          catalogSelectedIds={catalogSelectedIds}
+          setCatalogSelectedIds={setCatalogSelectedIds}
+          onOpenScanner={() => setScanOpen(true)}
+        />
+
+        {/* ✅ PRODUITS SECTION (clair) */}
         <Card className="p-6 space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold text-[var(--text)]">Produits</div>
-              <div className="text-xs text-[var(--muted)]">
-                Recherche / modification / création. (Le Catalogue PDF est plus bas)
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={load} loading={loading}>Rafraîchir</Button>
-              <Button onClick={openNewProduct} disabled={isAllServices}>Nouveau produit</Button>
-            </div>
+          <div className="text-sm text-[var(--muted)]">Produits</div>
+          <div className="text-lg font-semibold text-[var(--text)]">Ajouter / modifier des produits</div>
+          <div className="text-sm text-[var(--muted)]">
+            Ici tu gères le référentiel (création, modification, prix, TVA, etc.). Ensuite tu peux les inclure dans ton
+            catalogue PDF au-dessus.
           </div>
 
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="min-w-[220px] flex-1">
+          <div className="flex flex-wrap gap-3 items-end justify-between">
+            <div className="grid md:grid-cols-2 gap-3 items-end min-w-0 flex-1">
               {services?.length > 0 && (
                 <Select
                   label="Service"
@@ -1070,11 +1054,9 @@ export default function Products() {
                   ]}
                 />
               )}
-            </div>
 
-            <div className="min-w-[220px] flex-[2]">
               <Input
-                label="Recherche produit"
+                label="Recherche produits"
                 placeholder={ux.searchHint}
                 value={search}
                 inputRef={searchInputRef}
@@ -1083,23 +1065,33 @@ export default function Products() {
                   if (err) setErr("");
                 }}
                 rightSlot={
-                  barcodeEnabled ? <ScannerButton onClick={() => openScannerFor("search")} label="Scanner (recherche)" /> : null
+                  barcodeEnabled ? (
+                    <ScanButton onClick={() => setScanOpen(true)} />
+                  ) : null
                 }
               />
             </div>
 
-            <Button
-              variant="secondary"
-              type="button"
-              onClick={() => {
-                setSearch("");
-                pushToast?.({ message: "Recherche réinitialisée.", type: "info" });
-                window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
-              }}
-              disabled={loading}
-            >
-              Réinitialiser
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={load} loading={loading}>
+                Rafraîchir
+              </Button>
+              <Button
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  pushToast?.({ message: "Recherche réinitialisée.", type: "info" });
+                  window.setTimeout(() => searchInputRef.current?.focus?.(), 50);
+                }}
+                disabled={loading}
+              >
+                Réinitialiser
+              </Button>
+              <Button onClick={openNewProduct} disabled={isAllServices}>
+                Nouveau produit
+              </Button>
+            </div>
           </div>
 
           {isAllServices && (
@@ -1107,9 +1099,11 @@ export default function Products() {
               Mode lecture multi-services : sélectionnez un service précis pour ajouter ou modifier.
             </div>
           )}
+
           {err && <div className="text-sm text-red-700 dark:text-red-200">{err}</div>}
         </Card>
 
+        {/* List */}
         <Card className="p-6 space-y-4" ref={resultsRef}>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div>
@@ -1117,8 +1111,12 @@ export default function Products() {
               <div className="text-lg font-semibold text-[var(--text)]">{filteredItems.length} élément(s)</div>
             </div>
             <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-              <span>Page {page} / {totalPages}</span>
-              <span>Affichage {paginatedItems.length} / {filteredItems.length}</span>
+              <span>
+                Page {page} / {totalPages}
+              </span>
+              <span>
+                Affichage {paginatedItems.length} / {filteredItems.length}
+              </span>
             </div>
           </div>
 
@@ -1201,9 +1199,7 @@ export default function Products() {
                             <div className="text-xs text-[var(--muted)]">Stock min : {p.min_qty}</div>
                           )}
                           {(p.brand || p.supplier) && (
-                            <div className="text-xs text-[var(--muted)]">
-                              {[p.brand, p.supplier].filter(Boolean).join(" · ")}
-                            </div>
+                            <div className="text-xs text-[var(--muted)]">{[p.brand, p.supplier].filter(Boolean).join(" · ")}</div>
                           )}
                         </td>
 
@@ -1255,57 +1251,27 @@ export default function Products() {
 
           {filteredItems.length > PAGE_SIZE && (
             <div className="flex items-center justify-end gap-2 text-sm text-[var(--muted)]">
-              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.max(1, prev - 1))} disabled={page === 1}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={page === 1}
+              >
                 ← Précédent
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))} disabled={page === totalPages}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={page === totalPages}
+              >
                 Suivant →
               </Button>
             </div>
           )}
         </Card>
 
-        {/* ✅ CATALOGUE PDF : section claire + live preview */}
-        <CatalogPdfSection
-          canPdfCatalog={canPdfCatalog}
-          pdfLimit={pdfLimit}
-          services={services}
-          pdfService={pdfService}
-          setPdfService={setPdfService}
-          pdfServiceOptions={pdfServiceOptions}
-          pdfQuery={pdfQuery}
-          setPdfQuery={setPdfQuery}
-          pdfPreviewItems={pdfPreviewItems}
-          pdfPreviewCount={pdfPreviewCount}
-          categories={categories}
-          pdfCategory={pdfCategory}
-          setPdfCategory={setPdfCategory}
-          categoryOptions={categoryOptions}
-          wording={wording}
-          pdfFieldOptions={pdfFieldOptions}
-          pdfFields={pdfFields}
-          togglePdfField={togglePdfField}
-          pdfBranding={pdfBranding}
-          setPdfBranding={setPdfBranding}
-          pdfTemplate={pdfTemplate}
-          setPdfTemplate={setPdfTemplate}
-          pdfLogo={pdfLogo}
-          setPdfLogo={setPdfLogo}
-          templateOptions={templateOptions}
-          generateCatalogPdf={generateCatalogPdf}
-          pdfLoading={pdfLoading}
-          pdfError={pdfError}
-          pdfErrorCode={pdfErrorCode}
-          clearPdfError={() => {
-            setPdfError("");
-            setPdfErrorCode("");
-          }}
-          // ✅ bouton scanner "vrai icon"
-          onOpenScanner={() => openScannerFor("pdfQuery")}
-          barcodeEnabled={barcodeEnabled}
-        />
-
-        {/* Drawer ajout/modif produit */}
+        {/* Drawer product add/edit */}
         <Drawer
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
@@ -1337,9 +1303,7 @@ export default function Products() {
         >
           <form className="space-y-4" onSubmit={submit}>
             {isAllServices && (
-              <div className="text-sm text-[var(--muted)]">
-                Sélectionnez un service précis pour ajouter ou modifier un produit.
-              </div>
+              <div className="text-sm text-[var(--muted)]">Sélectionnez un service précis pour ajouter ou modifier un produit.</div>
             )}
 
             <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Essentiel</div>
@@ -1378,7 +1342,7 @@ export default function Products() {
                   inputRef={barcodeInputRef}
                   onChange={(e) => setForm((p) => ({ ...p, barcode: e.target.value }))}
                   helper={helpers.barcode}
-                  rightSlot={<ScannerButton onClick={() => openScannerFor("barcode")} label="Scanner (code-barres)" />}
+                  rightSlot={<ScanButton onClick={() => setScanOpen(true)} />}
                 />
               )}
 
@@ -1389,19 +1353,11 @@ export default function Products() {
                   value={form.internal_sku}
                   onChange={(e) => setForm((p) => ({ ...p, internal_sku: e.target.value }))}
                   helper={!form.barcode && !form.internal_sku ? helpers.sku : "Optionnel"}
-                  rightSlot={
-                    barcodeEnabled ? <ScannerButton onClick={() => openScannerFor("sku")} label="Scanner (SKU)" /> : null
-                  }
                 />
               )}
 
               {showUnit && (
-                <Select
-                  label={unitLabel}
-                  value={form.unit}
-                  onChange={(value) => setForm((p) => ({ ...p, unit: value }))}
-                  options={unitSelectOptions}
-                />
+                <Select label={unitLabel} value={form.unit} onChange={(value) => setForm((p) => ({ ...p, unit: value }))} options={unitSelectOptions} />
               )}
 
               {itemTypeEnabled && (
@@ -1417,9 +1373,7 @@ export default function Products() {
 
             {(variantsEnabled || lotEnabled || dlcEnabled || openEnabled || multiUnitEnabled) && (
               <details className="rounded-2xl border border-[var(--border)] px-4 py-3">
-                <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
-                  Options métier
-                </summary>
+                <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">Options métier</summary>
                 <div className="mt-3 grid gap-3">
                   {variantsEnabled && (
                     <>
@@ -1468,12 +1422,7 @@ export default function Products() {
                   )}
 
                   {dlcEnabled && (
-                    <Input
-                      label="DLC"
-                      type="date"
-                      value={form.dlc}
-                      onChange={(e) => setForm((p) => ({ ...p, dlc: e.target.value }))}
-                    />
+                    <Input label="DLC" type="date" value={form.dlc} onChange={(e) => setForm((p) => ({ ...p, dlc: e.target.value }))} />
                   )}
 
                   {openEnabled && (
@@ -1482,7 +1431,10 @@ export default function Products() {
                         label="Statut"
                         value={form.container_status}
                         onChange={(value) => setForm((p) => ({ ...p, container_status: value }))}
-                        options={containerStatusOptions}
+                        options={[
+                          { value: "SEALED", label: "Non entamé" },
+                          { value: "OPENED", label: "Entamé" },
+                        ]}
                       />
                       {form.container_status === "OPENED" && (
                         <>
@@ -1494,12 +1446,7 @@ export default function Products() {
                             value={form.pack_size}
                             onChange={(e) => setForm((p) => ({ ...p, pack_size: e.target.value }))}
                           />
-                          <Input
-                            label="Unité pack"
-                            placeholder="Ex. l, kg"
-                            value={form.pack_uom}
-                            onChange={(e) => setForm((p) => ({ ...p, pack_uom: e.target.value }))}
-                          />
+                          <Input label="Unité pack" placeholder="Ex. l, kg" value={form.pack_uom} onChange={(e) => setForm((p) => ({ ...p, pack_uom: e.target.value }))} />
                           <Input
                             label="Reste (quantité)"
                             type="number"
@@ -1526,9 +1473,7 @@ export default function Products() {
 
             {(purchaseEnabled || sellingEnabled) && (
               <details className="rounded-2xl border border-[var(--border)] px-4 py-3">
-                <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
-                  Prix & TVA
-                </summary>
+                <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">Prix & TVA</summary>
                 <div className="mt-3 grid gap-3">
                   {purchaseEnabled && (
                     <Input
@@ -1553,21 +1498,14 @@ export default function Products() {
                     />
                   )}
                   {tvaEnabled && (purchaseEnabled || sellingEnabled) && (
-                    <Select
-                      label="TVA"
-                      value={form.tva}
-                      onChange={(value) => setForm((p) => ({ ...p, tva: value }))}
-                      options={tvaSelectOptions}
-                    />
+                    <Select label="TVA" value={form.tva} onChange={(value) => setForm((p) => ({ ...p, tva: value }))} options={tvaSelectOptions} />
                   )}
                 </div>
               </details>
             )}
 
             <details className="rounded-2xl border border-[var(--border)] px-4 py-3">
-              <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">
-                Stock & informations
-              </summary>
+              <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">Stock & informations</summary>
               <div className="mt-3 grid gap-3">
                 {canStockAlerts && (
                   <Input
@@ -1579,24 +1517,9 @@ export default function Products() {
                     helper="Optionnel : seuil pour alerte stock."
                   />
                 )}
-                <Input
-                  label={brandLabel}
-                  placeholder={placeholders.brand || "Ex. Marque X"}
-                  value={form.brand}
-                  onChange={(e) => setForm((p) => ({ ...p, brand: e.target.value }))}
-                />
-                <Input
-                  label={supplierLabel}
-                  placeholder={placeholders.supplier || "Ex. Fournisseur X"}
-                  value={form.supplier}
-                  onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))}
-                />
-                <Input
-                  label="Notes internes"
-                  placeholder={placeholders.notes || "Ex. Rotation lente, saisonnier, fragile…"}
-                  value={form.notes}
-                  onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))}
-                />
+                <Input label={brandLabel} placeholder={placeholders.brand || "Ex. Marque X"} value={form.brand} onChange={(e) => setForm((p) => ({ ...p, brand: e.target.value }))} />
+                <Input label={supplierLabel} placeholder={placeholders.supplier || "Ex. Fournisseur X"} value={form.supplier} onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))} />
+                <Input label="Notes internes" placeholder={placeholders.notes || "Ex. Rotation lente, saisonnier, fragile…"} value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
               </div>
             </details>
           </form>
