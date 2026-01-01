@@ -260,7 +260,7 @@ export default function Products() {
   // Product form drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // ✅ Catalogue drawer
+  // Catalogue drawer
   const [catalogDrawerOpen, setCatalogDrawerOpen] = useState(false);
 
   // PDF / catalogue generation
@@ -278,8 +278,25 @@ export default function Products() {
   });
   const [pdfTemplate, setPdfTemplate] = useState("classic");
   const [pdfLogo, setPdfLogo] = useState(null);
+  const [pdfCoverImage, setPdfCoverImage] = useState(null); // File
+  const [pdfProductImages, setPdfProductImages] = useState({}); // { [productId]: File }
 
-  // ✅ NEW: catalogue selection modes
+  const [catalogTemplates, setCatalogTemplates] = useState([]); // [{ key, label, badge, hint, bg, surface, text, muted, primary, accent }]
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+
+  const loadCatalogTemplates = async () => {
+    setTemplatesLoading(true);
+    try {
+      const res = await api.get("/api/catalog/templates/");
+      setCatalogTemplates(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setCatalogTemplates([]);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  //  NEW: catalogue selection modes
   //  - "filters" (service/category/query)
   //  - "category" (one category = all products)
   //  - "service" (one service = all products)
@@ -290,6 +307,7 @@ export default function Products() {
   const [catalogLiveLoading, setCatalogLiveLoading] = useState(false);
   const [catalogSelected, setCatalogSelected] = useState([]); // manual selected products
   const [catalogExcluded, setCatalogExcluded] = useState([]); // allow removing a few
+  
   const catalogSearchSeq = useRef(0);
   const catalogSearchTimer = useRef(null);
 
@@ -458,52 +476,57 @@ export default function Products() {
     return base;
   }, [barcodeEnabled, skuEnabled]);
 
-  const templateOptions = useMemo(
-    () => [
+  const templateOptions = useMemo(() => {
+  
+    const fallback = [
       { value: "classic", label: "Classique" },
       { value: "midnight", label: "Minuit" },
       { value: "emerald", label: "Émeraude" },
-    ],
-    []
-  );
-  const templateMeta = useMemo(
-  () => ({
-    classic: {
-      name: "Classique",
-      badge: "Recommandé",
-      hint: "Propre & lisible",
-      bg: "#ffffff",
-      surface: "#f5f5f5",
-      text: "#111827",
-      muted: "#6b7280",
-      primary: "#111827",
-      accent: "#e5e7eb",
-    },
-    midnight: {
-      name: "Minuit",
-      badge: "Nocturne",
-      hint: "Contraste premium",
-      bg: "#0b1220",
-      surface: "#111a2e",
-      text: "#e5e7eb",
-      muted: "#94a3b8",
-      primary: "#60a5fa",
-      accent: "#1f2a44",
-    },
-    emerald: {
-      name: "Émeraude",
-      badge: "Nouveau",
-      hint: "Signature élégante",
-      bg: "#07130f",
-      surface: "#0b1f17",
-      text: "#e7f7ef",
-      muted: "#93c5aa",
-      primary: "#34d399",
-      accent: "#123326",
-    },
-  }),
-  []
-);
+    ];
+
+    if (catalogTemplates?.length) {
+      return catalogTemplates.map((t) => ({
+        value: t.key,
+        label: t.label || t.key,
+      }));
+    }
+
+    return fallback;
+}, [catalogTemplates]);
+  const templateMeta = useMemo(() => {
+   
+    const base = {
+      classic: {
+        name: "Classique",
+        badge: "Recommandé",
+        hint: "Propre & lisible",
+        bg: "#ffffff",
+        surface: "#f5f5f5",
+        text: "#111827",
+        muted: "#6b7280",
+        primary: "#111827",
+        accent: "#e5e7eb",
+      },
+    };
+
+    if (!catalogTemplates?.length) return base;
+
+    const map = {};
+    for (const t of catalogTemplates) {
+      map[t.key] = {
+        name: t.label || t.key,
+        badge: t.badge || "",
+        hint: t.hint || "Aperçu des couleurs",
+        bg: t.bg || "#ffffff",
+        surface: t.surface || "#f5f5f5",
+        text: t.text || "#111827",
+        muted: t.muted || "#6b7280",
+        primary: t.primary || "#111827",
+        accent: t.accent || "#e5e7eb",
+      };
+    }
+    return map;
+  }, [catalogTemplates]);
   const togglePdfField = (key) => {
     setPdfFields((prev) => (prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key]));
   };
@@ -538,7 +561,7 @@ export default function Products() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    
   }, [serviceId, services]);
 
   useEffect(() => {
@@ -585,8 +608,13 @@ export default function Products() {
       return pdfDefaultFields.filter((key) => allowed.has(key));
     });
   }, [pdfFieldOptions, pdfDefaultFields]);
+  useEffect(() => {
+  if (!catalogDrawerOpen) return;
+  loadCatalogTemplates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [catalogDrawerOpen]);
 
-  // ✅ Dedup “catalog items”
+  // Dedup “catalog items”
   const catalogItems = useMemo(() => {
     const map = new Map();
     items.forEach((item) => {
@@ -673,14 +701,12 @@ export default function Products() {
     const code = normalizeScannedCode(raw);
     if (!code) return;
 
-    // Smart: if catalogue drawer is open, apply into the most relevant search
     if (catalogDrawerOpen) {
       setCatalogQuery(code);
     } else {
       setSearch(code);
     }
 
-    // fill product form if barcode field exists
     if (barcodeEnabled) {
       setForm((p) => ({ ...p, barcode: code }));
       window.setTimeout(() => {
@@ -1067,33 +1093,75 @@ export default function Products() {
   const clearCatalogSelection = () => {
     setCatalogSelected([]);
     setCatalogExcluded([]);
+    setPdfProductImages({});
     pushToast?.({ type: "info", message: "Sélection catalogue réinitialisée." });
   };
 
   const resolveCatalogSelection = () => {
-    const effectiveService = pdfService || serviceId;
+  const effectiveService = pdfService || serviceId;
 
-    // Mode custom => ids list
-    if (catalogMode === "custom") {
-      const ids = catalogSelected.map((p) => p.id);
-      return { mode: "ids", ids, effectiveService };
-    }
+  if (catalogMode === "custom") {
+    const ids = catalogSelected.map((p) => p.id);
+    return { mode: "ids", ids, effectiveService };
+  }
 
-    // Mode category => use category filter
-    if (catalogMode === "category") {
-      return { mode: "filters", q: catalogQuery.trim(), category: pdfCategory, effectiveService };
-    }
+  if (catalogMode === "category") {
+    return {
+      mode: "filters",
+      q: "",                 // ignore query
+      category: pdfCategory, // category is the “whole category”
+      effectiveService,
+    };
+  }
 
-    // Mode service => use service filter
-    if (catalogMode === "service") {
-      return { mode: "filters", q: catalogQuery.trim(), category: pdfCategory, effectiveService };
-    }
+  if (catalogMode === "service") {
+    return {
+      mode: "filters",
+      q: "",        // ignore query
+      category: "", // ignore category
+      effectiveService,
+    };
+  }
 
-    // Default filters
-    return { mode: "filters", q: catalogQuery.trim(), category: pdfCategory, effectiveService };
+  // default "filters"
+  return { mode: "filters", q: catalogQuery.trim(), category: pdfCategory, effectiveService };
+};
+
+
+  const MAX_IMAGE_MB = 6;
+
+  const validateImageFile = (file, label = "Image") => {
+    if (!file) return null;
+    const maxBytes = MAX_IMAGE_MB * 1024 * 1024;
+    if (file.size > maxBytes) return `${label} trop lourde (max ${MAX_IMAGE_MB} Mo).`;
+    if (!file.type?.startsWith("image/")) return `${label} invalide (format image requis).`;
+    return null;
   };
 
-  const generateCatalogPdf = async () => {
+  const setProductImageFile = (productId, file) => {
+    const errMsg = validateImageFile(file, "Photo produit");
+    if (errMsg) {
+      pushToast?.({ type: "error", message: errMsg });
+      return;
+    }
+    setPdfProductImages((prev) => ({ ...prev, [String(productId)]: file }));
+  };
+
+  const removeProductImageFile = (productId) => {
+    setPdfProductImages((prev) => {
+      const next = { ...prev };
+      delete next[String(productId)];
+      return next;
+    });
+  };
+
+  const clearPdfImages = () => {
+    setPdfCoverImage(null);
+    setPdfProductImages({});
+    pushToast?.({ type: "info", message: "Photos (PDF) réinitialisées." });
+  };
+
+   const generateCatalogPdf = async () => {
     setPdfError("");
     setPdfErrorCode("");
 
@@ -1120,14 +1188,44 @@ export default function Products() {
       return;
     }
 
+    const coverErr = validateImageFile(pdfCoverImage, "Photo de couverture");
+    if (coverErr) {
+      setPdfError(coverErr);
+      setPdfErrorCode("COVER_TOO_LARGE");
+      return;
+    }
+
+    // product images validation (only those set)
+    for (const [pid, file] of Object.entries(pdfProductImages || {})) {
+      const errMsg = validateImageFile(file, `Photo produit (${pid})`);
+      if (errMsg) {
+        setPdfError(errMsg);
+        setPdfErrorCode("PRODUCT_IMAGE_TOO_LARGE");
+        return;
+      }
+    }
+
+    if (catalogMode === "category" && !pdfCategory) {
+      setPdfError("Choisis une catégorie pour générer un catalogue de catégorie entière.");
+      return;
+    }
+
     const selection = resolveCatalogSelection();
+
+    // IMPORTANT: si tu veux des photos produits, on force le mode custom (IDs),
+    // sinon tu ne sais pas “à quels produits” associer les fichiers.
+    const hasAnyProductImages = Object.keys(pdfProductImages || {}).length > 0;
+    if (hasAnyProductImages && selection.mode !== "ids") {
+      setPdfError("Pour ajouter des photos produit, passe en mode “Sélection personnalisée”.");
+      setPdfErrorCode("PRODUCT_IMAGES_REQUIRE_CUSTOM_MODE");
+      return;
+    }
 
     setPdfLoading(true);
     try {
       const params = new URLSearchParams();
       params.set("service", selection.effectiveService);
 
-      // Selection by IDs (custom mode) — may need backend support
       if (selection.mode === "ids") {
         if (selection.ids?.length) params.set("ids", selection.ids.join(","));
       } else {
@@ -1142,13 +1240,28 @@ export default function Products() {
       if (pdfBranding.company_address) params.set("company_address", pdfBranding.company_address);
       if (pdfTemplate) params.set("template", pdfTemplate);
 
+      const useMultipart =
+        Boolean(pdfLogo) || Boolean(pdfCoverImage) || Object.keys(pdfProductImages || {}).length > 0;
+
       let res;
-      if (pdfLogo) {
+
+      if (useMultipart) {
         const formData = new FormData();
-        formData.append("logo", pdfLogo);
+
+        // files
+        if (pdfLogo) formData.append("logo", pdfLogo);
+        if (pdfCoverImage) formData.append("cover_image", pdfCoverImage);
+
+        // product images: product_image_<id>
+        for (const [pid, file] of Object.entries(pdfProductImages || {})) {
+          if (file) formData.append(`product_image_${pid}`, file);
+        }
+
+        // params
         for (const [key, value] of params.entries()) {
           formData.append(key, value);
         }
+
         res = await api.post("/api/catalog/pdf/", formData, {
           headers: { "Content-Type": "multipart/form-data" },
           responseType: "blob",
@@ -1157,51 +1270,16 @@ export default function Products() {
         res = await api.get(`/api/catalog/pdf/?${params.toString()}`, { responseType: "blob" });
       }
 
-      const filename = parseFilenameFromContentDisposition(res?.headers?.["content-disposition"], "stockscan_catalogue.pdf");
+      const filename = parseFilenameFromContentDisposition(
+        res?.headers?.["content-disposition"],
+        "stockscan_catalogue.pdf"
+      );
       downloadBlob({ blob: res.data, filename });
       pushToast?.({ message: "Catalogue PDF généré.", type: "success" });
     } catch (e) {
-      // Fallback: if backend rejects ids=..., retry without ids
       const payload = await blobToJsonSafe(e?.response?.data);
       const detail = payload?.detail || e?.response?.data?.detail;
       const msg = getPdfErrorMessage({ code: payload?.code, detail, message: e?.message });
-
-      const triedIds = resolveCatalogSelection().mode === "ids";
-      const likelyUnknownParam =
-        triedIds && (String(detail || "").toLowerCase().includes("ids") || String(msg || "").toLowerCase().includes("ids"));
-
-      if (likelyUnknownParam) {
-        pushToast?.({
-          type: "warn",
-          message: "Sélection personnalisée nécessite un patch backend (paramètre ids). Génération en mode filtres.",
-        });
-
-        try {
-          const params2 = new URLSearchParams();
-          const effectiveService = pdfService || serviceId;
-          params2.set("service", effectiveService);
-          if (catalogQuery.trim()) params2.set("q", catalogQuery.trim());
-          if (pdfCategory) params2.set("category", pdfCategory);
-          if (pdfFields.length) params2.set("fields", pdfFields.join(","));
-          if (pdfBranding.company_name) params2.set("company_name", pdfBranding.company_name);
-          if (pdfBranding.company_email) params2.set("company_email", pdfBranding.company_email);
-          if (pdfBranding.company_phone) params2.set("company_phone", pdfBranding.company_phone);
-          if (pdfBranding.company_address) params2.set("company_address", pdfBranding.company_address);
-          if (pdfTemplate) params2.set("template", pdfTemplate);
-
-          const res2 = await api.get(`/api/catalog/pdf/?${params2.toString()}`, { responseType: "blob" });
-          const filename2 = parseFilenameFromContentDisposition(res2?.headers?.["content-disposition"], "stockscan_catalogue.pdf");
-          downloadBlob({ blob: res2.data, filename: filename2 });
-          return;
-        } catch (e2) {
-          const payload2 = await blobToJsonSafe(e2?.response?.data);
-          const msg2 = getPdfErrorMessage({ code: payload2?.code, detail: payload2?.detail, message: e2?.message });
-          setPdfError(msg2);
-          setPdfErrorCode(payload2?.code || "");
-          pushToast?.({ message: msg2, type: "error" });
-          return;
-        }
-      }
 
       setPdfError(msg);
       setPdfErrorCode(payload?.code || "");
@@ -1783,6 +1861,9 @@ export default function Products() {
               {/* Template + logo */}
             <div className="space-y-3">
               <div className="text-sm font-semibold text-[var(--text)]">Template</div>
+              {templatesLoading ? (
+                  <div className="text-xs text-[var(--muted)]">Chargement des templates…</div>
+                ) : null}
 
               {/* (Optionnel) on garde le Select pour accessibilité / rapidité */}
               <Select
@@ -1803,6 +1884,7 @@ export default function Products() {
                     active={String(pdfTemplate) === String(opt.value)}
                     onSelect={() => setPdfTemplate(opt.value)}
                   />
+                  
                 ))}
               </div>
               <div className="text-xs text-[var(--muted)]">
@@ -1822,6 +1904,104 @@ export default function Products() {
                   onChange={(e) => setPdfLogo(e.target.files?.[0] ?? null)}
                 />
                 <div className="text-xs text-[var(--muted)] mt-1">Max 2 Mo.</div>
+              </div>
+                {/* Photos (PDF only) */}
+              <div className="pt-3 space-y-2">
+                <div className="text-sm font-semibold text-[var(--text)]">Photos (PDF)</div>
+                <div className="text-xs text-[var(--muted)]">
+                  Ces images ne sont pas enregistrées : elles servent uniquement à générer ce PDF.
+                </div>
+
+                {/* Cover image */}
+                <div className="pt-2">
+                  <label className="block text-sm font-semibold text-[var(--text)]">Photo de couverture (optionnel)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="mt-1 block w-full text-sm"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      const errMsg = validateImageFile(f, "Photo de couverture");
+                      if (errMsg) {
+                        pushToast?.({ type: "error", message: errMsg });
+                        return;
+                      }
+                      setPdfCoverImage(f);
+                    }}
+                  />
+                  <div className="text-xs text-[var(--muted)] mt-1">Max {MAX_IMAGE_MB} Mo.</div>
+                </div>
+
+                {/* Product images only in custom mode */}
+                {catalogMode !== "custom" ? (
+                  <div className="text-xs text-[var(--muted)]">
+                    Pour ajouter des photos produit : passe en <b>Sélection personnalisée</b> et ajoute tes produits.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-sm font-semibold text-[var(--text)]">
+                      Photos produit (sélection personnalisée)
+                    </div>
+
+                    {catalogSelected.length === 0 ? (
+                      <div className="text-xs text-[var(--muted)]">
+                        Ajoute d’abord des produits via la recherche live, puis upload les photos ici.
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {catalogSelected.map((p) => {
+                          const pid = String(p.id);
+                          const currentFile = pdfProductImages?.[pid] || null;
+
+                          return (
+                            <div
+                              key={p.id}
+                              className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-[var(--text)] truncate">{p.name}</div>
+                                  <div className="text-xs text-[var(--muted)]">{p.barcode || p.internal_sku || "—"}</div>
+                                </div>
+
+                                {currentFile ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:bg-[var(--accent)]/15"
+                                    onClick={() => removeProductImageFile(pid)}
+                                  >
+                                    Retirer photo
+                                  </button>
+                                ) : null}
+                              </div>
+
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="mt-2 block w-full text-sm"
+                                onChange={(e) => setProductImageFile(pid, e.target.files?.[0] ?? null)}
+                              />
+
+                              {currentFile ? (
+                                <div className="text-xs text-[var(--muted)] mt-1">
+                                  Sélectionné : <span className="font-semibold text-[var(--text)]">{currentFile.name}</span>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-[var(--muted)] mt-1">Optionnel</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-2">
+                  <Button variant="secondary" type="button" onClick={clearPdfImages}>
+                    Réinitialiser les photos
+                  </Button>
+                </div>
               </div>
             </div>
 

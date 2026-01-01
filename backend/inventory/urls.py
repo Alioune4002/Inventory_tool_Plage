@@ -5,7 +5,7 @@ from django.db.utils import OperationalError, ProgrammingError
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from ai_assistant.views import AiAssistantView, AiChatView  
+from ai_assistant.views import AiAssistantView, AiChatView
 from inventory.metrics import metrics_view
 from products.views import (
     ProductViewSet,
@@ -63,22 +63,31 @@ urlpatterns = [
     path("api/products/export/excel/", export_excel),
     path("api/export-advanced/", export_advanced),
     path("api/exports/", export_generic),
+
     path("api/catalog/pdf/", catalog_pdf),
     path("api/labels/pdf/", labels_pdf),
+
     path("api/alerts/", alerts),
 
     path("api/products/lookup/", lookup_product),
+
+    
+    path("api/catalog/templates/", catalog_templates, name="api_catalog_templates"),
+  
     path("catalog/templates/", catalog_templates, name="catalog_templates"),
+
     path("api/products/search/", search_products),
     path("api/products/duplicates/", product_duplicates),
     path("api/products/merge/", merge_products),
+
     path("api/rituals/", rituals),
+
     path("api/receipts/import/", import_receipt),
     path("api/receipts/<int:receipt_id>/apply/", apply_receipt),
     path("api/receipts/history/", receipts_history),
 
     path("api/auth/", include("accounts.urls")),
-    path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),  
+    path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),
     path("api/ai/chat/", AiChatView.as_view(), name="ai-chat"),
 
     path("api/", include(router.urls)),

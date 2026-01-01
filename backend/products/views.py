@@ -9,6 +9,8 @@ from rest_framework import status, viewsets, permissions, exceptions
 from rest_framework.decorators import api_view, permission_classes, renderer_classes
 from rest_framework.response import Response
 from rest_framework.renderers import BaseRenderer
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import parser_classes
 
 from django.http import JsonResponse
 import openpyxl
@@ -618,6 +620,45 @@ def _draw_circle_logo(c, img_bytes, x, y, size):
     except Exception:
 
         return
+    
+    
+def _draw_rounded_image(c, img_bytes, x, y, w, h, radius=12):
+    """
+    Draw an image clipped into a rounded rectangle.
+    x,y = bottom-left of the rect.
+    """
+    if not img_bytes:
+        return False
+    try:
+        img = ImageReader(io.BytesIO(img_bytes))
+        path = c.beginPath()
+        path.roundRect(x, y, w, h, radius)
+
+        c.saveState()
+        c.clipPath(path, stroke=0, fill=0)
+        c.drawImage(img, x, y, width=w, height=h, preserveAspectRatio=True, anchor='c', mask="auto")
+        c.restoreState()
+        return True
+    except Exception:
+        return False
+
+
+def _draw_cover_hero_image(c, img_bytes, x, y, w, h):
+    """
+    Big cover image area (premium look) with subtle rounded corners.
+    """
+    ok = _draw_rounded_image(c, img_bytes, x, y, w, h, radius=16)
+    if ok:
+        
+        try:
+            c.saveState()
+            c.setLineWidth(1)
+            c.setStrokeColor(HexColor("#E2E8F0"))
+            c.roundRect(x, y, w, h, 16, fill=0, stroke=1)
+            c.restoreState()
+        except Exception:
+            pass
+    return ok
 
 
 def _truncate_text(c, text, font_name, font_size, max_width):
@@ -649,6 +690,8 @@ def _build_catalog_pdf(
     include_service,
     logo_bytes=None,
     template="classic",
+    cover_image_bytes=None,
+    product_images=None,
 ):
     buffer = io.BytesIO()
     c = NumberedCanvas(buffer, pagesize=A4)
@@ -707,18 +750,26 @@ def _build_catalog_pdf(
 
         draw_top_header("Catalogue produits")
 
-        # Hero title
-        c.setFillColor(ink)
-        c.setFont("Helvetica-Bold", 22)
-        c.drawString(margin_x, height - 4.2 * cm, "Catalogue produits")
+       
+        hero_x = margin_x
+        hero_w = width - 2 * margin_x
+        hero_h = 8.2 * cm
+        hero_y = height - 4.4 * cm - hero_h 
 
-        c.setFont("Helvetica", 11)
-        c.setFillColor(muted)
-        c.drawString(margin_x, height - 4.95 * cm, "Export premium StockScan")
+        if cover_image_bytes:
+            _draw_cover_hero_image(c, cover_image_bytes, hero_x, hero_y, hero_w, hero_h)
+        else:
+            c.setFillColor(soft)
+            c.setStrokeColor(border)
+            c.setLineWidth(1)
+            c.roundRect(hero_x, hero_y, hero_w, hero_h, 16, fill=1, stroke=1)
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 10)
+            c.drawCentredString(hero_x + hero_w / 2, hero_y + hero_h / 2, "Ajoutez une photo de couverture (optionnel)")
 
-        # Info card
+        # Info card (NOW it can use hero_y)
         card_x = margin_x
-        card_y = height - 8.9 * cm
+        card_y = hero_y - 3.8 * cm
         card_w = width - 2 * margin_x
         card_h = 3.2 * cm
 
@@ -745,7 +796,23 @@ def _build_catalog_pdf(
             c.setFillColor(HexColor("#B91C1C"))
             c.setFont("Helvetica-Bold", 9.5)
             c.drawString(margin_x, card_y - 0.65 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
+                # Hero image (optional)
+        hero_x = margin_x
+        hero_w = width - 2 * margin_x
+        hero_h = 8.2 * cm
+        hero_y = height - 4.4 * cm - hero_h  # sous le titre
 
+        if cover_image_bytes:
+            _draw_cover_hero_image(c, cover_image_bytes, hero_x, hero_y, hero_w, hero_h)
+        else:
+            # fallback nice empty hero
+            c.setFillColor(soft)
+            c.setStrokeColor(border)
+            c.setLineWidth(1)
+            c.roundRect(hero_x, hero_y, hero_w, hero_h, 16, fill=1, stroke=1)
+            c.setFillColor(muted)
+            c.setFont("Helvetica", 10)
+            c.drawCentredString(hero_x + hero_w / 2, hero_y + hero_h / 2, "Ajoutez une photo de couverture (optionnel)")
     # Cover
     draw_cover()
     c.showPage()
@@ -794,40 +861,55 @@ def _build_catalog_pdf(
                 c.drawString(margin_x, y, _truncate_text(c, category, "Helvetica-Bold", 10, width - 2 * margin_x))
                 y -= 0.55 * cm
 
-            # Card background
+                        # Card background
             c.setFillColor(soft)
             c.setStrokeColor(border)
             c.setLineWidth(1)
             c.roundRect(x, y - card_h, card_w, card_h, 12, fill=1, stroke=1)
 
-            # Name
+            # Product image area (top)
+            img_h = 1.55 * cm
+            img_pad = 0.45 * cm
+            img_x = x + img_pad
+            img_y = y - img_pad - img_h
+            img_w = card_w - 2 * img_pad
+
+            img_bytes = product_images.get(p.id)
+            has_img = False
+            if img_bytes:
+                has_img = _draw_rounded_image(c, img_bytes, img_x, img_y, img_w, img_h, radius=10)
+            if not has_img:
+                # subtle placeholder
+                c.setFillColor(HexColor("#E5E7EB"))
+                c.roundRect(img_x, img_y, img_w, img_h, 10, fill=1, stroke=0)
+
+            # Name (below image)
             c.setFillColor(ink)
             c.setFont("Helvetica-Bold", 11)
             name = (p.name or "").strip()
-            c.drawString(x + 0.55 * cm, y - 0.70 * cm, _truncate_text(c, name, "Helvetica-Bold", 11, card_w - 1.1 * cm))
+            name_y = img_y - 0.45 * cm
+            c.drawString(img_x, name_y, _truncate_text(c, name, "Helvetica-Bold", 11, img_w))
 
             # Service tag
             if include_service and getattr(p, "service", None):
                 tag = (p.service.name or "").strip()
                 c.setFont("Helvetica", 8.5)
                 c.setFillColor(accent)
-                c.drawString(x + 0.55 * cm, y - 1.25 * cm, _truncate_text(c, f"Service: {tag}", "Helvetica", 8.5, card_w - 1.1 * cm))
+                c.drawString(img_x, name_y - 0.45 * cm, _truncate_text(c, f"Service: {tag}", "Helvetica", 8.5, img_w))
 
             # Details line(s)
             details = _format_catalog_line(p, fields, include_service=False, currency_code=tenant.currency_code)
             c.setFont("Helvetica", 9)
             c.setFillColor(muted)
+            details_y = name_y - (0.95 * cm if (include_service and getattr(p, "service", None)) else 0.55 * cm)
             if details:
-                # allow 2 lines
-                max_w = card_w - 1.1 * cm
+                max_w = img_w
                 line1 = _truncate_text(c, details, "Helvetica", 9, max_w)
-                c.drawString(x + 0.55 * cm, y - 1.85 * cm, line1)
-                if len(details) > len(line1):
-                    rest = details[len(line1) :].lstrip(" ·")
-                    if rest:
-                        line2 = _truncate_text(c, rest, "Helvetica", 9, max_w)
-                        c.drawString(x + 0.55 * cm, y - 2.35 * cm, line2)
-
+                c.drawString(img_x, details_y, line1)
+                rest = details[len(line1):].lstrip(" ·")
+                if rest:
+                    line2 = _truncate_text(c, rest, "Helvetica", 9, max_w)
+                    c.drawString(img_x, details_y - 0.45 * cm, line2)
             # Barcode small (optional)
             code = (p.barcode or p.internal_sku or "").strip()
             if code:
@@ -2072,6 +2154,7 @@ def export_advanced(request):
 @api_view(["GET", "POST"])
 @permission_classes([permissions.IsAuthenticated, ManagerPermission])
 @renderer_classes([PDFRenderer])
+@parser_classes([MultiPartParser, FormParser])
 def catalog_pdf(request):
     tenant = get_tenant_for_request(request)
     check_entitlement(tenant, "pdf_catalog")
@@ -2080,6 +2163,7 @@ def catalog_pdf(request):
     payload = request.data if request.method == "POST" else request.query_params
     service_param = payload.get("service")
     ids_list = _parse_ids_param(payload.get("ids"))
+    exclude_ids_list = _parse_ids_param(payload.get("exclude_ids") or payload.get("excludeIds"))
     include_service = service_param == "all"
 
     qs = Product.objects.filter(tenant=tenant)
@@ -2091,8 +2175,10 @@ def catalog_pdf(request):
             pass
     if ids_list:
         qs = qs.filter(id__in=ids_list)
-    query = payload.get("q")
-    if query:
+    if exclude_ids_list:
+        qs = qs.exclude(id__in=exclude_ids_list)
+    query = (payload.get("q") or "").strip()
+    if len(query) >= 2:
         qs = qs.filter(
             Q(name__icontains=query)
             | Q(barcode__icontains=query)
@@ -2120,12 +2206,28 @@ def catalog_pdf(request):
         template = "classic"
 
     logo_bytes = None
+    cover_image_bytes = None
+    product_images = {}
+
     if request.method == "POST":
         logo_file = request.FILES.get("logo")
         if logo_file:
             logo_bytes = logo_file.read()
 
+        cover_file = request.FILES.get("cover_image") or request.FILES.get("coverImage")
+        if cover_file:
+            cover_image_bytes = cover_file.read()
+
+        # product_image_<id>
+        prefix = "product_image_"
+        for key, f in request.FILES.items():
+            if key.startswith(prefix):
+                raw_id = key[len(prefix):].strip()
+                if raw_id.isdigit():
+                    product_images[int(raw_id)] = f.read()
+
     pdf_bytes = _build_catalog_pdf(
+        product_images = product_images or {},
         tenant=tenant,
         company_name=company_name,
         company_email=company_email,
@@ -2137,6 +2239,8 @@ def catalog_pdf(request):
         include_service=include_service,
         logo_bytes=logo_bytes,
         template=template,
+        cover_image_bytes=cover_image_bytes,
+        #product_images=product_images,
     )
 
     _log_catalog_pdf_event(
@@ -2149,6 +2253,8 @@ def catalog_pdf(request):
             "category": category,
             "template": template,
             "logo": bool(logo_bytes),
+            "cover": bool(cover_image_bytes),
+            "product_images": len(product_images),
         },
     )
 

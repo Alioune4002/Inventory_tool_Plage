@@ -78,9 +78,9 @@ export default function Drawer({ open, onClose, title, children, footer, classNa
         {footer ? (
           <div
             className={cn(
-              "shrink-0 border-t border-[var(--border)] px-5 py-4",
-              "pb-[calc(env(safe-area-inset-bottom)+1rem)]"
-            )}
+                  "shrink-0 border-t border-[var(--border)] px-5 py-4",
+                  "pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+                )}
           >
             {footer}
           </div>
