@@ -20,7 +20,7 @@ export default function MobileNav({ open, onClose, onToggleTheme }) {
     <div className="fixed inset-0 z-40 flex items-stretch">
       <div className="absolute inset-0 bg-black/60 backdrop-blur" onClick={onClose} />
 
-      <div className="relative z-10 h-full w-72 max-w-full bg-[var(--surface)] border-r border-[var(--border)] shadow-[0_35px_60px_rgba(0,0,0,0.45)] p-5 flex flex-col">
+      <div className="relative z-10 h-full w-72 max-w-full bg-[var(--surface)] border-r border-[var(--border)] shadow-[0_35px_60px_rgba(0,0,0,0.45)] p-5 pt-[calc(1.25rem+env(safe-area-inset-top))] pb-[calc(1.25rem+env(safe-area-inset-bottom))] flex flex-col">
         {/* ✅ Header premium (logo + gradient) */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3 min-w-0">

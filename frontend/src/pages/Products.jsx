@@ -9,6 +9,7 @@ import Skeleton from "../ui/Skeleton";
 import Select from "../ui/Select";
 import Drawer from "../ui/Drawer";
 import { api } from "../lib/api";
+import { loadOfflineCache, saveOfflineCache } from "../lib/offlineCache";
 import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers } from "../lib/labels";
@@ -166,25 +167,34 @@ function TemplateCard({ active, title, meta, onSelect }) {
       </div>
 
       {/* mini mock */}
-      <div className="mt-3 rounded-xl overflow-hidden border border-black/10 dark:border-white/10">
-        <div className="px-3 py-2 text-xs font-semibold" style={{ background: meta.primary, color: meta.bg }}>
-          Catalogue PDF
-        </div>
+      <div className="mt-3 rounded-xl overflow-hidden border border-black/10 dark:border-white/10 bg-white">
+        {meta?.previewSvg ? (
+          <div
+            className="w-full"
+            dangerouslySetInnerHTML={{ __html: meta.previewSvg }}
+          />
+        ) : (
+          <>
+            <div className="px-3 py-2 text-xs font-semibold" style={{ background: meta.primary, color: meta.bg }}>
+              Catalogue PDF
+            </div>
 
-        <div className="px-3 py-2 space-y-2" style={{ background: meta.surface, color: meta.text }}>
-          <div className="flex items-center justify-between">
-            <span className="text-[11px]" style={{ color: meta.muted }}>
-              Références
-            </span>
-            <span className="text-[11px]" style={{ color: meta.muted }}>
-              Prix
-            </span>
-          </div>
+            <div className="px-3 py-2 space-y-2" style={{ background: meta.surface, color: meta.text }}>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px]" style={{ color: meta.muted }}>
+                  Références
+                </span>
+                <span className="text-[11px]" style={{ color: meta.muted }}>
+                  Prix
+                </span>
+              </div>
 
-          <div className="h-2 rounded" style={{ background: meta.accent }} />
-          <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.75 }} />
-          <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.55 }} />
-        </div>
+              <div className="h-2 rounded" style={{ background: meta.accent }} />
+              <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.75 }} />
+              <div className="h-2 rounded" style={{ background: meta.accent, opacity: 0.55 }} />
+            </div>
+          </>
+        )}
       </div>
 
       {/* subtle glow */}
@@ -244,6 +254,7 @@ export default function Products() {
   const barcodeInputRef = useRef(null);
 
   const [items, setItems] = useState([]);
+  const [offlineData, setOfflineData] = useState(false);
   const [categories, setCategories] = useState([]);
   const [page, setPage] = useState(1);
 
@@ -277,18 +288,20 @@ export default function Products() {
     company_address: "",
   });
   const [pdfTemplate, setPdfTemplate] = useState("classic");
+  const [pdfMode, setPdfMode] = useState("graphic");
   const [pdfLogo, setPdfLogo] = useState(null);
   const [pdfCoverImage, setPdfCoverImage] = useState(null); // File
   const [pdfProductImages, setPdfProductImages] = useState({}); // { [productId]: File }
 
-  const [catalogTemplates, setCatalogTemplates] = useState([]); // [{ key, label, badge, hint, bg, surface, text, muted, primary, accent }]
+  const [catalogTemplates, setCatalogTemplates] = useState([]); // [{ id, label, description, recommended, accent, header_bg, text, muted, card_bg, card_border, preview_svg }]
   const [templatesLoading, setTemplatesLoading] = useState(false);
 
   const loadCatalogTemplates = async () => {
     setTemplatesLoading(true);
     try {
       const res = await api.get("/api/catalog/templates/");
-      setCatalogTemplates(Array.isArray(res.data) ? res.data : []);
+      const payload = Array.isArray(res.data) ? res.data : res.data?.templates;
+      setCatalogTemplates(Array.isArray(payload) ? payload : []);
     } catch {
       setCatalogTemplates([]);
     } finally {
@@ -477,7 +490,6 @@ export default function Products() {
   }, [barcodeEnabled, skuEnabled]);
 
   const templateOptions = useMemo(() => {
-  
     const fallback = [
       { value: "classic", label: "Classique" },
       { value: "midnight", label: "Minuit" },
@@ -486,8 +498,8 @@ export default function Products() {
 
     if (catalogTemplates?.length) {
       return catalogTemplates.map((t) => ({
-        value: t.key,
-        label: t.label || t.key,
+        value: t.id,
+        label: t.label || t.id,
       }));
     }
 
@@ -513,16 +525,17 @@ export default function Products() {
 
     const map = {};
     for (const t of catalogTemplates) {
-      map[t.key] = {
-        name: t.label || t.key,
-        badge: t.badge || "",
-        hint: t.hint || "Aperçu des couleurs",
-        bg: t.bg || "#ffffff",
-        surface: t.surface || "#f5f5f5",
+      map[t.id] = {
+        name: t.label || t.id,
+        badge: t.recommended ? "Recommandé" : "",
+        hint: t.description || "Aperçu du template",
+        bg: "#ffffff",
+        surface: t.card_bg || "#f5f5f5",
         text: t.text || "#111827",
         muted: t.muted || "#6b7280",
-        primary: t.primary || "#111827",
+        primary: t.header_bg || "#111827",
         accent: t.accent || "#e5e7eb",
+        previewSvg: t.preview_svg || "",
       };
     }
     return map;
@@ -535,6 +548,9 @@ export default function Products() {
     if (!serviceId) return;
     setLoading(true);
     setErr("");
+    setOfflineData(false);
+
+    const cacheKey = `products:${isAllServices ? "all" : serviceId || "none"}`;
 
     try {
       if (isAllServices) {
@@ -547,11 +563,24 @@ export default function Products() {
         const results = await Promise.all(calls);
         const merged = results.flatMap((r) => r.items.map((it) => ({ ...it, __service_name: r.service.name })));
         setItems(merged);
+        saveOfflineCache(cacheKey, merged);
       } else {
         const res = await api.get(`/api/products/?service=${serviceId}`);
-        setItems(Array.isArray(res.data) ? res.data : []);
+        const list = Array.isArray(res.data) ? res.data : [];
+        setItems(list);
+        saveOfflineCache(cacheKey, list);
       }
     } catch (e) {
+      if (!navigator.onLine) {
+        const cached = loadOfflineCache(cacheKey);
+        if (cached) {
+          setItems(cached);
+          setOfflineData(true);
+          setErr("Mode hors ligne : données locales affichées.");
+          setLoading(false);
+          return;
+        }
+      }
       setErr("Impossible de charger la liste. Vérifiez votre connexion et vos droits.");
       setItems([]);
     } finally {
@@ -1164,6 +1193,7 @@ export default function Products() {
    const generateCatalogPdf = async () => {
     setPdfError("");
     setPdfErrorCode("");
+    setCatalogDrawerOpen(true);
 
     if (!canPdfCatalog) {
       setPdfError("Catalogue PDF non inclus dans votre plan.");
@@ -1182,26 +1212,30 @@ export default function Products() {
       return;
     }
 
-    if (pdfLogo && pdfLogo.size > 2 * 1024 * 1024) {
-      setPdfError("Logo trop lourd. Limitez à 2 Mo.");
-      setPdfErrorCode("LOGO_TOO_LARGE");
-      return;
-    }
+    const allowImages = pdfMode === "graphic";
 
-    const coverErr = validateImageFile(pdfCoverImage, "Photo de couverture");
-    if (coverErr) {
-      setPdfError(coverErr);
-      setPdfErrorCode("COVER_TOO_LARGE");
-      return;
-    }
-
-    // product images validation (only those set)
-    for (const [pid, file] of Object.entries(pdfProductImages || {})) {
-      const errMsg = validateImageFile(file, `Photo produit (${pid})`);
-      if (errMsg) {
-        setPdfError(errMsg);
-        setPdfErrorCode("PRODUCT_IMAGE_TOO_LARGE");
+    if (allowImages) {
+      if (pdfLogo && pdfLogo.size > 2 * 1024 * 1024) {
+        setPdfError("Logo trop lourd. Limitez à 2 Mo.");
+        setPdfErrorCode("LOGO_TOO_LARGE");
         return;
+      }
+
+      const coverErr = validateImageFile(pdfCoverImage, "Photo de couverture");
+      if (coverErr) {
+        setPdfError(coverErr);
+        setPdfErrorCode("COVER_TOO_LARGE");
+        return;
+      }
+
+      // product images validation (only those set)
+      for (const [pid, file] of Object.entries(pdfProductImages || {})) {
+        const errMsg = validateImageFile(file, `Photo produit (${pid})`);
+        if (errMsg) {
+          setPdfError(errMsg);
+          setPdfErrorCode("PRODUCT_IMAGE_TOO_LARGE");
+          return;
+        }
       }
     }
 
@@ -1214,7 +1248,7 @@ export default function Products() {
 
     // IMPORTANT: si tu veux des photos produits, on force le mode custom (IDs),
     // sinon tu ne sais pas “à quels produits” associer les fichiers.
-    const hasAnyProductImages = Object.keys(pdfProductImages || {}).length > 0;
+    const hasAnyProductImages = allowImages && Object.keys(pdfProductImages || {}).length > 0;
     if (hasAnyProductImages && selection.mode !== "ids") {
       setPdfError("Pour ajouter des photos produit, passe en mode “Sélection personnalisée”.");
       setPdfErrorCode("PRODUCT_IMAGES_REQUIRE_CUSTOM_MODE");
@@ -1239,9 +1273,11 @@ export default function Products() {
       if (pdfBranding.company_phone) params.set("company_phone", pdfBranding.company_phone);
       if (pdfBranding.company_address) params.set("company_address", pdfBranding.company_address);
       if (pdfTemplate) params.set("template", pdfTemplate);
+      if (pdfMode) params.set("mode", pdfMode);
 
       const useMultipart =
-        Boolean(pdfLogo) || Boolean(pdfCoverImage) || Object.keys(pdfProductImages || {}).length > 0;
+        allowImages &&
+        (Boolean(pdfLogo) || Boolean(pdfCoverImage) || Object.keys(pdfProductImages || {}).length > 0);
 
       let res;
 
@@ -1253,8 +1289,10 @@ export default function Products() {
         if (pdfCoverImage) formData.append("cover_image", pdfCoverImage);
 
         // product images: product_image_<id>
-        for (const [pid, file] of Object.entries(pdfProductImages || {})) {
-          if (file) formData.append(`product_image_${pid}`, file);
+        if (allowImages) {
+          for (const [pid, file] of Object.entries(pdfProductImages || {})) {
+            if (file) formData.append(`product_image_${pid}`, file);
+          }
         }
 
         // params
@@ -1397,11 +1435,20 @@ export default function Products() {
           <h1 className="text-2xl font-black text-[var(--text)]">{ux.productsTitle}</h1>
           <p className="text-[var(--muted)] text-sm">{ux.productsIntro}</p>
           <div className="text-xs text-[var(--muted)]">{catalogueNote}</div>
+          <div className="text-xs text-[var(--muted)]">Catalogue PDF disponible depuis ce catalogue.</div>
+          {offlineData && (
+            <div className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-100/80 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-400/30 rounded-full px-3 py-1 w-fit">
+              Mode hors ligne : données locales affichées
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2 pt-2">
-            <Button variant="secondary" onClick={openCatalogDrawer}>
+            <Button variant="secondary" onClick={generateCatalogPdf}>
               <FileText className="h-4 w-4" />
-              Générer un catalogue PDF
+              Générer le PDF
+            </Button>
+            <Button variant="secondary" onClick={openCatalogDrawer}>
+              Options catalogue
             </Button>
             <Button onClick={openNewProduct} disabled={isAllServices}>
               <ListChecks className="h-4 w-4" />
@@ -1858,152 +1905,168 @@ export default function Products() {
               />
             </div>
 
-              {/* Template + logo */}
-            <div className="space-y-3">
-              <div className="text-sm font-semibold text-[var(--text)]">Template</div>
-              {templatesLoading ? (
+            {/* Mode */}
+            <Select
+              label="Mode d’impression"
+              value={pdfMode}
+              onChange={(v) => setPdfMode(v)}
+              options={[
+                { value: "graphic", label: "Graphique (premium)" },
+                { value: "simple", label: "Impression simple (tableau)" },
+              ]}
+              helper="Le mode simple génère un tableau lisible, sans images."
+            />
+
+            {pdfMode === "graphic" ? (
+              <div className="space-y-3">
+                <div className="text-sm font-semibold text-[var(--text)]">Template</div>
+                {templatesLoading ? (
                   <div className="text-xs text-[var(--muted)]">Chargement des templates…</div>
                 ) : null}
 
-              {/* (Optionnel) on garde le Select pour accessibilité / rapidité */}
-              <Select
-                label="Choix rapide"
-                value={pdfTemplate}
-                onChange={(v) => setPdfTemplate(v)}
-                options={templateOptions}
-                helper="Ou clique directement sur une carte ci-dessous."
-              />
-
-              {/* Preview cards */}
-              <div className="grid sm:grid-cols-3 gap-2">
-                {templateOptions.map((opt) => (
-                  <TemplateCard
-                    key={opt.value}
-                    title={opt.label}
-                    meta={templateMeta[opt.value] || templateMeta.classic}
-                    active={String(pdfTemplate) === String(opt.value)}
-                    onSelect={() => setPdfTemplate(opt.value)}
-                  />
-                  
-                ))}
-              </div>
-              <div className="text-xs text-[var(--muted)]">
-                Template sélectionné :{" "}
-                <span className="font-semibold text-[var(--text)]">
-                  {templateMeta[pdfTemplate]?.name || pdfTemplate}
-                </span>
-              </div>
-
-              {/* Logo */}
-              <div className="pt-2">
-                <label className="block text-sm font-semibold text-[var(--text)]">Logo (optionnel)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="mt-1 block w-full text-sm"
-                  onChange={(e) => setPdfLogo(e.target.files?.[0] ?? null)}
+                {/* (Optionnel) on garde le Select pour accessibilité / rapidité */}
+                <Select
+                  label="Choix rapide"
+                  value={pdfTemplate}
+                  onChange={(v) => setPdfTemplate(v)}
+                  options={templateOptions}
+                  helper="Ou clique directement sur une carte ci-dessous."
                 />
-                <div className="text-xs text-[var(--muted)] mt-1">Max 2 Mo.</div>
-              </div>
-                {/* Photos (PDF only) */}
-              <div className="pt-3 space-y-2">
-                <div className="text-sm font-semibold text-[var(--text)]">Photos (PDF)</div>
+
+                {/* Preview cards */}
+                <div className="grid sm:grid-cols-3 gap-2">
+                  {templateOptions.map((opt) => (
+                    <TemplateCard
+                      key={opt.value}
+                      title={opt.label}
+                      meta={templateMeta[opt.value] || templateMeta.classic}
+                      active={String(pdfTemplate) === String(opt.value)}
+                      onSelect={() => setPdfTemplate(opt.value)}
+                    />
+                  ))}
+                </div>
                 <div className="text-xs text-[var(--muted)]">
-                  Ces images ne sont pas enregistrées : elles servent uniquement à générer ce PDF.
+                  Template sélectionné :{" "}
+                  <span className="font-semibold text-[var(--text)]">
+                    {templateMeta[pdfTemplate]?.name || pdfTemplate}
+                  </span>
                 </div>
 
-                {/* Cover image */}
+                {/* Logo */}
                 <div className="pt-2">
-                  <label className="block text-sm font-semibold text-[var(--text)]">Photo de couverture (optionnel)</label>
+                  <label className="block text-sm font-semibold text-[var(--text)]">Logo (optionnel)</label>
                   <input
                     type="file"
                     accept="image/*"
                     className="mt-1 block w-full text-sm"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      const errMsg = validateImageFile(f, "Photo de couverture");
-                      if (errMsg) {
-                        pushToast?.({ type: "error", message: errMsg });
-                        return;
-                      }
-                      setPdfCoverImage(f);
-                    }}
+                    onChange={(e) => setPdfLogo(e.target.files?.[0] ?? null)}
                   />
-                  <div className="text-xs text-[var(--muted)] mt-1">Max {MAX_IMAGE_MB} Mo.</div>
+                  <div className="text-xs text-[var(--muted)] mt-1">Max 2 Mo.</div>
                 </div>
-
-                {/* Product images only in custom mode */}
-                {catalogMode !== "custom" ? (
+                {/* Photos (PDF only) */}
+                <div className="pt-3 space-y-2">
+                  <div className="text-sm font-semibold text-[var(--text)]">Photos (PDF)</div>
                   <div className="text-xs text-[var(--muted)]">
-                    Pour ajouter des photos produit : passe en <b>Sélection personnalisée</b> et ajoute tes produits.
+                    Ces images ne sont pas enregistrées : elles servent uniquement à générer ce PDF.
                   </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="text-sm font-semibold text-[var(--text)]">
-                      Photos produit (sélection personnalisée)
+
+                  {/* Cover image */}
+                  <div className="pt-2">
+                    <label className="block text-sm font-semibold text-[var(--text)]">Photo de couverture (optionnel)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="mt-1 block w-full text-sm"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] ?? null;
+                        const errMsg = validateImageFile(f, "Photo de couverture");
+                        if (errMsg) {
+                          pushToast?.({ type: "error", message: errMsg });
+                          return;
+                        }
+                        setPdfCoverImage(f);
+                      }}
+                    />
+                    <div className="text-xs text-[var(--muted)] mt-1">Max {MAX_IMAGE_MB} Mo.</div>
+                  </div>
+
+                  {/* Product images only in custom mode */}
+                  {catalogMode !== "custom" ? (
+                    <div className="text-xs text-[var(--muted)]">
+                      Pour ajouter des photos produit : passe en <b>Sélection personnalisée</b> et ajoute tes produits.
                     </div>
-
-                    {catalogSelected.length === 0 ? (
-                      <div className="text-xs text-[var(--muted)]">
-                        Ajoute d’abord des produits via la recherche live, puis upload les photos ici.
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold text-[var(--text)]">
+                        Photos produit (sélection personnalisée)
                       </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {catalogSelected.map((p) => {
-                          const pid = String(p.id);
-                          const currentFile = pdfProductImages?.[pid] || null;
 
-                          return (
-                            <div
-                              key={p.id}
-                              className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="text-sm font-semibold text-[var(--text)] truncate">{p.name}</div>
-                                  <div className="text-xs text-[var(--muted)]">{p.barcode || p.internal_sku || "—"}</div>
+                      {catalogSelected.length === 0 ? (
+                        <div className="text-xs text-[var(--muted)]">
+                          Ajoute d’abord des produits via la recherche live, puis upload les photos ici.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {catalogSelected.map((p) => {
+                            const pid = String(p.id);
+                            const currentFile = pdfProductImages?.[pid] || null;
+
+                            return (
+                              <div
+                                key={p.id}
+                                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-sm font-semibold text-[var(--text)] truncate">{p.name}</div>
+                                    <div className="text-xs text-[var(--muted)]">{p.barcode || p.internal_sku || "—"}</div>
+                                  </div>
+
+                                  {currentFile ? (
+                                    <button
+                                      type="button"
+                                      className="text-xs rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:bg-[var(--accent)]/15"
+                                      onClick={() => removeProductImageFile(pid)}
+                                    >
+                                      Retirer photo
+                                    </button>
+                                  ) : null}
                                 </div>
+
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="mt-2 block w-full text-sm"
+                                  onChange={(e) => setProductImageFile(pid, e.target.files?.[0] ?? null)}
+                                />
 
                                 {currentFile ? (
-                                  <button
-                                    type="button"
-                                    className="text-xs rounded-full border border-[var(--border)] px-3 py-1 text-[var(--muted)] hover:bg-[var(--accent)]/15"
-                                    onClick={() => removeProductImageFile(pid)}
-                                  >
-                                    Retirer photo
-                                  </button>
-                                ) : null}
+                                  <div className="text-xs text-[var(--muted)] mt-1">
+                                    Sélectionné : <span className="font-semibold text-[var(--text)]">{currentFile.name}</span>
+                                  </div>
+                                ) : (
+                                  <div className="text-xs text-[var(--muted)] mt-1">Optionnel</div>
+                                )}
                               </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="mt-2 block w-full text-sm"
-                                onChange={(e) => setProductImageFile(pid, e.target.files?.[0] ?? null)}
-                              />
-
-                              {currentFile ? (
-                                <div className="text-xs text-[var(--muted)] mt-1">
-                                  Sélectionné : <span className="font-semibold text-[var(--text)]">{currentFile.name}</span>
-                                </div>
-                              ) : (
-                                <div className="text-xs text-[var(--muted)] mt-1">Optionnel</div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                  <div className="pt-2 flex gap-2">
+                    <Button variant="secondary" type="button" onClick={clearPdfImages}>
+                      Réinitialiser les photos
+                    </Button>
                   </div>
-                )}
-
-                <div className="pt-2 flex gap-2">
-                  <Button variant="secondary" type="button" onClick={clearPdfImages}>
-                    Réinitialiser les photos
-                  </Button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--muted)]">
+                Mode simple actif : tableau lisible, sans images ni template graphique.
+              </div>
+            )}
 
             {pdfError ? (
               <div className="rounded-2xl border border-red-200/70 dark:border-red-400/25 bg-red-50/70 dark:bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-200">

@@ -33,8 +33,6 @@ from django.utils.text import slugify
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
-from reportlab.lib.colors import HexColor
 from reportlab.graphics.barcode import code128
 
 from accounts.mixins import TenantQuerySetMixin
@@ -69,6 +67,15 @@ from .models import (
 )
 from .serializers import ProductSerializer, CategorySerializer, LossEventSerializer
 from .sku import generate_auto_sku
+from .pdf import (
+    build_catalog_graphic_pdf,
+    build_catalog_simple_pdf,
+    list_templates,
+    get_theme,
+    build_preview_svg,
+)
+from .pdf.fields import CATALOG_ALLOWED_FIELDS, CATALOG_DEFAULT_FIELDS, CATALOG_FIELD_LABELS
+from .pdf.components.utils import currency_symbol, format_price
 
 logger = logging.getLogger(__name__)
 
@@ -93,38 +100,6 @@ RECEIPTS_OCR_MAX_PAGES_DEFAULT = 3
 RECEIPTS_OCR_TIMEOUT_DEFAULT = 25
 RECEIPTS_OCR_CACHE_TTL_DEFAULT = 60 * 60 * 24  # 24h
 DUPLICATE_NAME_SIMILARITY = 0.985
-CATALOG_TEMPLATES = {
-   
-    "classic":  {"accent": "#1E3A8A", "muted": "#475569"},
-    "midnight": {"accent": "#0F172A", "muted": "#334155"},
-    "emerald":  {"accent": "#047857", "muted": "#475569"},
-
-    # nouveaux templates (premium + variés)
-    "royal":    {"accent": "#4F46E5", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "sunset":   {"accent": "#F97316", "muted": "#7C2D12", "header_bg": "#111827", "header_text": "#FFFFFF"},
-    "rose":     {"accent": "#E11D48", "muted": "#64748B", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "ocean":    {"accent": "#0284C7", "muted": "#475569", "header_bg": "#082F49", "header_text": "#FFFFFF"},
-    "lime":     {"accent": "#65A30D", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "amber":    {"accent": "#D97706", "muted": "#475569", "header_bg": "#111827", "header_text": "#FFFFFF"},
-    "violet":   {"accent": "#7C3AED", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "copper":   {"accent": "#B45309", "muted": "#57534E", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-
-    # sobres / industries
-    "slate":    {"accent": "#334155", "muted": "#475569", "header_bg": "#0F172A", "header_text": "#FFFFFF"},
-    "graphite": {"accent": "#111827", "muted": "#6B7280", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "sand":     {"accent": "#A16207", "muted": "#57534E", "header_bg": "#1C1917", "header_text": "#FFFFFF"},
-    "ink":      {"accent": "#0EA5E9", "muted": "#64748B", "header_bg": "#020617", "header_text": "#FFFFFF"},
-
-    # beauty / luxe
-    "champagne":{"accent": "#C8A97E", "muted": "#6B7280", "header_bg": "#111827", "header_text": "#FFFFFF"},
-    "noir_gold":{"accent": "#D4AF37", "muted": "#9CA3AF", "header_bg": "#050505", "header_text": "#FFFFFF"},
-    "plum":     {"accent": "#6D28D9", "muted": "#6B7280", "header_bg": "#1F2937", "header_text": "#FFFFFF"},
-
-    # nature / bio
-    "forest":   {"accent": "#166534", "muted": "#475569", "header_bg": "#052E16", "header_text": "#FFFFFF"},
-    "mint":     {"accent": "#10B981", "muted": "#475569", "header_bg": "#0B1220", "header_text": "#FFFFFF"},
-    "earth":    {"accent": "#92400E", "muted": "#57534E", "header_bg": "#1C1917", "header_text": "#FFFFFF"},
-}
 NAME_STOPWORDS = {
     "produit",
     "article",
@@ -152,37 +127,6 @@ LABEL_ALLOWED_FIELDS = {
     "brand",
     "unit",
     "dlc",
-}
-CATALOG_ALLOWED_FIELDS = {
-    "barcode",
-    "sku",
-    "unit",
-    "purchase_price",
-    "selling_price",
-    "tva",
-    "variants",
-    "dlc",
-    "lot",
-    "min_qty",
-    "supplier",
-    "notes",
-    "brand",
-}
-CATALOG_DEFAULT_FIELDS = ["barcode", "sku", "unit"]
-CATALOG_FIELD_LABELS = {
-    "barcode": "EAN",
-    "sku": "SKU",
-    "unit": "Unité",
-    "purchase_price": "Prix achat",
-    "selling_price": "Prix vente",
-    "tva": "TVA",
-    "variants": "Variante",
-    "dlc": "DLC",
-    "lot": "Lot",
-    "min_qty": "Stock min",
-    "supplier": "Fournisseur",
-    "notes": "Notes",
-    "brand": "Marque",
 }
 
 
@@ -358,78 +302,12 @@ def _parse_pdf_fields(raw_fields):
     return filtered if filtered else list(CATALOG_DEFAULT_FIELDS)
 
 
-def _format_catalog_field(label, value):
-    if value is None or value == "":
-        return None
-    return f"{label}: {value}"
-
-
-def _format_catalog_line(product, fields, include_service=False, currency_code="EUR"):
-    values = []
-    if include_service and getattr(product, "service", None):
-        values.append(_format_catalog_field("Service", product.service.name))
-
-    if "barcode" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["barcode"], product.barcode))
-    if "sku" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["sku"], product.internal_sku))
-    if "unit" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["unit"], product.unit))
-    if "variants" in fields:
-        variant = _format_variant(product)
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["variants"], variant))
-    if "purchase_price" in fields:
-        val = _format_price(product.purchase_price, currency_code)
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["purchase_price"], val))
-    if "selling_price" in fields:
-        val = _format_price(product.selling_price, currency_code)
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["selling_price"], val))
-    if "tva" in fields:
-        val = f"{product.tva}%" if product.tva is not None else None
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["tva"], val))
-    if "dlc" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["dlc"], product.dlc))
-    if "lot" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["lot"], product.lot_number))
-    if "min_qty" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["min_qty"], product.min_qty))
-    if "supplier" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["supplier"], product.supplier))
-    if "brand" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["brand"], product.brand))
-    if "notes" in fields:
-        values.append(_format_catalog_field(CATALOG_FIELD_LABELS["notes"], product.notes))
-
-    return " · ".join([v for v in values if v])
-
-
 def _currency_symbol(code: str) -> str:
-    code = (code or "EUR").upper()
-    symbols = {
-        "EUR": "€",
-        "USD": "$",
-        "GBP": "£",
-        "CHF": "CHF",
-        "CAD": "CA$",
-        "AUD": "A$",
-        "JPY": "¥",
-        "CNY": "¥",
-        "BRL": "R$",
-        "MAD": "MAD",
-        "XOF": "F CFA",
-        "XAF": "F CFA",
-    }
-    return symbols.get(code, code)
+    return currency_symbol(code)
 
 
 def _format_price(value, currency_code="EUR"):
-    if value is None:
-        return None
-    try:
-        symbol = _currency_symbol(currency_code)
-        return f"{float(value):.2f} {symbol}"
-    except (TypeError, ValueError):
-        return None
+    return format_price(value, currency_code)
 
 
 def _price_per_unit(product, currency_code="EUR"):
@@ -525,29 +403,6 @@ def _parse_label_counts(raw):
     return counts
 
 
-class NumberedCanvas(canvas.Canvas):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._saved_page_states = []
-
-    def showPage(self):
-        self._saved_page_states.append(dict(self.__dict__))
-        self._startPage()
-
-    def save(self):
-        num_pages = len(self._saved_page_states)
-        for state in self._saved_page_states:
-            self.__dict__.update(state)
-            self._draw_page_number(num_pages)
-            canvas.Canvas.showPage(self)
-        canvas.Canvas.save(self)
-
-    def _draw_page_number(self, page_count):
-        self.setFont("Helvetica", 9)
-        self.setFillColorRGB(0.45, 0.45, 0.45)
-        self.drawRightString(A4[0] - 2 * cm, 1.2 * cm, f"Page {self._pageNumber} / {page_count}")
-
-
 class PDFRenderer(BaseRenderer):
     media_type = "application/pdf"
     format = "pdf"
@@ -584,83 +439,6 @@ def _parse_ids_param(raw):
     return out
 
 
-def _draw_circle_logo(c, img_bytes, x, y, size):
-    """
-    Draw a circular clipped logo (premium look).
-    x,y = bottom-left of the square container.
-    """
-    if not img_bytes:
-        return
-    try:
-        logo = ImageReader(io.BytesIO(img_bytes))
-        path = c.beginPath()
-        r = size / 2.0
-        cx = x + r
-        cy = y + r
-        path.circle(cx, cy, r)
-        c.saveState()
-        c.clipPath(path, stroke=0, fill=0)
-        c.drawImage(
-            logo,
-            x,
-            y,
-            width=size,
-            height=size,
-            preserveAspectRatio=True,
-            mask="auto",
-        )
-        c.restoreState()
-
-        # subtle ring
-        c.saveState()
-        c.setLineWidth(1)
-        c.setStrokeColor(HexColor("#E2E8F0"))
-        c.circle(cx, cy, r)
-        c.restoreState()
-    except Exception:
-
-        return
-    
-    
-def _draw_rounded_image(c, img_bytes, x, y, w, h, radius=12):
-    """
-    Draw an image clipped into a rounded rectangle.
-    x,y = bottom-left of the rect.
-    """
-    if not img_bytes:
-        return False
-    try:
-        img = ImageReader(io.BytesIO(img_bytes))
-        path = c.beginPath()
-        path.roundRect(x, y, w, h, radius)
-
-        c.saveState()
-        c.clipPath(path, stroke=0, fill=0)
-        c.drawImage(img, x, y, width=w, height=h, preserveAspectRatio=True, anchor='c', mask="auto")
-        c.restoreState()
-        return True
-    except Exception:
-        return False
-
-
-def _draw_cover_hero_image(c, img_bytes, x, y, w, h):
-    """
-    Big cover image area (premium look) with subtle rounded corners.
-    """
-    ok = _draw_rounded_image(c, img_bytes, x, y, w, h, radius=16)
-    if ok:
-        
-        try:
-            c.saveState()
-            c.setLineWidth(1)
-            c.setStrokeColor(HexColor("#E2E8F0"))
-            c.roundRect(x, y, w, h, 16, fill=0, stroke=1)
-            c.restoreState()
-        except Exception:
-            pass
-    return ok
-
-
 def _truncate_text(c, text, font_name, font_size, max_width):
     if not text:
         return ""
@@ -677,277 +455,6 @@ def _truncate_text(c, text, font_name, font_size, max_width):
         else:
             hi = mid
     return (s[: max(0, lo - 1)].rstrip() + ell) if lo > 0 else ell
-def _build_catalog_pdf(
-    *,
-    tenant,
-    company_name,
-    company_email,
-    company_phone,
-    company_address,
-    fields,
-    products,
-    truncated,
-    include_service,
-    logo_bytes=None,
-    template="classic",
-    cover_image_bytes=None,
-    product_images=None,
-):
-    buffer = io.BytesIO()
-    c = NumberedCanvas(buffer, pagesize=A4)
-    width, height = A4
-
-    theme = CATALOG_TEMPLATES.get((template or "").lower(), CATALOG_TEMPLATES["classic"])
-
-    accent = HexColor(theme.get("accent", "#1E3A8A"))
-    muted = HexColor(theme.get("muted", "#475569"))
-
-    header_bg = HexColor(theme.get("header_bg", "#0B1220"))      
-    header_text = HexColor(theme.get("header_text", "#FFFFFF")) 
-
-    ink = HexColor("#0F172A")
-    paper = HexColor("#FFFFFF")
-    soft = HexColor("#F1F5F9")
-    border = HexColor("#E2E8F0")
-
-    margin_x = 1.6 * cm
-    top_header_h = 2.2 * cm
-
-    def draw_top_header(title_left=None):
-        # Dark premium bar
-        c.setFillColor(header_bg)
-        c.rect(0, height - top_header_h, width, top_header_h, fill=1, stroke=0)
-
-        # Accent line
-        c.setFillColor(accent)
-        c.rect(0, height - top_header_h, width, 0.10 * cm, fill=1, stroke=0)
-
-        # Circular logo
-        if logo_bytes:
-            _draw_circle_logo(c, logo_bytes, margin_x, height - top_header_h + 0.35 * cm, 1.5 * cm)
-
-        # Company name
-        c.setFillColor(header_text)
-        c.setFont("Helvetica-Bold", 14)
-        name_x = margin_x + (1.75 * cm if logo_bytes else 0)
-        c.drawString(name_x, height - 1.35 * cm, _truncate_text(c, company_name or tenant.name or "StockScan", "Helvetica-Bold", 14, width - name_x - margin_x))
-
-        # subtitle
-        c.setFont("Helvetica", 9.5)
-        subtitle = title_left or "Catalogue produits"
-        c.setFillColor(HexColor(theme.get("header_subtext", "#CBD5E1")))
-        c.drawString(name_x, height - 1.90 * cm, _truncate_text(c, subtitle, "Helvetica", 9.5, width - name_x - margin_x))
-
-        # date right
-        c.setFont("Helvetica", 9.5)
-        c.setFillColor(HexColor(theme.get("header_subtext", "#CBD5E1")))
-        c.drawRightString(width - margin_x, height - 1.85 * cm, timezone.now().strftime("%d/%m/%Y"))
-
-    def draw_cover():
-        # Background
-        c.setFillColor(paper)
-        c.rect(0, 0, width, height, fill=1, stroke=0)
-
-        draw_top_header("Catalogue produits")
-
-       
-        hero_x = margin_x
-        hero_w = width - 2 * margin_x
-        hero_h = 8.2 * cm
-        hero_y = height - 4.4 * cm - hero_h 
-
-        if cover_image_bytes:
-            _draw_cover_hero_image(c, cover_image_bytes, hero_x, hero_y, hero_w, hero_h)
-        else:
-            c.setFillColor(soft)
-            c.setStrokeColor(border)
-            c.setLineWidth(1)
-            c.roundRect(hero_x, hero_y, hero_w, hero_h, 16, fill=1, stroke=1)
-            c.setFillColor(muted)
-            c.setFont("Helvetica", 10)
-            c.drawCentredString(hero_x + hero_w / 2, hero_y + hero_h / 2, "Ajoutez une photo de couverture (optionnel)")
-
-        # Info card (NOW it can use hero_y)
-        card_x = margin_x
-        card_y = hero_y - 3.8 * cm
-        card_w = width - 2 * margin_x
-        card_h = 3.2 * cm
-
-        c.setFillColor(soft)
-        c.setStrokeColor(border)
-        c.setLineWidth(1)
-        c.roundRect(card_x, card_y, card_w, card_h, 10, fill=1, stroke=1)
-
-        info_lines = [company_email, company_phone, company_address]
-        y = card_y + card_h - 0.75 * cm
-        c.setFont("Helvetica-Bold", 10)
-        c.setFillColor(ink)
-        c.drawString(card_x + 0.7 * cm, y, "Coordonnées")
-        y -= 0.55 * cm
-
-        c.setFont("Helvetica", 9.5)
-        c.setFillColor(muted)
-        for line in info_lines:
-            if line:
-                c.drawString(card_x + 0.7 * cm, y, str(line))
-                y -= 0.5 * cm
-
-        if truncated:
-            c.setFillColor(HexColor("#B91C1C"))
-            c.setFont("Helvetica-Bold", 9.5)
-            c.drawString(margin_x, card_y - 0.65 * cm, f"Liste tronquée à {CATALOG_PDF_MAX_PRODUCTS} produits.")
-                # Hero image (optional)
-        hero_x = margin_x
-        hero_w = width - 2 * margin_x
-        hero_h = 8.2 * cm
-        hero_y = height - 4.4 * cm - hero_h  # sous le titre
-
-        if cover_image_bytes:
-            _draw_cover_hero_image(c, cover_image_bytes, hero_x, hero_y, hero_w, hero_h)
-        else:
-            # fallback nice empty hero
-            c.setFillColor(soft)
-            c.setStrokeColor(border)
-            c.setLineWidth(1)
-            c.roundRect(hero_x, hero_y, hero_w, hero_h, 16, fill=1, stroke=1)
-            c.setFillColor(muted)
-            c.setFont("Helvetica", 10)
-            c.drawCentredString(hero_x + hero_w / 2, hero_y + hero_h / 2, "Ajoutez une photo de couverture (optionnel)")
-    # Cover
-    draw_cover()
-    c.showPage()
-
-    # Group by category
-    grouped = {}
-    for p in products:
-        key = (p.category or "Sans catégorie").strip() or "Sans catégorie"
-        grouped.setdefault(key, []).append(p)
-
-    # Layout for product cards: 2 columns
-    col_gap = 0.7 * cm
-    card_w = (width - 2 * margin_x - col_gap) / 2
-    card_h = 4.0 * cm
-    y = height - top_header_h - 1.0 * cm
-
-    def new_page():
-        c.showPage()
-        draw_top_header("Catalogue produits")
-        return height - top_header_h - 1.0 * cm
-
-    draw_top_header("Catalogue produits")
-
-    for category, items in grouped.items():
-        if y < 3.2 * cm:
-            y = new_page()
-
-        # Category pill
-        c.setFillColor(HexColor("#0B1220"))
-        pill_h = 0.85 * cm
-        c.roundRect(margin_x, y - pill_h, width - 2 * margin_x, pill_h, 10, fill=1, stroke=0)
-        c.setFillColor(paper)
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(margin_x + 0.55 * cm, y - 0.62 * cm, _truncate_text(c, category, "Helvetica-Bold", 11, width - 2 * margin_x - 1.2 * cm))
-        y -= (pill_h + 0.55 * cm)
-
-        col = 0
-        x = margin_x
-
-        for p in items:
-            if y < 3.2 * cm:
-                y = new_page()
-                # repeat category label lightly
-                c.setFillColor(muted)
-                c.setFont("Helvetica-Bold", 10)
-                c.drawString(margin_x, y, _truncate_text(c, category, "Helvetica-Bold", 10, width - 2 * margin_x))
-                y -= 0.55 * cm
-
-                        # Card background
-            c.setFillColor(soft)
-            c.setStrokeColor(border)
-            c.setLineWidth(1)
-            c.roundRect(x, y - card_h, card_w, card_h, 12, fill=1, stroke=1)
-
-            # Product image area (top)
-            img_h = 1.55 * cm
-            img_pad = 0.45 * cm
-            img_x = x + img_pad
-            img_y = y - img_pad - img_h
-            img_w = card_w - 2 * img_pad
-
-            img_bytes = product_images.get(p.id)
-            has_img = False
-            if img_bytes:
-                has_img = _draw_rounded_image(c, img_bytes, img_x, img_y, img_w, img_h, radius=10)
-            if not has_img:
-                # subtle placeholder
-                c.setFillColor(HexColor("#E5E7EB"))
-                c.roundRect(img_x, img_y, img_w, img_h, 10, fill=1, stroke=0)
-
-            # Name (below image)
-            c.setFillColor(ink)
-            c.setFont("Helvetica-Bold", 11)
-            name = (p.name or "").strip()
-            name_y = img_y - 0.45 * cm
-            c.drawString(img_x, name_y, _truncate_text(c, name, "Helvetica-Bold", 11, img_w))
-
-            # Service tag
-            if include_service and getattr(p, "service", None):
-                tag = (p.service.name or "").strip()
-                c.setFont("Helvetica", 8.5)
-                c.setFillColor(accent)
-                c.drawString(img_x, name_y - 0.45 * cm, _truncate_text(c, f"Service: {tag}", "Helvetica", 8.5, img_w))
-
-            # Details line(s)
-            details = _format_catalog_line(p, fields, include_service=False, currency_code=tenant.currency_code)
-            c.setFont("Helvetica", 9)
-            c.setFillColor(muted)
-            details_y = name_y - (0.95 * cm if (include_service and getattr(p, "service", None)) else 0.55 * cm)
-            if details:
-                max_w = img_w
-                line1 = _truncate_text(c, details, "Helvetica", 9, max_w)
-                c.drawString(img_x, details_y, line1)
-                rest = details[len(line1):].lstrip(" ·")
-                if rest:
-                    line2 = _truncate_text(c, rest, "Helvetica", 9, max_w)
-                    c.drawString(img_x, details_y - 0.45 * cm, line2)
-            # Barcode small (optional)
-            code = (p.barcode or p.internal_sku or "").strip()
-            if code:
-                try:
-                    barcode_h = 0.75 * cm
-                    barcode_obj = code128.Code128(code, barHeight=barcode_h, barWidth=0.65)
-                    bx = x + card_w - 0.55 * cm - barcode_obj.width
-                    by = y - card_h + 0.55 * cm
-                    barcode_obj.drawOn(c, bx, by)
-                    c.setFont("Helvetica", 7)
-                    c.setFillColor(muted)
-                    c.drawRightString(x + card_w - 0.55 * cm, by - 0.25 * cm, _truncate_text(c, code, "Helvetica", 7, card_w * 0.6))
-                except Exception:
-                    pass
-
-            # Move column / row
-            col += 1
-            if col % 2 == 0:
-                # new row
-                x = margin_x
-                y -= (card_h + 0.6 * cm)
-            else:
-                # next column
-                x = margin_x + card_w + col_gap
-
-        # ensure next category starts on new row properly
-        if (len(items) % 2) == 1:
-            x = margin_x
-            y -= (card_h + 0.6 * cm)
-        else:
-            x = margin_x
-
-        y -= 0.2 * cm
-
-    c.save()
-    return buffer.getvalue()
-
-
 def _converted_quantity(product):
     factor = getattr(product, "conversion_factor", None)
     unit = getattr(product, "conversion_unit", None)
@@ -2166,13 +1673,17 @@ def catalog_pdf(request):
     exclude_ids_list = _parse_ids_param(payload.get("exclude_ids") or payload.get("excludeIds"))
     include_service = service_param == "all"
 
-    qs = Product.objects.filter(tenant=tenant)
-    qs = _apply_retention(qs, tenant)
+    service_obj = None
     if service_param and service_param != "all":
         try:
-            qs = qs.filter(service_id=int(service_param))
+            service_obj = Service.objects.filter(id=int(service_param), tenant=tenant).first()
         except (ValueError, TypeError):
-            pass
+            service_obj = None
+
+    qs = Product.objects.filter(tenant=tenant)
+    qs = _apply_retention(qs, tenant)
+    if service_obj:
+        qs = qs.filter(service=service_obj)
     if ids_list:
         qs = qs.filter(id__in=ids_list)
     if exclude_ids_list:
@@ -2202,8 +1713,12 @@ def catalog_pdf(request):
     company_phone = (payload.get("company_phone") or "").strip()
     company_address = (payload.get("company_address") or "").strip()
     template = (payload.get("template") or "classic").strip().lower()
-    if template not in CATALOG_TEMPLATES:
+    template_ids = {t["id"] for t in list_templates()}
+    if template not in template_ids:
         template = "classic"
+    mode = (payload.get("mode") or "graphic").strip().lower()
+    if mode not in ("graphic", "simple"):
+        mode = "graphic"
 
     logo_bytes = None
     cover_image_bytes = None
@@ -2226,22 +1741,32 @@ def catalog_pdf(request):
                 if raw_id.isdigit():
                     product_images[int(raw_id)] = f.read()
 
-    pdf_bytes = _build_catalog_pdf(
-        product_images = product_images or {},
-        tenant=tenant,
-        company_name=company_name,
-        company_email=company_email,
-        company_phone=company_phone,
-        company_address=company_address,
-        fields=fields,
-        products=products,
-        truncated=truncated,
-        include_service=include_service,
-        logo_bytes=logo_bytes,
-        template=template,
-        cover_image_bytes=cover_image_bytes,
-        #product_images=product_images,
-    )
+    if mode == "simple":
+        pdf_bytes = build_catalog_simple_pdf(
+            tenant=tenant,
+            products=products,
+            fields=fields,
+            include_service=include_service,
+            company_name=company_name,
+        )
+    else:
+        pdf_bytes = build_catalog_graphic_pdf(
+            tenant=tenant,
+            products=products,
+            fields=fields,
+            truncated=truncated,
+            include_service=include_service,
+            template=template,
+            company_name=company_name,
+            company_email=company_email,
+            company_phone=company_phone,
+            company_address=company_address,
+            service_type=getattr(service_obj, "service_type", None),
+            service_name=getattr(service_obj, "name", None),
+            logo_bytes=logo_bytes,
+            cover_image_bytes=cover_image_bytes,
+            product_images=product_images or {},
+        )
 
     _log_catalog_pdf_event(
         tenant=tenant,
@@ -2252,6 +1777,7 @@ def catalog_pdf(request):
             "q": query,
             "category": category,
             "template": template,
+            "mode": mode,
             "logo": bool(logo_bytes),
             "cover": bool(cover_image_bytes),
             "product_images": len(product_images),
@@ -2265,14 +1791,10 @@ def catalog_pdf(request):
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated, ManagerPermission])
 def catalog_templates(request):
-    return Response(
-        {
-            "templates": [
-                {"key": k, "accent": v.get("accent"), "header_bg": v.get("header_bg")}
-                for k, v in sorted(CATALOG_TEMPLATES.items())
-            ]
-        }
-    )
+    templates = list_templates()
+    for t in templates:
+        t["preview_svg"] = build_preview_svg(t["id"])
+    return Response({"templates": templates})
 @api_view(["GET"])
 @permission_classes([permissions.IsAuthenticated, ProductPermission])
 def search_products(request):
@@ -3986,9 +3508,6 @@ def labels_pdf(request):
 
         name_lines = wrap_label_text(name, max_name_w, "Helvetica-Bold", name_font, max_lines=2)
         y_top = y + label_h - pad_y - 2
-        for line in name_lines:
-            c.drawString(x + pad_x, y_top, line)
-            y_top -= 10.2
 
         # Price block (bigger, better centered)
         base_price = product.selling_price if product.selling_price is not None else product.purchase_price
@@ -4005,10 +3524,22 @@ def labels_pdf(request):
         barcode_y = y + pad_y + 10
         barcode_x = x + (label_w - barcode_obj.width) / 2
 
+        # Ensure there is enough room for price block; reduce name to 1 line if needed
+        min_price_height = 30 if promo_active else 22
+        price_block_top = barcode_y + barcode_height + 8
+        price_block_bottom = y_top - (len(name_lines) * 10.2) - 4
+        if price_block_bottom - price_block_top < min_price_height and len(name_lines) > 1:
+            name_lines = name_lines[:1]
+
+        # Draw name after the adjustment
+        y_top = y + label_h - pad_y - 2
+        for line in name_lines:
+            c.drawString(x + pad_x, y_top, line)
+            y_top -= 10.2
+
         # Compute price area just above barcode
-        price_y = barcode_y + barcode_height + 18
-        # Ensure it doesn't overlap name area
-        price_y = max(price_y, y_top - 6)
+        price_block_bottom = y_top - 4
+        price_y = max(price_block_top, price_block_bottom - min_price_height)
 
         if show_price:
             if promo_active:
@@ -4020,12 +3551,13 @@ def labels_pdf(request):
                     if promo["type"] == "percent"
                     else f"-{_format_price(promo['value'], currency_code)}"
                 )
+                old_y = min(price_block_bottom - 2, price_y + 12)
                 c.setFont("Helvetica", 7.8)
                 c.setFillColorRGB(0.25, 0.29, 0.34)
-                c.drawString(x + pad_x, price_y + 12, old_price or "")
+                c.drawString(x + pad_x, old_y, old_price or "")
                 old_w = c.stringWidth(old_price or "", "Helvetica", 7.8)
                 c.setLineWidth(1)
-                c.line(x + pad_x, price_y + 10, x + pad_x + old_w, price_y + 10)
+                c.line(x + pad_x, old_y - 2, x + pad_x + old_w, old_y - 2)
 
                 c.setFont("Helvetica-Bold", 20.5)
                 c.setFillColorRGB(0.08, 0.1, 0.13)
@@ -4033,7 +3565,7 @@ def labels_pdf(request):
 
                 c.setFont("Helvetica-Bold", 8.4)
                 c.setFillColorRGB(0.02, 0.5, 0.33)
-                c.drawRightString(x + label_w - pad_x, price_y + 12, badge)
+                c.drawRightString(x + label_w - pad_x, old_y, badge)
             elif price:
                 c.setFont("Helvetica-Bold", 20.5)
                 c.setFillColorRGB(0.08, 0.1, 0.13)

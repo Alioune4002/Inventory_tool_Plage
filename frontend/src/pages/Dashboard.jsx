@@ -14,6 +14,7 @@ import { api } from "../lib/api";
 import { useToast } from "../app/ToastContext";
 import AIAssistantPanel from "../components/AIAssistantPanel";
 import AlertsPanel from "../components/AlertsPanel";
+import PwaInstallCard from "../components/PwaInstallCard";
 import { getWording, getUxCopy } from "../lib/labels";
 import { formatCurrency } from "../lib/currency";
 
@@ -519,6 +520,8 @@ export default function Dashboard() {
             Astuce : le dashboard devient très parlant dès que vous avez des prix d’achat/vente et quelques pertes déclarées.
           </div>
         </Card>
+
+        <PwaInstallCard />
 
         {/* KPIs */}
         <div className="grid md:grid-cols-3 xl:grid-cols-5 gap-4 min-w-0">

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StockScan — Hors ligne</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, sans-serif;
+        background: #0b1220;
+        color: #e2e8f0;
+      }
+      .wrap {
+        min-height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        max-width: 460px;
+        width: 100%;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 24px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: #cbd5f5;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      button {
+        border: 0;
+        background: #3b82f6;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Vous êtes hors ligne</h1>
+        <p>
+          StockScan reste accessible, mais certaines actions nécessitent une connexion.
+          Réessayez quand le réseau est disponible.
+        </p>
+        <button onclick="window.location.reload()">Réessayer</button>
+      </div>
+    </div>
+  </body>
+</html>

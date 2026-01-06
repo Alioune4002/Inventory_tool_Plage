@@ -8,8 +8,20 @@ import { AuthProvider } from "./app/AuthProvider.jsx";
 import { HelmetProvider } from "react-helmet-async";
 import ErrorBoundary from "./app/ErrorBoundary.jsx";
 import { initMonitoring } from "./lib/monitoring";
+import { registerSW } from "virtual:pwa-register";
 
 initMonitoring();
+
+if (import.meta.env.PROD) {
+  const updateSW = registerSW({
+    onNeedRefresh() {
+      window.dispatchEvent(new CustomEvent("pwa:need-refresh", { detail: { updateSW } }));
+    },
+    onOfflineReady() {
+      window.dispatchEvent(new Event("pwa:offline-ready"));
+    },
+  });
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

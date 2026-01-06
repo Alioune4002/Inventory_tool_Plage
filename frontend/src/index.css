@@ -16,6 +16,8 @@
   --radius-pill: 999px;
   --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 0 1px rgba(59, 130, 246, 0.12), 0 25px 70px rgba(59, 130, 246, 0.35);
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
 
   /* ✅ optionnel mais très utile pour badges / banners */
   --warn-bg: #fbbf24;
@@ -78,6 +80,7 @@ body,
   width: 100%;
   overflow-x: hidden;
   max-width: 100vw;
+  -webkit-text-size-adjust: 100%;
 }
 
 /* Sécurise médias (souvent responsables du overflow) */
@@ -95,6 +98,7 @@ body {
     radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.06), transparent 30%),
     var(--bg);
   color: var(--text);
+  padding-bottom: var(--safe-bottom);
 }
 
 .public-shell {
@@ -183,6 +187,14 @@ body {
   select,
   textarea {
     color: var(--text);
+  }
+
+  @media (max-width: 768px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 
   /* Mode sombre - on garde un fallback mais pas destructif */

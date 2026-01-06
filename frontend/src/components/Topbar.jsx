@@ -1,5 +1,5 @@
 // src/components/Topbar.jsx
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { LogOut, Moon, Sun, Menu } from "lucide-react";
 import { useAuth } from "../app/AuthProvider";
 import Button from "../ui/Button";
@@ -39,6 +39,7 @@ function serviceDomainFromType(serviceType) {
 export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
   const { me, tenant, services, serviceId, selectService, logout, loading, serviceProfile } = useAuth();
   const isLight = useIsLightTheme();
+  const [isOffline, setIsOffline] = useState(typeof navigator !== "undefined" ? !navigator.onLine : false);
 
   const tenantDomain = tenant?.domain || "food";
   const isGeneralTenant = tenantDomain === "general";
@@ -59,8 +60,19 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
     return isGeneralTenant ? "Commerce non-alimentaire" : "Commerce alimentaire";
   }, [services, isGeneralTenant]);
 
+  useEffect(() => {
+    const onOnline = () => setIsOffline(false);
+    const onOffline = () => setIsOffline(true);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
+
   return (
-    <header className="sticky top-0 z-20 backdrop-blur bg-[var(--surface)]/90 border-b border-[var(--border)]">
+    <header className="sticky top-0 z-20 backdrop-blur bg-[var(--surface)]/90 border-b border-[var(--border)] pt-[env(safe-area-inset-top)]">
       <div className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <div className="hidden lg:block min-w-0">
@@ -95,6 +107,8 @@ export default function Topbar({ onLogout, onToggleTheme, onOpenMobileNav }) {
               <Menu size={18} />
             </button>
           )}
+
+          {isOffline && <Badge variant="warn">Hors ligne</Badge>}
 
           {onToggleTheme && (
             <Button

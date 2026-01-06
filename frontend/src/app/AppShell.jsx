@@ -8,6 +8,7 @@ import useEntitlements from "./useEntitlements";
 import ErrorBoundary from "./ErrorBoundary";
 import { formatApiError } from "../lib/errorUtils";
 import { captureException } from "../lib/monitoring";
+import PwaUpdateBanner from "../components/PwaUpdateBanner";
 
 const Sidebar = React.lazy(() => import("../components/Sidebar"));
 const Topbar = React.lazy(() => import("../components/Topbar"));
@@ -37,6 +38,36 @@ function UnhandledRejectionToaster() {
     };
     window.addEventListener("unhandledrejection", onUnhandled);
     return () => window.removeEventListener("unhandledrejection", onUnhandled);
+  }, [pushToast]);
+
+  return null;
+}
+
+function NetworkStatusToaster() {
+  const pushToast = useToast();
+
+  useEffect(() => {
+    const updateFlag = (offline) => {
+      if (offline) document.documentElement.setAttribute("data-offline", "true");
+      else document.documentElement.removeAttribute("data-offline");
+    };
+
+    const onOffline = () => {
+      updateFlag(true);
+      pushToast?.({ message: "Hors ligne : certaines actions sont bloquées.", type: "warning", durationMs: 14000 });
+    };
+    const onOnline = () => {
+      updateFlag(false);
+      pushToast?.({ message: "Connexion rétablie.", type: "success", durationMs: 6000 });
+    };
+
+    updateFlag(!navigator.onLine);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
   }, [pushToast]);
 
   return null;
@@ -73,6 +104,7 @@ export default function AppShell() {
   return (
     <ToastProvider>
       <UnhandledRejectionToaster />
+      <NetworkStatusToaster />
 
       <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
         {isAppSection && isAuthed && (
@@ -95,7 +127,7 @@ export default function AppShell() {
           )}
 
           <div className="flex-1 min-w-0">
-            <main className="mx-auto max-w-6xl px-4 py-6">
+            <main className="mx-auto max-w-6xl px-4 py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
               {isAppSection && isAuthed && (
                 <Suspense fallback={null}>
                   <BillingBanners entitlements={entitlements} />
@@ -119,6 +151,8 @@ export default function AppShell() {
         <Suspense fallback={null}>
           <Toasts />
         </Suspense>
+
+        <PwaUpdateBanner />
 
         <Suspense fallback={null}>
           <MobileNav

@@ -72,6 +72,8 @@ export default function Labels() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [lastAddedId, setLastAddedId] = useState(null);
+  const [priceModalOpen, setPriceModalOpen] = useState(false);
+  const [priceModalSaving, setPriceModalSaving] = useState(false);
 
   // ✅ inline price edit
   const [priceEdits, setPriceEdits] = useState({}); // { [id]: "2.90" }
@@ -197,6 +199,11 @@ export default function Labels() {
     });
   }, [selected, requiresPrice]);
 
+  const applyPriceUpdate = (id, value) => {
+    setSelected((prev) => prev.map((x) => (x.id === id ? { ...x, selling_price: value } : x)));
+    setResults((prev) => prev.map((x) => (x.id === id ? { ...x, selling_price: value } : x)));
+  };
+
   const saveProductPrice = async (p) => {
     // on évite les mauvais contextes (multi-services)
     if (!serviceId || serviceId === "all") {
@@ -214,10 +221,7 @@ export default function Labels() {
     setSavingPrice((prev) => ({ ...prev, [p.id]: true }));
     try {
       await api.patch(`/api/products/${p.id}/`, { selling_price: n });
-
-      // update selected + results
-      setSelected((prev) => prev.map((x) => (x.id === p.id ? { ...x, selling_price: n } : x)));
-      setResults((prev) => prev.map((x) => (x.id === p.id ? { ...x, selling_price: n } : x)));
+      applyPriceUpdate(p.id, n);
 
       pushToast?.({ type: "success", message: `Prix enregistré : ${p.name}` });
     } catch (e) {
@@ -232,27 +236,7 @@ export default function Labels() {
     }
   };
 
-  const generateLabels = async () => {
-    if (!selected.length) {
-      pushToast?.({ message: "Sélectionnez au moins un produit.", type: "warn" });
-      return;
-    }
-
-    if (missingPriceProducts.length) {
-      const names = missingPriceProducts
-        .slice(0, 4)
-        .map((p) => p.name)
-        .filter(Boolean)
-        .join(", ");
-      const more = missingPriceProducts.length > 4 ? ` (+${missingPriceProducts.length - 4})` : "";
-      pushToast?.({
-        type: "error",
-        message: `Prix obligatoire pour imprimer des étiquettes prix. Complétez : ${names}${more}.`,
-      });
-      setDrawerOpen(true);
-      return;
-    }
-
+  const performGenerateLabels = async () => {
     setLoading(true);
     try {
       const ids = selected.map((p) => p.id).join(",");
@@ -277,6 +261,64 @@ export default function Labels() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openMissingPriceModal = () => {
+    const defaults = {};
+    missingPriceProducts.forEach((p) => {
+      defaults[p.id] = priceEdits[p.id] ?? "";
+    });
+    setPriceEdits((prev) => ({ ...defaults, ...prev }));
+    setPriceModalOpen(true);
+  };
+
+  const saveMissingPricesAndPrint = async () => {
+    if (!missingPriceProducts.length) {
+      setPriceModalOpen(false);
+      return;
+    }
+
+    const updates = [];
+    for (const p of missingPriceProducts) {
+      const raw = String(priceEdits[p.id] ?? "").replace(",", ".").trim();
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) {
+        pushToast?.({ type: "error", message: `Prix invalide pour ${p.name || "produit"}.` });
+        return;
+      }
+      updates.push({ id: p.id, price: n });
+    }
+
+    setPriceModalSaving(true);
+    try {
+      await Promise.all(updates.map((u) => api.patch(`/api/products/${u.id}/`, { selling_price: u.price })));
+      updates.forEach((u) => applyPriceUpdate(u.id, u.price));
+      setPriceModalOpen(false);
+      await performGenerateLabels();
+    } catch (error) {
+      const apiMsg =
+        error?.response?.data?.detail ||
+        error?.message ||
+        "Impossible d’enregistrer les prix.";
+      pushToast?.({ type: "error", message: apiMsg });
+    } finally {
+      setPriceModalSaving(false);
+    }
+  };
+
+  const generateLabels = async () => {
+    if (!selected.length) {
+      pushToast?.({ message: "Sélectionnez au moins un produit.", type: "warn" });
+      return;
+    }
+
+    if (missingPriceProducts.length) {
+      openMissingPriceModal();
+      setDrawerOpen(true);
+      return;
+    }
+
+    await performGenerateLabels();
   };
 
   return (
@@ -594,6 +636,42 @@ export default function Labels() {
           </>
         )}
       </div>
+
+      {priceModalOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-lg rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+            <div className="text-sm font-semibold text-[var(--text)]">Prix manquants</div>
+            <div className="text-xs text-[var(--muted)] mt-1">
+              Renseigne un prix de vente pour imprimer les étiquettes.
+            </div>
+
+            <div className="mt-4 space-y-3 max-h-[50vh] overflow-auto pr-1">
+              {missingPriceProducts.map((p) => (
+                <div key={p.id} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
+                  <div className="text-sm font-semibold text-[var(--text)]">{p.name || "Produit"}</div>
+                  <Input
+                    label={`Prix de vente (${currencyText})`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={priceEdits[p.id] ?? ""}
+                    onChange={(e) => setPriceEdits((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" type="button" onClick={() => setPriceModalOpen(false)}>
+                Annuler
+              </Button>
+              <Button onClick={saveMissingPricesAndPrint} loading={priceModalSaving}>
+                Enregistrer & imprimer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Suspense fallback={null}>
         <BarcodeScannerModal

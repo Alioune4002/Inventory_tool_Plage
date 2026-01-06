@@ -23,6 +23,7 @@ import { getWording } from "../lib/labels";
 import { formatPlanLabel } from "../lib/planLabels";
 import { getTourKey, getTourPendingKey } from "../lib/tour";
 import { currencyLabel, getCurrencyOptions } from "../lib/currency";
+import PwaInstallCard from "../components/PwaInstallCard";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -852,6 +853,8 @@ export default function Settings() {
             </div>
           </div>
         </Card>
+
+        <PwaInstallCard />
 
         {/* Préférences */}
         <Card className="p-6 space-y-4">

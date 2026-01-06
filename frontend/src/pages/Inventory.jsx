@@ -3,6 +3,7 @@ import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
 import { api } from "../lib/api";
+import { loadOfflineCache, saveOfflineCache } from "../lib/offlineCache";
 import PageTransition from "../components/PageTransition";
 import Button from "../ui/Button";
 import Input from "../ui/Input";
@@ -36,6 +37,7 @@ export default function Inventory() {
 
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [items, setItems] = useState([]);
+  const [offlineData, setOfflineData] = useState(false);
   const [categories, setCategories] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -309,6 +311,9 @@ export default function Inventory() {
 
     setLoading(true);
     setErr("");
+    setOfflineData(false);
+
+    const cacheKey = `inventory:${month}:${isAllServices ? "all" : serviceId || "none"}`;
 
     try {
       if (isAllServices) {
@@ -320,11 +325,23 @@ export default function Inventory() {
         const results = await Promise.all(calls);
         const merged = results.flatMap((r) => r.items.map((it) => ({ ...it, __service_name: r.service.name })));
         setItems(merged);
+        saveOfflineCache(cacheKey, merged);
       } else {
         const res = await api.get(`/api/products/?month=${month}&service=${serviceId}`);
-        setItems(Array.isArray(res.data) ? res.data : []);
+        const list = Array.isArray(res.data) ? res.data : [];
+        setItems(list);
+        saveOfflineCache(cacheKey, list);
       }
     } catch {
+      if (!navigator.onLine) {
+        const cached = loadOfflineCache(cacheKey);
+        if (cached) {
+          setItems(cached);
+          setOfflineData(true);
+          setErr("Mode hors ligne : données locales affichées.");
+          return;
+        }
+      }
       setErr("Impossible de charger l’inventaire. Vérifiez votre connexion, votre token et le service sélectionné.");
       pushToast?.({ message: "Chargement inventaire impossible (auth ou service).", type: "error" });
       setItems([]);
@@ -874,6 +891,11 @@ export default function Inventory() {
           <p className="text-xs text-[var(--muted)]">
             Inventaire = comptage du mois. Le catalogue reste dans l’onglet Produits.
           </p>
+          {offlineData && (
+            <div className="text-xs font-semibold text-amber-800 dark:text-amber-200 bg-amber-100/80 dark:bg-amber-500/10 border border-amber-200/70 dark:border-amber-400/30 rounded-full px-3 py-1 w-fit">
+              Mode hors ligne : données locales affichées
+            </div>
+          )}
 
           <div className="grid sm:grid-cols-3 gap-3 items-center min-w-0">
             <Input label="Mois" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />

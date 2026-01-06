@@ -68,6 +68,31 @@ cd frontend
 E2E_USER="demo" E2E_PASS="demo123" npm run test:e2e
 ```
 
+## PWA (installation & offline)
+Commandes:
+```bash
+cd frontend
+npm install
+npm run build
+npm run preview
+```
+
+Checklist iOS (Safari):
+- Ouvrir Settings → encart “Installer StockScan”.
+- Vérifier le message “Partager → Sur l’écran d’accueil”.
+- Installer et relancer depuis l’écran d’accueil (mode standalone).
+- Vérifier safe-area (barre du haut / bas sans chevauchement).
+- Couper le réseau → l’app affiche la page offline + toast “Hors ligne”.
+
+Checklist Android (Chrome):
+- Ouvrir Settings → bouton “Installer l’application”.
+- Cliquer → prompt Android → installer.
+- Vérifier mode standalone + retour.
+- Couper le réseau → app shell visible + toast hors ligne.
+- Simuler update (nouvelle version) → bannière “Nouvelle version disponible” + bouton “Mettre à jour”.
+
+Checklist détaillée minute par minute : `QA_PWA.md`
+
 ## Metrics (/metrics)
 - Endpoint Prometheus : `GET /metrics/`
 - Retourne 503 si `prometheus-client` n'est pas installe.

@@ -22,6 +22,16 @@ if (bootToken) setAuthToken(bootToken);
 const SERVICE_KEY = "serviceId";
 const LAST_SERVICE_KEY = "lastConcreteServiceId";
 
+api.interceptors.request.use((config) => {
+  const method = String(config?.method || "get").toLowerCase();
+  if (typeof navigator !== "undefined" && !navigator.onLine && method !== "get") {
+    const error = new Error("offline");
+    error.isOffline = true;
+    return Promise.reject(error);
+  }
+  return config;
+});
+
 function getStoredServiceIdSafe() {
   try {
     return localStorage.getItem(SERVICE_KEY) || "";
@@ -154,6 +164,10 @@ function isAuthEndpoint(url) {
 api.interceptors.response.use(
   (res) => res,
   (error) => {
+    if (error?.isOffline) {
+      error.friendlyMessage = "Vous êtes hors ligne. Cette action nécessite une connexion.";
+      return Promise.reject(error);
+    }
     const status = error?.response?.status;
     const code = extractErrorCode(error);
     const reqUrl = error?.config?.url || "";
