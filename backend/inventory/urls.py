@@ -29,6 +29,7 @@ from products.views import (
     apply_receipt,
     receipts_history,
 )
+from products.inventory_import import inventory_import_preview, inventory_import_commit
 
 router = DefaultRouter()
 router.register(r"products", ProductViewSet, basename="products")
@@ -85,6 +86,8 @@ urlpatterns = [
     path("api/receipts/import/", import_receipt),
     path("api/receipts/<int:receipt_id>/apply/", apply_receipt),
     path("api/receipts/history/", receipts_history),
+    path("api/imports/inventory/preview/", inventory_import_preview),
+    path("api/imports/inventory/commit/", inventory_import_commit),
 
     path("api/auth/", include("accounts.urls")),
     path("api/ai/assistant/", AiAssistantView.as_view(), name="ai-assistant"),

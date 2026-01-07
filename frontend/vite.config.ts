@@ -10,6 +10,8 @@ export default defineConfig({
       registerType: "prompt",
       includeAssets: [
         "favicon.ico",
+        "favicon-16x16.png",
+        "favicon-32x32.png",
         "icon.svg",
         "icon_dark.svg",
         "icon-192.png",

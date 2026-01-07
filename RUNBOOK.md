@@ -42,6 +42,11 @@ curl -sS -X POST https://<api-host>/api/auth/login/ \
 curl -sS -X GET "https://<api-host>/api/exports/?from=2025-01&to=2025-01&service=all&format=csv" \
   -H "Authorization: Bearer <token>"
 
+# import inventaire CSV/XLSX (token required)
+curl -sS -X POST "https://<api-host>/api/imports/inventory/preview/?service=<id>" \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@/path/to/inventory.csv"
+
 # catalogue PDF (token required)
 curl -sS -X GET "https://<api-host>/api/catalog/pdf/?service=all&fields=barcode,sku,unit" \
   -H "Authorization: Bearer <token>" -o /tmp/catalogue.pdf
@@ -92,6 +97,13 @@ Checklist Android (Chrome):
 - Simuler update (nouvelle version) → bannière “Nouvelle version disponible” + bouton “Mettre à jour”.
 
 Checklist détaillée minute par minute : `QA_PWA.md`
+
+## SEO / favicon
+- Vérifier `https://stockscan.app/favicon.ico` (200 OK).
+- Vérifier `https://stockscan.app/favicon-16x16.png` et `favicon-32x32.png`.
+- DevTools → Application → Manifest: icônes OK, pas de 404.
+- Tab preview Chrome: pas d’icône Vite, favicon StockScan visible.
+- `view-source:https://stockscan.app/` : canonical + JSON-LD présents.
 
 ## Metrics (/metrics)
 - Endpoint Prometheus : `GET /metrics/`

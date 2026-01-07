@@ -2456,7 +2456,11 @@ def _ocr_receipt_text(pdf_bytes: bytes) -> str:
 def _parse_receipt_rows(file_obj, file_name):
     file_name = file_name or "import"
     if file_name.lower().endswith(".csv"):
-        raw = file_obj.read().decode("utf-8-sig")
+        raw_bytes = file_obj.read()
+        try:
+            raw = raw_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raw = raw_bytes.decode("latin-1")
         reader = csv.DictReader(io.StringIO(raw))
         rows = list(reader)
         meta = _extract_invoice_meta_from_rows(rows)
@@ -2479,25 +2483,32 @@ def _parse_receipt_rows(file_obj, file_name):
 
         max_pages = _env_int("RECEIPTS_OCR_MAX_PAGES", RECEIPTS_OCR_MAX_PAGES_DEFAULT)
 
-        reader = PdfReader(io.BytesIO(pdf_bytes))
+        try:
+            reader = PdfReader(io.BytesIO(pdf_bytes))
+        except Exception as exc:
+            raise exceptions.ValidationError("PDF illisible ou corrompu.") from exc
+
         page_texts = []
-        for idx, page in enumerate(reader.pages):
-            if max_pages and idx >= max_pages:
-                break
-            text = ""
-            try:
-                text = page.extract_text(extraction_mode="layout") or ""
-            except TypeError:
-                text = page.extract_text() or ""
-            except Exception:
+        try:
+            for idx, page in enumerate(reader.pages):
+                if max_pages and idx >= max_pages:
+                    break
                 text = ""
-            if not text:
                 try:
+                    text = page.extract_text(extraction_mode="layout") or ""
+                except TypeError:
                     text = page.extract_text() or ""
                 except Exception:
                     text = ""
-            if text:
-                page_texts.append(text)
+                if not text:
+                    try:
+                        text = page.extract_text() or ""
+                    except Exception:
+                        text = ""
+                if text:
+                    page_texts.append(text)
+        except Exception as exc:
+            raise exceptions.ValidationError("Lecture du PDF impossible.") from exc
 
         raw_text = "\n".join(page_texts)
         raw_text = _normalize_receipt_text(raw_text).strip()
@@ -3086,7 +3097,19 @@ def import_receipt(request):
     received_at_raw = request.data.get("received_at") or ""
     received_at = _parse_invoice_date(received_at_raw) or parse_date(received_at_raw) or timezone.now().date()
 
-    rows, source, meta = _parse_receipt_rows(file_obj, file_obj.name)
+    try:
+        rows, source, meta = _parse_receipt_rows(file_obj, file_obj.name)
+    except exceptions.ValidationError as exc:
+        return Response({"detail": str(exc.detail)}, status=400)
+    except Exception:
+        logger.exception(
+            "receipts_import_failed",
+            extra={"tenant_id": tenant.id, "service_id": getattr(service, "id", None), "file": file_obj.name},
+        )
+        return Response(
+            {"detail": "Impossible d’analyser ce fichier. Vérifiez le format et réessayez.", "code": "RECEIPT_PARSE_FAILED"},
+            status=400,
+        )
     if len(rows) > RECEIPT_IMPORT_MAX_LINES:
         rows = rows[:RECEIPT_IMPORT_MAX_LINES]
     raw_rows_count = len(rows)

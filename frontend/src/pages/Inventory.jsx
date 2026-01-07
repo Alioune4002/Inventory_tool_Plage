@@ -14,6 +14,7 @@ import Drawer from "../ui/Drawer";
 import { useToast } from "../app/ToastContext";
 import { ScanLine } from "lucide-react";
 const BarcodeScannerModal = React.lazy(() => import("../components/BarcodeScannerModal"));
+import InventoryImportWizard from "../components/InventoryImportWizard";
 import { getWording, getUxCopy, getPlaceholders, getFieldHelpers, getLossReasons } from "../lib/labels";
 import { FAMILLES, resolveFamilyId } from "../lib/famillesConfig";
 import { useEntitlements } from "../app/useEntitlements";
@@ -946,7 +947,7 @@ export default function Inventory() {
                   <div className="text-xs uppercase tracking-wide text-[var(--muted)]">Essentiel</div>
                   <div className="grid gap-3 items-end md:grid-cols-2 lg:grid-cols-6">
                     {barcodeEnabled && (
-                      <div className="lg:col-span-2">
+                      <div className="lg:col-span-2 space-y-1">
                         <Input
                           label={wording.barcodeLabel}
                           placeholder={`Scannez ou saisissez ${wording.barcodeLabel || "le code-barres"}`}
@@ -974,6 +975,7 @@ export default function Inventory() {
                             </div>
                           }
                         />
+                        {ux.scanHint && <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>}
                       </div>
                     )}
 
@@ -1316,7 +1318,6 @@ export default function Inventory() {
                     </div>
                   </details>
 
-                  {barcodeEnabled && <div className="text-xs text-[var(--muted)]">{ux.scanHint}</div>}
                 </fieldset>
               </form>
             )}
@@ -1392,6 +1393,14 @@ export default function Inventory() {
             )}
           </div>
         </Card>
+
+        <InventoryImportWizard
+          serviceId={serviceId}
+          serviceLabel={currentService?.name || "Service"}
+          disabled={isAllServices || !serviceId}
+          onImported={load}
+          pushToast={pushToast}
+        />
 
         {lastFound && (
           <Card className="p-4 bg-blue-50/60 dark:bg-blue-500/10 border border-blue-100/70 dark:border-blue-400/20 space-y-2 min-w-0">

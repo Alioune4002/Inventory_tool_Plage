@@ -56,41 +56,48 @@ export default function Landing() {
     [canonicalUrl, seoDescription]
   );
 
+  const faqItems = useMemo(
+    () => [
+      {
+        question: "StockScan est-il adapté à mon activité ?",
+        answer:
+          "Oui. StockScan adapte l’interface au métier (restaurant, bar, boulangerie, épicerie, boutique, pharmacie…). Vous gardez l’essentiel, puis vous activez des options si besoin.",
+      },
+      {
+        question: "Puis-je gérer plusieurs espaces (rayons, zones ou services) ?",
+        answer:
+          "Oui. Vous pouvez créer une ou plusieurs unités de travail (rayons / zones / services) et consulter une vue consolidée dans le tableau de bord.",
+      },
+      {
+        question: "Existe-t-il une alternative simple à Excel pour l’inventaire ?",
+        answer:
+          "Oui. StockScan remplace les feuilles Excel par une base produits propre, un comptage guidé et des exports prêts à partager.",
+      },
+      {
+        question: "L’inventaire mensuel est-il rapide à faire ?",
+        answer:
+          "Oui. Le mode progressif et le mode chrono permettent de compter vite, avec des champs essentiels visibles et des options avancées si besoin.",
+      },
+      {
+        question: "Les exports sont-ils prêts à partager ?",
+        answer:
+          "Oui. Vous pouvez exporter des fichiers CSV/Excel/PDF lisibles, utiles pour l’équipe, un associé ou le comptable.",
+      },
+    ],
+    []
+  );
+
   const faqJsonLd = useMemo(
     () => ({
       "@context": "https://schema.org",
       "@type": "FAQPage",
-      mainEntity: [
-        {
-          "@type": "Question",
-          name: "StockScan est-il adapté à mon activité ?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text:
-              "Oui. StockScan adapte l’interface au métier (restaurant, bar, boulangerie, épicerie, boutique, pharmacie…). Vous gardez l’essentiel, puis vous activez des options si besoin.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Puis-je gérer plusieurs espaces (rayons, zones ou services) ?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text:
-              "Oui. Vous pouvez créer une ou plusieurs unités de travail (rayons / zones / services) et consulter une vue consolidée dans le tableau de bord.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Les exports sont-ils prêts à partager ?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text:
-              "Oui. Vous pouvez exporter des fichiers CSV/Excel/PDF lisibles, utiles pour l’équipe, un associé ou le comptable.",
-          },
-        },
-      ],
+      mainEntity: faqItems.map((item) => ({
+        "@type": "Question",
+        name: item.question,
+        acceptedAnswer: { "@type": "Answer", text: item.answer },
+      })),
     }),
-    []
+    [faqItems]
   );
 
   return (
@@ -260,6 +267,26 @@ export default function Landing() {
                 >
                   Lire le détail
                 </Link>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-6 sm:p-7 space-y-6">
+              <div>
+                <div className="text-sm font-semibold text-blue-300 uppercase tracking-wide">FAQ</div>
+                <h2 className="text-2xl sm:text-3xl font-black text-white mt-1">
+                  Les questions les plus fréquentes
+                </h2>
+                <p className="text-sm text-slate-200 mt-2 max-w-3xl">
+                  Réponses rapides pour choisir un logiciel d’inventaire simple et fiable, sans jargon.
+                </p>
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">
+                {faqItems.map((item) => (
+                  <Card key={item.question} className="p-5 border-white/10 bg-white/5 rounded-2xl">
+                    <div className="text-base font-semibold text-white">{item.question}</div>
+                    <div className="text-sm text-slate-200 mt-2">{item.answer}</div>
+                  </Card>
+                ))}
               </div>
             </section>
 
