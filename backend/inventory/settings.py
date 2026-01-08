@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "products.apps.ProductsConfig",
     "ai_assistant",
+    "pos",
 ]
 
 MIDDLEWARE = [

@@ -80,7 +80,8 @@ export default function AppShell() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const isAppSection = location.pathname.startsWith("/app");
+  const isAppSection =
+    location.pathname.startsWith("/app") || location.pathname.startsWith("/pos");
 
   const onLogout = () => {
     logout();

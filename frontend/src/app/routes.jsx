@@ -30,6 +30,7 @@ const Exports = React.lazy(() => import("../pages/Exports.jsx"));
 const Losses = React.lazy(() => import("../pages/Losses.jsx"));
 const Settings = React.lazy(() => import("../pages/Settings.jsx"));
 const Support = React.lazy(() => import("../pages/Support.jsx"));
+const Pos = React.lazy(() => import("../pages/Pos.jsx"));
 const Duplicates = React.lazy(() => import("../pages/Duplicates.jsx"));
 const Rituals = React.lazy(() => import("../pages/Rituals.jsx"));
 const Receipts = React.lazy(() => import("../pages/Receipts.jsx"));
@@ -97,6 +98,7 @@ export default function AppRoutes() {
 
         {/* App (protected) */}
         <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="/app/pos" element={<Navigate to="/pos" replace />} />
         <Route
           path="/app/dashboard"
           element={
@@ -134,6 +136,14 @@ export default function AppRoutes() {
           element={
             <Protected>
               <Exports />
+            </Protected>
+          }
+        />
+        <Route
+          path="/pos"
+          element={
+            <Protected>
+              <Pos />
             </Protected>
           }
         />
