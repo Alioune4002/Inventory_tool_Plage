@@ -8,9 +8,12 @@ import Button from "../ui/Button";
 import Input from "../ui/Input";
 import Select from "../ui/Select";
 import Drawer from "../ui/Drawer";
+import Badge from "../ui/Badge";
 import { api } from "../lib/api";
+import { useAuth } from "../app/AuthProvider";
 import { useToast } from "../app/ToastContext";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
+import { isKdsEnabled } from "../lib/kdsAccess";
 import posLogo from "../assets/pos-logo.png";
 
 const METHODS = [
@@ -25,6 +28,13 @@ const DISCOUNT_TYPES = [
   { value: "amount", label: "€" },
   { value: "percent", label: "%" },
 ];
+
+const KDS_STATUS_LABELS = {
+  DRAFT: "Brouillon",
+  SENT: "En cuisine",
+  READY: "Prêt",
+  SERVED: "Servi",
+};
 
 const formatMoney = (value) => {
   const n = Number(value);
@@ -79,12 +89,22 @@ function computeLineTotals(item) {
 }
 
 export default function Pos() {
+  const { serviceId, serviceProfile } = useAuth();
   const pushToast = useToast();
+
+  const kdsActive = isKdsEnabled(serviceProfile);
+  const isServiceSelected = Boolean(serviceId && String(serviceId) !== "all");
+  const isKdsAvailable = kdsActive && isServiceSelected;
 
   const [query, setQuery] = useState("");
   const [products, setProducts] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+
+  const [kdsOpenTables, setKdsOpenTables] = useState([]);
+  const [kdsLoading, setKdsLoading] = useState(false);
+  const [kdsCheckout, setKdsCheckout] = useState(null);
+  const [kdsCheckoutLoading, setKdsCheckoutLoading] = useState(false);
 
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -100,7 +120,17 @@ export default function Pos() {
   const [priceModalOpen, setPriceModalOpen] = useState(false);
   const [pendingPayload, setPendingPayload] = useState(null);
 
+  const isKdsMode = Boolean(kdsCheckout);
+
   const totals = useMemo(() => {
+    if (kdsCheckout) {
+      return {
+        subtotal: parseNumber(kdsCheckout.subtotal),
+        lineDiscount: parseNumber(kdsCheckout.discount_total),
+        globalDiscount: 0,
+        total: parseNumber(kdsCheckout.total),
+      };
+    }
     const lines = cartItems.map((item) => computeLineTotals(item));
     const subtotal = lines.reduce((acc, line) => acc + line.subtotal, 0);
     const lineDiscount = lines.reduce((acc, line) => acc + line.discount, 0);
@@ -116,7 +146,7 @@ export default function Pos() {
       globalDiscount: globalDiscountSafe,
       total,
     };
-  }, [cartItems, globalDiscount]);
+  }, [cartItems, globalDiscount, kdsCheckout]);
 
   const paymentTotal = useMemo(
     () => payments.reduce((acc, p) => acc + parseNumber(p.amount), 0),
@@ -162,6 +192,60 @@ export default function Pos() {
     }
   }, []);
 
+  const fetchKdsOpenTables = useCallback(async () => {
+    if (!isKdsAvailable) {
+      setKdsOpenTables([]);
+      return;
+    }
+    setKdsLoading(true);
+    try {
+      const res = await api.get("/api/kds/pos/open-tables/");
+      setKdsOpenTables(res.data || []);
+    } catch {
+      setKdsOpenTables([]);
+    } finally {
+      setKdsLoading(false);
+    }
+  }, [isKdsAvailable]);
+
+  const resetKdsCheckout = () => {
+    setKdsCheckout(null);
+    setCartItems([]);
+    setPayments([{ method: "cash", amount: "" }]);
+    setGlobalDiscount({ value: "", type: "amount" });
+    setNote("");
+    setQuery("");
+    setProducts([]);
+  };
+
+  const startKdsCheckout = async (orderId) => {
+    if (!orderId) return;
+    setKdsCheckoutLoading(true);
+    try {
+      const res = await api.get(`/api/kds/pos/orders/${orderId}/for-checkout/`);
+      const payload = res.data || null;
+      setKdsCheckout(payload);
+      setCartItems([]);
+      setGlobalDiscount({ value: "", type: "amount" });
+      setNote("");
+      setPayments([
+        {
+          method: "card",
+          amount: payload ? formatMoney(payload.total) : "",
+        },
+      ]);
+      setQuery("");
+      setProducts([]);
+    } catch (error) {
+      pushToast?.({
+        message: error?.response?.data?.detail || "Impossible de charger la commande.",
+        type: "error",
+      });
+    } finally {
+      setKdsCheckoutLoading(false);
+    }
+  };
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       fetchProducts(query);
@@ -173,7 +257,18 @@ export default function Pos() {
     fetchReport();
   }, [fetchReport]);
 
+  useEffect(() => {
+    fetchKdsOpenTables();
+  }, [fetchKdsOpenTables]);
+
   const addToCart = (product) => {
+    if (isKdsMode) {
+      pushToast?.({
+        message: "Encaissement KDS en cours : terminez ou annulez avant d’ajouter des produits.",
+        type: "warn",
+      });
+      return;
+    }
     setCartItems((prev) => {
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
@@ -211,6 +306,7 @@ export default function Pos() {
   const handleSearchEnter = async (event) => {
     if (event.key !== "Enter") return;
     event.preventDefault();
+    if (isKdsMode) return;
     const results = await fetchProducts(query);
     if (results.length === 1) {
       addToCart(results[0]);
@@ -256,7 +352,51 @@ export default function Pos() {
     }
   };
 
+  const submitKdsCheckout = async () => {
+    if (!kdsCheckout?.order_id) return null;
+    setCheckoutLoading(true);
+    try {
+      const res = await api.post(`/api/kds/pos/orders/${kdsCheckout.order_id}/mark-paid/`, {
+        payments: payments.map((p) => ({
+          method: p.method,
+          amount: String(p.amount),
+        })),
+      });
+      pushToast?.({ message: "Commande encaissée.", type: "success" });
+      resetKdsCheckout();
+      fetchReport();
+      fetchKdsOpenTables();
+      return res.data;
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   const handleCheckout = async () => {
+    if (isKdsMode) {
+      if (Math.abs(paymentTotal - totals.total) > 0.01) {
+        pushToast?.({
+          message: "Le total des paiements doit correspondre au total net.",
+          type: "error",
+        });
+        return;
+      }
+      try {
+        await submitKdsCheckout();
+      } catch (error) {
+        const data = error?.response?.data;
+        if (data?.code === "payment_total_mismatch") {
+          pushToast?.({ message: data?.detail || "Paiements incomplets.", type: "error" });
+          return;
+        }
+        pushToast?.({
+          message: data?.detail || "Impossible d’encaisser la commande.",
+          type: "error",
+        });
+      }
+      return;
+    }
+
     if (!cartItems.length) {
       pushToast?.({ message: "Ajoutez au moins un produit.", type: "warn" });
       return;
@@ -349,6 +489,51 @@ export default function Pos() {
           </div>
         </Card>
 
+        {isKdsAvailable ? (
+          <Card className="p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text)]">Tables ouvertes</div>
+                <div className="text-xs text-[var(--muted)]">
+                  Encaissez une commande envoyée en cuisine en un clic.
+                </div>
+              </div>
+              <Button variant="secondary" size="sm" onClick={fetchKdsOpenTables} disabled={kdsLoading}>
+                Actualiser
+              </Button>
+            </div>
+
+            {kdsLoading ? (
+              <div className="text-sm text-[var(--muted)]">Chargement des commandes…</div>
+            ) : kdsOpenTables.length === 0 ? (
+              <div className="text-sm text-[var(--muted)]">Aucune table ouverte pour ce service.</div>
+            ) : (
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {kdsOpenTables.map((row) => (
+                  <Card key={row.order_id} className="p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-[var(--text)]">{row.table_name}</div>
+                      <Badge variant="info">
+                        {KDS_STATUS_LABELS[row.status] || row.status}
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-[var(--muted)]">
+                      Total : {formatMoney(row.total)} €
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => startKdsCheckout(row.order_id)}
+                      loading={kdsCheckoutLoading}
+                    >
+                      Encaisser
+                    </Button>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </Card>
+        ) : null}
+
         <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
           <div className="space-y-4">
             <Card className="p-5 space-y-4">
@@ -357,32 +542,44 @@ export default function Pos() {
                 Recherche rapide
               </div>
               <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={handleSearchEnter}
-                    placeholder="Nom, code‑barres ou SKU"
-                    className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
-                    autoFocus
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setScanOpen(true)}
-                    className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--accent)]/10"
-                  >
-                    Scanner
-                  </button>
-                </div>
-                <div className="text-xs text-[var(--muted)]">
-                  Astuce : scannez un produit puis validez avec Entrée pour l’ajouter au panier.
-                </div>
+                {isKdsMode ? (
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
+                    Encaissement KDS en cours. Terminez ou annulez pour reprendre la caisse classique.
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+                      <input
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={handleSearchEnter}
+                        placeholder="Nom, code‑barres ou SKU"
+                        className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setScanOpen(true)}
+                        className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--text)] hover:bg-[var(--accent)]/10"
+                      >
+                        Scanner
+                      </button>
+                    </div>
+                    <div className="text-xs text-[var(--muted)]">
+                      Astuce : scannez un produit puis validez avec Entrée pour l’ajouter au panier.
+                    </div>
+                  </>
+                )}
               </div>
             </Card>
 
             <Card className="p-5 space-y-3">
               <div className="text-sm font-semibold text-[var(--text)]">Produits</div>
-              {searchLoading ? (
+              {isKdsMode ? (
+                <div className="text-sm text-[var(--muted)]">
+                  Encaissement KDS en cours. Le catalogue POS est temporairement désactivé.
+                </div>
+              ) : searchLoading ? (
                 <div className="text-sm text-[var(--muted)]">Recherche en cours…</div>
               ) : products.length === 0 ? (
                 <div className="text-sm text-[var(--muted)]">
@@ -415,7 +612,34 @@ export default function Pos() {
           <div className="space-y-4">
             <Card className="p-5 space-y-3">
               <div className="text-sm font-semibold text-[var(--text)]">Panier</div>
-              {cartItems.length === 0 ? (
+              {isKdsMode ? (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-[var(--muted)]">
+                      Encaissement {kdsCheckout?.table || "commande"}
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={resetKdsCheckout}>
+                      Quitter
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {(kdsCheckout?.lines || []).map((line, idx) => (
+                      <div key={`${line.menu_item_name}-${idx}`} className="rounded-2xl border border-[var(--border)] p-3 space-y-2">
+                        <div className="font-semibold text-[var(--text)]">{line.menu_item_name}</div>
+                        {line.notes ? (
+                          <div className="text-xs text-[var(--muted)]">Note : {line.notes}</div>
+                        ) : null}
+                        <div className="flex justify-between text-sm text-[var(--text)]">
+                          <span>
+                            Qté {line.qty}
+                          </span>
+                          <span>{formatMoney(line.line_total)} €</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : cartItems.length === 0 ? (
                 <div className="text-sm text-[var(--muted)]">Aucun article ajouté.</div>
               ) : (
                 <div className="space-y-3">
@@ -495,31 +719,38 @@ export default function Pos() {
               )}
             </Card>
 
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-                <BadgePercent className="h-4 w-4" />
-                Remise globale
-              </div>
-              <div className="grid grid-cols-[1fr_100px] gap-2 items-end">
-                <Input
-                  label="Valeur"
-                  value={globalDiscount.value}
-                  onChange={(e) => setGlobalDiscount((prev) => ({ ...prev, value: e.target.value }))}
-                  inputMode="decimal"
-                />
-                <Select
-                  value={globalDiscount.type}
-                  onChange={(value) => setGlobalDiscount((prev) => ({ ...prev, type: value }))}
-                  options={DISCOUNT_TYPES}
-                />
-              </div>
-            </Card>
+            {!isKdsMode ? (
+              <Card className="p-5 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                  <BadgePercent className="h-4 w-4" />
+                  Remise globale
+                </div>
+                <div className="grid grid-cols-[1fr_100px] gap-2 items-end">
+                  <Input
+                    label="Valeur"
+                    value={globalDiscount.value}
+                    onChange={(e) => setGlobalDiscount((prev) => ({ ...prev, value: e.target.value }))}
+                    inputMode="decimal"
+                  />
+                  <Select
+                    value={globalDiscount.type}
+                    onChange={(value) => setGlobalDiscount((prev) => ({ ...prev, type: value }))}
+                    options={DISCOUNT_TYPES}
+                  />
+                </div>
+              </Card>
+            ) : null}
 
             <Card className="p-5 space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
                 <CreditCard className="h-4 w-4" />
                 Paiements
               </div>
+              {isKdsMode ? (
+                <div className="text-xs text-[var(--muted)]">
+                  Encaissement d’une commande KDS (aucune remise supplémentaire).
+                </div>
+              ) : null}
               <div className="space-y-2">
                 {payments.map((payment, idx) => (
                   <div key={idx} className="grid grid-cols-[1fr_120px] gap-2 items-end">
@@ -603,11 +834,13 @@ export default function Pos() {
               <div className="text-xs text-[var(--muted)]">
                 Paiements saisis : {formatMoney(paymentTotal)} €
               </div>
-              <Input
-                label="Note (optionnel)"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-              />
+              {!isKdsMode ? (
+                <Input
+                  label="Note (optionnel)"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              ) : null}
               <Button onClick={handleCheckout} loading={checkoutLoading} className="w-full">
                 Confirmer paiement
               </Button>

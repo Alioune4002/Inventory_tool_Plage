@@ -1081,6 +1081,7 @@ export default function Settings() {
               const multiUnitEnabled = features.multi_unit?.enabled === true;
               const variantsEnabled = features.variants?.enabled === true;
               const itemTypeEnabled = features.item_type?.enabled === true;
+              const kdsEnabled = features.kds?.enabled === true;
 
               const hasModule = (id) => modules.includes(id);
 
@@ -1221,6 +1222,16 @@ export default function Settings() {
                         helper="Les ventes/marges s’appuient sur les produits finis."
                         checked={itemTypeEnabled}
                         onChange={(e) => toggleFeature(s, "item_type", e.target.checked)}
+                        disabled={loading}
+                      />
+                    )}
+
+                    {hasModule("kds") && (
+                      <FeatureToggle
+                        label="Commandes & Cuisine (KDS)"
+                        description="Active la prise de commande et l’écran cuisine pour ce service."
+                        checked={kdsEnabled}
+                        onChange={(e) => toggleFeature(s, "kds", e.target.checked)}
                         disabled={loading}
                       />
                     )}

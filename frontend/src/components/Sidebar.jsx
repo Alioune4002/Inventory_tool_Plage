@@ -5,6 +5,7 @@ import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
 import { getWording } from "../lib/labels";
 import { navItems } from "../app/navItems";
+import { isKdsEnabled } from "../lib/kdsAccess";
 
 export default function Sidebar() {
   const { tenant, services, serviceId, serviceProfile } = useAuth();
@@ -15,7 +16,9 @@ export default function Sidebar() {
   const wording = getWording(serviceType, tenantDomain);
   const identifierLabel = wording?.identifierLabel || "code-barres";
 
-  const items = navItems;
+  const kdsActive = isKdsEnabled(serviceProfile);
+  const isServiceSelected = Boolean(serviceId && String(serviceId) !== "all");
+  const items = navItems.filter((item) => !item.requiresKds || (kdsActive && isServiceSelected));
 
   return (
     <aside className="hidden lg:flex h-full w-72 flex-col p-3 space-y-3 text-[var(--text)] min-w-0-safe">

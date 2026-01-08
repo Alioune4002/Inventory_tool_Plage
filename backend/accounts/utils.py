@@ -20,6 +20,7 @@ def _base_features():
         "variants": {"enabled": False, "recommended": False},
         "open_container_tracking": {"enabled": False},
         "item_type": {"enabled": False, "recommended": False},
+        "kds": {"enabled": False, "recommended": False},
     }
 
 
@@ -86,6 +87,7 @@ def apply_service_preset(service_type: str, domain: str = None):
                     "multi_unit": {"enabled": True, "recommended": False},
                     "open_container_tracking": {"enabled": True},
                     "tva": {"enabled": True, "recommended": False},
+                    "kds": {"enabled": False, "recommended": True},
                 },
             ),
         },
@@ -103,6 +105,7 @@ def apply_service_preset(service_type: str, domain: str = None):
                     "open_container_tracking": {"enabled": True},
                     "item_type": {"enabled": True, "recommended": True},
                     "tva": {"enabled": False, "recommended": False},
+                    "kds": {"enabled": False, "recommended": True},
                 },
             ),
         },
@@ -149,6 +152,7 @@ def apply_service_preset(service_type: str, domain: str = None):
                     "open_container_tracking": {"enabled": True},
                     "item_type": {"enabled": True, "recommended": True},
                     "tva": {"enabled": True, "recommended": False},
+                    "kds": {"enabled": False, "recommended": True},
                 },
             ),
         },
@@ -166,6 +170,7 @@ def apply_service_preset(service_type: str, domain: str = None):
                     "open_container_tracking": {"enabled": True},
                     "item_type": {"enabled": True, "recommended": True},
                     "tva": {"enabled": True, "recommended": False},
+                    "kds": {"enabled": False, "recommended": True},
                 },
             ),
         },

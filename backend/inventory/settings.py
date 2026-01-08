@@ -48,6 +48,7 @@ INSTALLED_APPS = [
     "products.apps.ProductsConfig",
     "ai_assistant",
     "pos",
+    "kds",
 ]
 
 MIDDLEWARE = [

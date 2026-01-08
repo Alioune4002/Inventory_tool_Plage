@@ -1,0 +1,25 @@
+{
+  "name": "StockScan Cuisine",
+  "short_name": "Cuisine",
+  "description": "Écran cuisine StockScan (KDS).",
+  "start_url": "/kds?source=pwa",
+  "scope": "/kds",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B1220",
+  "theme_color": "#0B1220",
+  "icons": [
+    {
+      "src": "/kds-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/kds-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

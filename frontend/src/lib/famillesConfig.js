@@ -183,7 +183,7 @@ const FAMILLES = [
       sku: false,
       expiry: true,
     },
-    modules: ["pricing", "identifier", "expiry", "opened", "lot", "multiUnit"],
+    modules: ["pricing", "identifier", "expiry", "opened", "lot", "multiUnit", "kds"],
     defaults: {
       categoryLabel: "Famille",
       unitLabel: "bouteille",
@@ -248,7 +248,7 @@ const FAMILLES = [
       sku: true,
       expiry: true,
     },
-    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
+    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType", "kds"],
     defaults: {
       categoryLabel: "Poste",
       unitLabel: "portion",
@@ -313,7 +313,7 @@ const FAMILLES = [
       sku: true,
       expiry: true,
     },
-    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType"],
+    modules: ["pricing", "identifier", "expiry", "lot", "opened", "multiUnit", "itemType", "kds"],
     defaults: {
       categoryLabel: "Fournée",
       unitLabel: "pièce",
@@ -435,6 +435,13 @@ const MODULES = [
     description:
       "Classez vos articles (matière première, produit fini, préparation) pour une lecture plus claire.",
     families: ["restauration", "boulangerie"],
+  },
+  {
+    id: "kds",
+    name: "Commandes & Cuisine (KDS)",
+    description:
+      "Prise de commande + écran cuisine. Idéal pour le service à table (restaurant, bar, salon de thé).",
+    families: ["bar", "restauration", "boulangerie"],
   },
   {
     id: "multiUnit",

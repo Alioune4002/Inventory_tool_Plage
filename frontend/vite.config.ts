@@ -18,6 +18,10 @@ export default defineConfig({
         "icon-512.png",
         "apple-touch-icon.png",
         "og-image.png",
+        "orders-icon-192.png",
+        "orders-icon-512.png",
+        "kds-icon-192.png",
+        "kds-icon-512.png",
       ],
       manifest: {
         name: "StockScan",

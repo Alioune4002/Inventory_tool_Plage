@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { Moon, Sun } from "lucide-react";
 import { navItems } from "../app/navItems";
 import Button from "../ui/Button";
+import { useAuth } from "../app/AuthProvider";
+import { isKdsEnabled } from "../lib/kdsAccess";
 
 function isLightTheme() {
   const t = document?.documentElement?.getAttribute("data-theme");
@@ -12,7 +14,10 @@ function isLightTheme() {
 
 export default function MobileNav({ open, onClose, onToggleTheme }) {
   const light = useMemo(() => isLightTheme(), [document?.documentElement?.getAttribute?.("data-theme")]);
-  const items = navItems;
+  const { serviceId, serviceProfile } = useAuth();
+  const kdsActive = isKdsEnabled(serviceProfile);
+  const isServiceSelected = Boolean(serviceId && String(serviceId) !== "all");
+  const items = navItems.filter((item) => !item.requiresKds || (kdsActive && isServiceSelected));
 
   if (!open) return null;
 

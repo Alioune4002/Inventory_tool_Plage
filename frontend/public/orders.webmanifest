@@ -1,0 +1,25 @@
+{
+  "name": "StockScan Commandes",
+  "short_name": "Commandes",
+  "description": "Prise de commande StockScan (salle).",
+  "start_url": "/orders?source=pwa",
+  "scope": "/orders",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B1220",
+  "theme_color": "#0B1220",
+  "icons": [
+    {
+      "src": "/orders-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/orders-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

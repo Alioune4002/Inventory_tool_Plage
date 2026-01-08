@@ -94,6 +94,7 @@ urlpatterns = [
     path("api/ai/chat/", AiChatView.as_view(), name="ai-chat"),
 
     path("api/pos/", include("pos.urls")),
+    path("api/kds/", include("kds.urls")),
 
     path("api/", include(router.urls)),
 ]

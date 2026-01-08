@@ -31,6 +31,8 @@ const Losses = React.lazy(() => import("../pages/Losses.jsx"));
 const Settings = React.lazy(() => import("../pages/Settings.jsx"));
 const Support = React.lazy(() => import("../pages/Support.jsx"));
 const Pos = React.lazy(() => import("../pages/Pos.jsx"));
+const Orders = React.lazy(() => import("../pages/Orders.jsx"));
+const Kds = React.lazy(() => import("../pages/Kds.jsx"));
 const Duplicates = React.lazy(() => import("../pages/Duplicates.jsx"));
 const Rituals = React.lazy(() => import("../pages/Rituals.jsx"));
 const Receipts = React.lazy(() => import("../pages/Receipts.jsx"));
@@ -144,6 +146,22 @@ export default function AppRoutes() {
           element={
             <Protected>
               <Pos />
+            </Protected>
+          }
+        />
+        <Route
+          path="/orders"
+          element={
+            <Protected>
+              <Orders />
+            </Protected>
+          }
+        />
+        <Route
+          path="/kds"
+          element={
+            <Protected>
+              <Kds />
             </Protected>
           }
         />

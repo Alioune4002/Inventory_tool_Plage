@@ -92,6 +92,7 @@ def default_service_features():
         "variants": {"enabled": False, "recommended": False},
         "open_container_tracking": {"enabled": False},
         "item_type": {"enabled": False, "recommended": False},
+        "kds": {"enabled": False, "recommended": False},
     }
 
 

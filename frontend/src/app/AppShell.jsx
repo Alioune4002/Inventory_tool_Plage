@@ -81,7 +81,10 @@ export default function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const isAppSection =
-    location.pathname.startsWith("/app") || location.pathname.startsWith("/pos");
+    location.pathname.startsWith("/app") ||
+    location.pathname.startsWith("/pos") ||
+    location.pathname.startsWith("/orders") ||
+    location.pathname.startsWith("/kds");
 
   const onLogout = () => {
     logout();

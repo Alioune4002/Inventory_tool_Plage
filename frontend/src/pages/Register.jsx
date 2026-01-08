@@ -214,6 +214,7 @@ export default function Register() {
       multi_unit: { enabled: moduleSet.has("multiUnit") },
       open_container_tracking: { enabled: moduleSet.has("opened") },
       item_type: { enabled: moduleSet.has("itemType") },
+      kds: { enabled: moduleSet.has("kds") },
       prices: { purchase_enabled: pricingEnabled, selling_enabled: pricingEnabled },
       tva: { enabled: pricingEnabled },
     };
@@ -271,6 +272,7 @@ export default function Register() {
               enabled: moduleSet.has("opened"),
             };
             nextFeatures.item_type = { ...(nextFeatures.item_type || {}), enabled: moduleSet.has("itemType") };
+            nextFeatures.kds = { ...(nextFeatures.kds || {}), enabled: moduleSet.has("kds") };
             nextFeatures.prices = {
               ...(nextFeatures.prices || {}),
               purchase_enabled: pricingEnabled,
