@@ -81,11 +81,13 @@ export default function AppShell() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const isCoreApp = location.pathname.startsWith("/app");
+  const isPosApp = location.pathname.startsWith("/pos/app");
+  const isKdsApp = location.pathname.startsWith("/kds/app");
   const isStandaloneApp =
-    location.pathname.startsWith("/pos/app") ||
-    location.pathname.startsWith("/kds/app") ||
+    isPosApp ||
+    isKdsApp ||
     location.pathname.startsWith("/orders");
-  const showTopbar = isCoreApp || isStandaloneApp;
+  const showTopbar = isCoreApp || (isStandaloneApp && !isPosApp && !isKdsApp);
   const showSidebar = isCoreApp;
 
   const onLogout = () => {

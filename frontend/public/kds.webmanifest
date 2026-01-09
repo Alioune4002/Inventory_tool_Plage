@@ -1,7 +1,7 @@
 {
-  "name": "StockScan Cuisine",
-  "short_name": "Cuisine",
-  "description": "Écran cuisine StockScan (KDS).",
+  "name": "Prise de commande cuisine gratuite",
+  "short_name": "KDS",
+  "description": "Écran cuisine gratuit pour prise de commande restaurant.",
   "start_url": "/kds/app?source=pwa",
   "scope": "/kds/",
   "display": "standalone",

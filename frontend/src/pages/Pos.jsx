@@ -30,6 +30,8 @@ const DISCOUNT_TYPES = [
   { value: "percent", label: "%" },
 ];
 
+const POS_GUIDE_STORAGE = "pos_guide_v1";
+
 const KDS_STATUS_LABELS = {
   DRAFT: "Brouillon",
   SENT: "En cuisine",
@@ -90,7 +92,7 @@ function computeLineTotals(item) {
 }
 
 export default function Pos() {
-  const { serviceId, serviceProfile, services, tenant } = useAuth();
+  const { serviceId, serviceProfile, services, tenant, logout } = useAuth();
   const pushToast = useToast();
 
   const kdsActive = isKdsEnabled(serviceProfile);
@@ -120,6 +122,13 @@ export default function Pos() {
   const [priceEdits, setPriceEdits] = useState({});
   const [priceModalOpen, setPriceModalOpen] = useState(false);
   const [pendingPayload, setPendingPayload] = useState(null);
+  const [showGuide, setShowGuide] = useState(() => {
+    try {
+      return localStorage.getItem(POS_GUIDE_STORAGE) !== "1";
+    } catch {
+      return true;
+    }
+  });
 
   const isKdsMode = Boolean(kdsCheckout);
   const serviceLabel = serviceProfile?.name || "";
@@ -127,6 +136,28 @@ export default function Pos() {
   const coreCta = hasCoreAccess
     ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
     : { label: "Activer StockScan", href: "/app/settings" };
+  const handleLogout = () => {
+    logout();
+    window.location.href = "/login?next=/pos/app";
+  };
+
+  const dismissGuide = () => {
+    setShowGuide(false);
+    try {
+      localStorage.setItem(POS_GUIDE_STORAGE, "1");
+    } catch {
+      // noop
+    }
+  };
+
+  const reopenGuide = () => {
+    setShowGuide(true);
+    try {
+      localStorage.removeItem(POS_GUIDE_STORAGE);
+    } catch {
+      // noop
+    }
+  };
 
   const totals = useMemo(() => {
     if (kdsCheckout) {
@@ -482,10 +513,12 @@ export default function Pos() {
           <div className="flex items-center gap-3">
             <PosLogo />
             <div>
-              <div className="text-sm text-[var(--muted)]">StockScan POS</div>
-              <h1 className="text-2xl font-black text-[var(--text)]">Caisse multi‑services</h1>
+              <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
+                Caisse enregistreuse gratuite en ligne
+              </div>
+              <h1 className="text-2xl font-black text-[var(--text)]">StockScan POS</h1>
               <p className="text-sm text-[var(--muted)]">
-                Encaissez rapidement, suivez vos ventes et mettez le stock à jour.
+                Encaissez en quelques clics sur tablette, mobile ou ordinateur, sans configuration lourde.
               </p>
             </div>
           </div>
@@ -493,15 +526,49 @@ export default function Pos() {
             {serviceLabel ? (
               <div className="text-xs text-[var(--muted)]">Service actif : {serviceLabel}</div>
             ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
+                {coreCta.label}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleLogout}>
+                Se déconnecter
+              </Button>
+            </div>
             <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
               <ReceiptText className="h-4 w-4" />
-              Transactions sécurisées, stock mis à jour à la validation.
+              Stock mis à jour uniquement à l’encaissement.
             </div>
-            <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
-              {coreCta.label}
-            </Button>
           </div>
         </Card>
+
+        {showGuide ? (
+          <Card className="p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[var(--text)]">
+                Guide express — bien démarrer la caisse
+              </div>
+              <Button size="sm" variant="ghost" onClick={dismissGuide}>
+                Fermer
+              </Button>
+            </div>
+            <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
+              <li>Sélectionnez un service si vous en avez plusieurs.</li>
+              <li>Recherchez ou scannez un produit pour l’ajouter au panier.</li>
+              <li>Ajustez les quantités et les remises si besoin.</li>
+              <li>Encaissez : le stock se met à jour à la validation.</li>
+            </ol>
+          </Card>
+        ) : (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={reopenGuide}
+              className="text-xs font-semibold text-[var(--text)] underline underline-offset-4"
+            >
+              Relancer le guide POS
+            </button>
+          </div>
+        )}
 
         {isKdsAvailable ? (
           <Card className="p-5 space-y-3">

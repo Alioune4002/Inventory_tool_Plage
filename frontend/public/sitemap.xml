@@ -7,6 +7,8 @@
   <url><loc>https://stockscan.app/fonctionnalites</loc><lastmod>2025-12-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://stockscan.app/tarifs</loc><lastmod>2025-12-24</lastmod><changefreq>weekly</changefreq><priority>0.9</priority></url>
   <url><loc>https://stockscan.app/support</loc><lastmod>2025-12-24</lastmod><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://stockscan.app/pos</loc><lastmod>2025-12-24</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://stockscan.app/kds</loc><lastmod>2025-12-24</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
 
   <!-- Pages métiers -->
   <url><loc>https://stockscan.app/pour-epicerie</loc><lastmod>2025-12-24</lastmod><changefreq>monthly</changefreq><priority>0.8</priority></url>

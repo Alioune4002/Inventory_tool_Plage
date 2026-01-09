@@ -31,6 +31,7 @@ const CANCEL_REASONS = [
 ];
 
 const POLL_MS = 2500;
+const KDS_GUIDE_STORAGE = "kds_guide_v1";
 
 function formatTime(value) {
   if (!value) return "";
@@ -57,7 +58,7 @@ const KdsLogo = () => {
 };
 
 export default function Kds() {
-  const { serviceId, services, serviceProfile, selectService, tenant } = useAuth();
+  const { serviceId, services, serviceProfile, selectService, tenant, logout } = useAuth();
   const pushToast = useToast();
 
   const [orders, setOrders] = useState([]);
@@ -68,6 +69,13 @@ export default function Kds() {
   const [cancelReason, setCancelReason] = useState("cancelled");
   const [cancelText, setCancelText] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [showGuide, setShowGuide] = useState(() => {
+    try {
+      return localStorage.getItem(KDS_GUIDE_STORAGE) !== "1";
+    } catch {
+      return true;
+    }
+  });
 
   const isReadyService = Boolean(serviceId && String(serviceId) !== "all");
   const kdsActive = isKdsEnabled(serviceProfile);
@@ -174,6 +182,28 @@ export default function Kds() {
   const coreCta = hasCoreAccess
     ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
     : { label: "Activer StockScan", href: "/app/settings" };
+  const handleLogout = () => {
+    logout();
+    window.location.href = "/login?next=/kds/app";
+  };
+
+  const dismissGuide = () => {
+    setShowGuide(false);
+    try {
+      localStorage.setItem(KDS_GUIDE_STORAGE, "1");
+    } catch {
+      // noop
+    }
+  };
+
+  const reopenGuide = () => {
+    setShowGuide(true);
+    try {
+      localStorage.removeItem(KDS_GUIDE_STORAGE);
+    } catch {
+      // noop
+    }
+  };
 
   return (
     <PageTransition>
@@ -183,13 +213,13 @@ export default function Kds() {
 
       <div className="space-y-4">
         <Card className="p-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-12 rounded-2xl bg-[var(--accent)]/20 flex items-center justify-center">
-              <KdsLogo />
-            </div>
+          <div className="flex items-center gap-3">
+            <KdsLogo />
             <div>
-              <div className="text-sm font-semibold text-[var(--muted)]">Module Cuisine</div>
-              <div className="text-2xl font-black text-[var(--text)]">KDS — écran cuisine</div>
+              <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
+                Prise de commande & cuisine en temps réel
+              </div>
+              <div className="text-2xl font-black text-[var(--text)]">StockScan KDS</div>
               <div className="text-sm text-[var(--muted)]">
                 Toutes les commandes arrivent ici, prêtes à être préparées.
               </div>
@@ -199,11 +229,47 @@ export default function Kds() {
             {serviceLabel ? (
               <div className="text-sm text-[var(--muted)]">Service actif : {serviceLabel}</div>
             ) : null}
-            <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
-              {coreCta.label}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
+                {coreCta.label}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={handleLogout}>
+                Se déconnecter
+              </Button>
+            </div>
           </div>
         </Card>
+
+        {showGuide && isReadyService && kdsActive ? (
+          <Card className="p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-sm font-semibold text-[var(--text)]">
+                Guide express — bien démarrer la cuisine
+              </div>
+              <Button size="sm" variant="ghost" onClick={dismissGuide}>
+                Fermer
+              </Button>
+            </div>
+            <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
+              <li>Créez une commande depuis l’écran Salle (Commandes).</li>
+              <li>Envoyez-la en cuisine : elle apparaît automatiquement ici.</li>
+              <li>Marquez “Prêt”, puis “Servi” pour garder un suivi propre.</li>
+              <li>En cas d’annulation, choisissez la raison pour tracer les pertes.</li>
+            </ol>
+          </Card>
+        ) : null}
+
+        {!showGuide && isReadyService && kdsActive ? (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={reopenGuide}
+              className="text-xs font-semibold text-[var(--text)] underline underline-offset-4"
+            >
+              Relancer le guide KDS
+            </button>
+          </div>
+        ) : null}
 
         {!isReadyService ? (
           <Card className="p-6 space-y-2">

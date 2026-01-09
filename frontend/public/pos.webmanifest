@@ -1,7 +1,7 @@
 {
-  "name": "StockScan POS",
+  "name": "Caisse enregistreuse gratuite",
   "short_name": "POS",
-  "description": "Caisse StockScan.",
+  "description": "Logiciel de caisse enregistreuse gratuit, sans abonnement.",
   "start_url": "/pos/app?source=pwa",
   "scope": "/pos/",
   "display": "standalone",
