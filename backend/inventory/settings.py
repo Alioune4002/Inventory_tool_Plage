@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "ai_assistant",
     "pos",
     "kds",
+    "admin_dashboard",
 ]
 
 MIDDLEWARE = [

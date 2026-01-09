@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from accounts.models import Service
-from products.models import Product
+from products.models import Product, LossEvent
 from pos.models import PosTicket
 from .factories import TenantFactory, UserFactory
 
@@ -158,3 +158,116 @@ def test_pos_reports_summary_returns_totals():
     report = client.get("/api/pos/reports/summary/")
     assert report.status_code == 200
     assert Decimal(report.data.get("total_net")) == Decimal("3.00")
+
+
+@pytest.mark.django_db
+def test_pos_ticket_cancel_restocks_when_revendable():
+    tenant = TenantFactory()
+    user = UserFactory(profile=tenant)
+    service = Service.objects.get(tenant=tenant, name="Principal")
+    product = Product.objects.create(
+        tenant=tenant,
+        service=service,
+        name="Jus",
+        selling_price="2.00",
+        quantity=Decimal("5"),
+        inventory_month="2025-01",
+    )
+
+    client = _auth_client(user)
+    res = client.post(
+        "/api/pos/tickets/checkout/",
+        {
+            "items": [{"product_id": product.id, "qty": "2"}],
+            "payments": [{"method": "cash", "amount": "4.00"}],
+        },
+        format="json",
+    )
+    assert res.status_code == 200
+    product.refresh_from_db()
+    assert product.quantity == Decimal("3")
+
+    ticket_id = res.data.get("ticket_id")
+    cancel = client.post(
+        f"/api/pos/tickets/{ticket_id}/cancel/",
+        {"reason_code": "error", "restock": True},
+        format="json",
+    )
+    assert cancel.status_code == 200
+    product.refresh_from_db()
+    assert product.quantity == Decimal("5")
+    assert LossEvent.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_pos_ticket_cancel_creates_loss_when_not_restock():
+    tenant = TenantFactory()
+    user = UserFactory(profile=tenant)
+    service = Service.objects.get(tenant=tenant, name="Principal")
+    product = Product.objects.create(
+        tenant=tenant,
+        service=service,
+        name="Soda",
+        selling_price="1.50",
+        quantity=Decimal("4"),
+        inventory_month="2025-01",
+    )
+
+    client = _auth_client(user)
+    res = client.post(
+        "/api/pos/tickets/checkout/",
+        {
+            "items": [{"product_id": product.id, "qty": "1"}],
+            "payments": [{"method": "cash", "amount": "1.50"}],
+        },
+        format="json",
+    )
+    assert res.status_code == 200
+    product.refresh_from_db()
+    assert product.quantity == Decimal("3")
+
+    ticket_id = res.data.get("ticket_id")
+    cancel = client.post(
+        f"/api/pos/tickets/{ticket_id}/cancel/",
+        {"reason_code": "breakage", "restock": False},
+        format="json",
+    )
+    assert cancel.status_code == 200
+    product.refresh_from_db()
+    assert product.quantity == Decimal("3")
+    assert LossEvent.objects.filter(tenant=tenant, service=service).count() == 1
+
+
+@pytest.mark.django_db
+def test_pos_cash_session_close_returns_totals():
+    tenant = TenantFactory()
+    user = UserFactory(profile=tenant)
+    service = Service.objects.get(tenant=tenant, name="Principal")
+    product = Product.objects.create(
+        tenant=tenant,
+        service=service,
+        name="Sandwich",
+        selling_price="5.00",
+        quantity=Decimal("10"),
+        inventory_month="2025-01",
+    )
+
+    client = _auth_client(user)
+    res = client.post(
+        "/api/pos/tickets/checkout/",
+        {
+            "items": [{"product_id": product.id, "qty": "2"}],
+            "payments": [{"method": "card", "amount": "10.00"}],
+        },
+        format="json",
+    )
+    assert res.status_code == 200
+
+    session = client.get("/api/pos/session/active/")
+    assert session.status_code == 200
+    assert session.data.get("active") is True
+
+    close = client.post("/api/pos/session/close/")
+    assert close.status_code == 200
+    summary = close.data.get("summary") or {}
+    assert Decimal(summary.get("total_net")) == Decimal("10.00")

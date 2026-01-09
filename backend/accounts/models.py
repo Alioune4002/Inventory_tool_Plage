@@ -136,6 +136,8 @@ class UserProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="users")
     role = models.CharField(max_length=30, default="owner")
+    is_test_account = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

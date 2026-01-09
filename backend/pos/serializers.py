@@ -56,6 +56,25 @@ class PosCheckoutSerializer(serializers.Serializer):
         return attrs
 
 
+class PosTicketCancelSerializer(serializers.Serializer):
+    REASON_CHOICES = [
+        ("error", "Erreur de caisse"),
+        ("customer_left", "Client parti"),
+        ("breakage", "Casse"),
+        ("mistake", "Erreur de commande"),
+        ("other", "Autre"),
+    ]
+
+    reason_code = serializers.ChoiceField(choices=REASON_CHOICES)
+    reason_text = serializers.CharField(required=False, allow_blank=True, default="")
+    restock = serializers.BooleanField(default=True)
+
+    def validate(self, attrs):
+        if attrs.get("reason_code") == "other" and not attrs.get("reason_text"):
+            raise serializers.ValidationError({"reason_text": "Précisez la raison d’annulation."})
+        return attrs
+
+
 def _discount_amount(base: Decimal, value: Decimal, discount_type: str) -> Decimal:
     if base <= 0:
         return Decimal("0")

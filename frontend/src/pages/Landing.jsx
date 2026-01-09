@@ -1,5 +1,5 @@
 // frontend/src/pages/Landing.jsx
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { ArrowRight, Barcode, BookOpen, ClipboardList, Sparkles, FileText } from "lucide-react";
@@ -7,6 +7,7 @@ import PublicShell from "../components/public/PublicShell";
 import Card from "../ui/Card";
 import LazyAutoDemoShowcase from "../components/public/LazyAutoDemoShowcase";
 import { FAMILLES, MODULES } from "../lib/famillesConfig";
+import { trackPublicVisit } from "../lib/trackVisit";
 
 const familyIcons = {
   retail: Barcode,
@@ -36,6 +37,10 @@ export default function Landing() {
   const siteUrl = "https://stockscan.app";
   const canonicalUrl = `${siteUrl}/`;
   const ogImage = `${siteUrl}/og-image.png`;
+
+  useEffect(() => {
+    trackPublicVisit("landing");
+  }, []);
 
   const seoTitle =
     "StockScan — Inventaire clair et rapide pour commerces (restaurant, bar, boulangerie, épicerie, boutique, pharmacie)";

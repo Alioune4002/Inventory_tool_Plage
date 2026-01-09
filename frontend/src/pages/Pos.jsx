@@ -1,7 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
-import { CreditCard, Search, Plus, Minus, Trash2, BadgePercent, ReceiptText } from "lucide-react";
+import {
+  CreditCard,
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  BadgePercent,
+  ReceiptText,
+  Printer,
+  RotateCcw,
+} from "lucide-react";
 
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
@@ -28,6 +38,14 @@ const METHODS = [
 const DISCOUNT_TYPES = [
   { value: "amount", label: "€" },
   { value: "percent", label: "%" },
+];
+
+const CANCEL_REASONS = [
+  { value: "error", label: "Erreur de caisse" },
+  { value: "customer_left", label: "Client parti" },
+  { value: "breakage", label: "Casse" },
+  { value: "mistake", label: "Erreur de commande" },
+  { value: "other", label: "Autre" },
 ];
 
 const POS_GUIDE_STORAGE = "pos_guide_v1";
@@ -111,6 +129,20 @@ export default function Pos() {
 
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+
+  const [tickets, setTickets] = useState([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketDetail, setTicketDetail] = useState(null);
+  const [ticketDrawerOpen, setTicketDrawerOpen] = useState(false);
+  const [cancelDrawerOpen, setCancelDrawerOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("error");
+  const [cancelReasonText, setCancelReasonText] = useState("");
+  const [cancelRestock, setCancelRestock] = useState(true);
+  const [cancelLoading, setCancelLoading] = useState(false);
+
+  const [cashSession, setCashSession] = useState({ active: false });
+  const [cashSessionLoading, setCashSessionLoading] = useState(false);
+  const [cashSessionClosing, setCashSessionClosing] = useState(false);
 
   const [cartItems, setCartItems] = useState([]);
   const [globalDiscount, setGlobalDiscount] = useState({ value: "", type: "amount" });
@@ -245,6 +277,175 @@ export default function Pos() {
     }
   }, [isKdsAvailable]);
 
+  const fetchTickets = useCallback(async () => {
+    setTicketsLoading(true);
+    try {
+      const res = await api.get("/api/pos/tickets/?limit=20");
+      setTickets(res.data?.tickets || []);
+    } catch (error) {
+      setTickets([]);
+      pushToast?.({
+        message: "Impossible de charger l’historique des tickets.",
+        type: "error",
+      });
+    } finally {
+      setTicketsLoading(false);
+    }
+  }, [pushToast]);
+
+  const fetchTicketDetail = useCallback(
+    async (ticketId) => {
+      if (!ticketId) return;
+      try {
+        const res = await api.get(`/api/pos/tickets/${ticketId}/`);
+        setTicketDetail(res.data || null);
+        setTicketDrawerOpen(true);
+      } catch (error) {
+        pushToast?.({
+          message: error?.response?.data?.detail || "Impossible d’ouvrir ce ticket.",
+          type: "error",
+        });
+      }
+    },
+    [pushToast]
+  );
+
+  const fetchCashSession = useCallback(async () => {
+    setCashSessionLoading(true);
+    try {
+      const res = await api.get("/api/pos/session/active/");
+      setCashSession(res.data || { active: false });
+    } catch (error) {
+      setCashSession({ active: false });
+    } finally {
+      setCashSessionLoading(false);
+    }
+  }, []);
+
+  const handleCloseSession = async () => {
+    setCashSessionClosing(true);
+    try {
+      const res = await api.post("/api/pos/session/close/", {});
+      pushToast?.({ message: res?.data?.detail || "Caisse clôturée.", type: "success" });
+      setCashSession({ active: false });
+      fetchTickets();
+    } catch (error) {
+      pushToast?.({
+        message: error?.response?.data?.detail || "Impossible de clôturer la caisse.",
+        type: "error",
+      });
+    } finally {
+      setCashSessionClosing(false);
+    }
+  };
+
+  const openCancelDrawer = () => {
+    setCancelReason("error");
+    setCancelReasonText("");
+    setCancelRestock(true);
+    setCancelDrawerOpen(true);
+  };
+
+  const handleCancelTicket = async () => {
+    if (!ticketDetail?.id) return;
+    if (cancelReason === "other" && !cancelReasonText.trim()) {
+      pushToast?.({ message: "Veuillez préciser la raison de l’annulation.", type: "warn" });
+      return;
+    }
+    setCancelLoading(true);
+    try {
+      const res = await api.post(`/api/pos/tickets/${ticketDetail.id}/cancel/`, {
+        reason_code: cancelReason,
+        reason_text: cancelReasonText,
+        restock: cancelRestock,
+      });
+      pushToast?.({ message: res?.data?.detail || "Ticket annulé.", type: "success" });
+      setCancelDrawerOpen(false);
+      setTicketDrawerOpen(false);
+      setTicketDetail(null);
+      fetchTickets();
+      fetchReport();
+      fetchCashSession();
+    } catch (error) {
+      pushToast?.({
+        message: error?.response?.data?.detail || "Impossible d’annuler le ticket.",
+        type: "error",
+      });
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const printTicket = (ticket) => {
+    if (!ticket) return;
+    const printWindow = window.open("", "pos-ticket", "width=420,height=720");
+    if (!printWindow) {
+      pushToast?.({ message: "Autorisez l’ouverture de la fenêtre d’impression.", type: "warn" });
+      return;
+    }
+    const linesHtml = (ticket.lines || [])
+      .map(
+        (line) => `
+          <tr>
+            <td>${line.product_name || "Produit"}</td>
+            <td style="text-align:center;">${line.qty}</td>
+            <td style="text-align:right;">${formatMoney(line.unit_price)} €</td>
+            <td style="text-align:right;">${formatMoney(line.line_total)} €</td>
+          </tr>`
+      )
+      .join("");
+    const paymentsHtml = (ticket.payments || [])
+      .map(
+        (pay) => `
+          <tr>
+            <td>${METHODS.find((m) => m.value === pay.method)?.label || pay.method}</td>
+            <td style="text-align:right;">${formatMoney(pay.amount)} €</td>
+          </tr>`
+      )
+      .join("");
+    const html = `
+      <html>
+        <head>
+          <title>Ticket ${ticket.reference || ticket.id}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 16px; color: #111; }
+            h1 { font-size: 18px; margin: 0 0 4px; }
+            h2 { font-size: 14px; margin: 18px 0 6px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { padding: 6px 0; border-bottom: 1px solid #ddd; }
+            .totals { margin-top: 12px; font-weight: 700; text-align: right; }
+            .muted { color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <h1>StockScan POS</h1>
+          <div class="muted">Ticket ${ticket.reference || ticket.id}</div>
+          <div class="muted">${new Date(ticket.created_at).toLocaleString("fr-FR")}</div>
+          <h2>Produits</h2>
+          <table>
+            <thead>
+              <tr>
+                <th style="text-align:left;">Produit</th>
+                <th style="text-align:center;">Qté</th>
+                <th style="text-align:right;">PU</th>
+                <th style="text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>${linesHtml}</tbody>
+          </table>
+          <h2>Paiements</h2>
+          <table>
+            <tbody>${paymentsHtml}</tbody>
+          </table>
+          <div class="totals">Total: ${formatMoney(ticket.total_amount)} €</div>
+        </body>
+      </html>`;
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
   const resetKdsCheckout = () => {
     setKdsCheckout(null);
     setCartItems([]);
@@ -297,6 +498,11 @@ export default function Pos() {
   useEffect(() => {
     fetchKdsOpenTables();
   }, [fetchKdsOpenTables]);
+
+  useEffect(() => {
+    fetchTickets();
+    fetchCashSession();
+  }, [fetchTickets, fetchCashSession]);
 
   const addToCart = (product) => {
     if (isKdsMode) {
@@ -383,6 +589,8 @@ export default function Pos() {
       setGlobalDiscount({ value: "", type: "amount" });
       setNote("");
       fetchReport();
+      fetchTickets();
+      fetchCashSession();
       return res.data;
     } finally {
       setCheckoutLoading(false);
@@ -403,6 +611,8 @@ export default function Pos() {
       resetKdsCheckout();
       fetchReport();
       fetchKdsOpenTables();
+      fetchTickets();
+      fetchCashSession();
       return res.data;
     } finally {
       setCheckoutLoading(false);
@@ -899,6 +1109,95 @@ export default function Pos() {
             </Card>
 
             <Card className="p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-[var(--text)]">Session de caisse</div>
+                  <div className="text-xs text-[var(--muted)]">
+                    Résumé automatique des encaissements en cours.
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={handleCloseSession}
+                  disabled={!cashSession?.active || cashSessionClosing}
+                  loading={cashSessionClosing}
+                >
+                  Clôturer
+                </Button>
+              </div>
+              {cashSessionLoading ? (
+                <div className="text-sm text-[var(--muted)]">Chargement…</div>
+              ) : cashSession?.active && cashSession.summary ? (
+                <div className="space-y-2 text-sm text-[var(--text)]">
+                  <div className="flex justify-between">
+                    <span>Total net</span>
+                    <span>{formatMoney(cashSession.summary.total_net)} €</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Remises</span>
+                    <span>{formatMoney(cashSession.summary.total_remises)} €</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Tickets</span>
+                    <span>{cashSession.summary.total_tickets}</span>
+                  </div>
+                  <div className="space-y-1 text-xs text-[var(--muted)]">
+                    {(cashSession.summary.payments_by_method || []).map((row) => (
+                      <div key={row.method} className="flex justify-between">
+                        <span>{METHODS.find((m) => m.value === row.method)?.label || row.method}</span>
+                        <span>{formatMoney(row.total)} €</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-[var(--muted)]">
+                  Aucune caisse ouverte. Le prochain encaissement ouvrira automatiquement une session.
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-[var(--text)]">Historique des tickets</div>
+                <Button size="sm" variant="ghost" onClick={fetchTickets}>
+                  Rafraîchir
+                </Button>
+              </div>
+              {ticketsLoading ? (
+                <div className="text-sm text-[var(--muted)]">Chargement…</div>
+              ) : tickets.length === 0 ? (
+                <div className="text-sm text-[var(--muted)]">Aucun ticket enregistré.</div>
+              ) : (
+                <div className="space-y-2">
+                  {tickets.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      className="flex items-center justify-between gap-2 rounded-2xl border border-[var(--border)] px-3 py-2"
+                    >
+                      <div>
+                        <div className="text-sm font-semibold text-[var(--text)]">{ticket.reference}</div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {new Date(ticket.created_at).toLocaleString("fr-FR")}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-semibold text-[var(--text)]">
+                          {formatMoney(ticket.total_amount)} €
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">{ticket.status === "PAID" ? "Payé" : "Annulé"}</div>
+                      </div>
+                      <Button size="sm" variant="secondary" onClick={() => fetchTicketDetail(ticket.id)}>
+                        Voir
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            <Card className="p-5 space-y-3">
               <div className="text-xs text-[var(--muted)]">Totaux</div>
               <div className="flex justify-between text-sm text-[var(--text)]">
                 <span>Total brut</span>
@@ -966,6 +1265,135 @@ export default function Pos() {
               placeholder="Prix de vente"
             />
           ))}
+        </div>
+      </Drawer>
+
+      <Drawer
+        open={ticketDrawerOpen}
+        onClose={() => {
+          setTicketDrawerOpen(false);
+          setTicketDetail(null);
+        }}
+        title="Détail du ticket"
+        footer={
+          ticketDetail ? (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => printTicket(ticketDetail)}>
+                <Printer className="h-4 w-4" />
+                Imprimer
+              </Button>
+              {ticketDetail.status === "PAID" ? (
+                <Button variant="danger" onClick={openCancelDrawer}>
+                  <RotateCcw className="h-4 w-4" />
+                  Annuler
+                </Button>
+              ) : null}
+              <Button variant="ghost" onClick={() => setTicketDrawerOpen(false)}>
+                Fermer
+              </Button>
+            </div>
+          ) : null
+        }
+      >
+        {ticketDetail ? (
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-semibold text-[var(--text)]">{ticketDetail.reference}</div>
+              <div className="text-xs text-[var(--muted)]">
+                {new Date(ticketDetail.created_at).toLocaleString("fr-FR")}
+              </div>
+              <div className="text-xs text-[var(--muted)]">
+                Statut : {ticketDetail.status === "PAID" ? "Payé" : "Annulé"}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {(ticketDetail.lines || []).map((line) => (
+                <div key={line.id} className="rounded-2xl border border-[var(--border)] p-3 space-y-1">
+                  <div className="font-semibold text-[var(--text)]">{line.product_name}</div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {line.internal_sku || line.barcode || ""}
+                  </div>
+                  <div className="flex justify-between text-sm text-[var(--text)]">
+                    <span>Qté {line.qty}</span>
+                    <span>{formatMoney(line.line_total)} €</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Paiements</div>
+              {(ticketDetail.payments || []).map((pay) => (
+                <div key={pay.id} className="flex justify-between text-sm text-[var(--text)]">
+                  <span>{METHODS.find((m) => m.value === pay.method)?.label || pay.method}</span>
+                  <span>{formatMoney(pay.amount)} €</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-1 text-sm text-[var(--text)]">
+              <div className="flex justify-between">
+                <span>Total brut</span>
+                <span>{formatMoney(ticketDetail.subtotal_amount)} €</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Remises</span>
+                <span>{formatMoney(ticketDetail.discount_total)} €</span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span>Total net</span>
+                <span>{formatMoney(ticketDetail.total_amount)} €</span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-[var(--muted)]">Chargement…</div>
+        )}
+      </Drawer>
+
+      <Drawer
+        open={cancelDrawerOpen}
+        onClose={() => setCancelDrawerOpen(false)}
+        title="Annuler le ticket"
+        footer={
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setCancelDrawerOpen(false)}>
+              Fermer
+            </Button>
+            <Button variant="danger" onClick={handleCancelTicket} loading={cancelLoading}>
+              Confirmer l’annulation
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-[var(--muted)]">
+            Indiquez la raison et choisissez si le stock peut être réintégré.
+          </div>
+          <Select
+            label="Raison"
+            value={cancelReason}
+            onChange={setCancelReason}
+            options={CANCEL_REASONS}
+          />
+          {cancelReason === "other" ? (
+            <Input
+              label="Précision"
+              value={cancelReasonText}
+              onChange={(e) => setCancelReasonText(e.target.value)}
+              placeholder="Ex. erreur de saisie"
+            />
+          ) : null}
+          <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+            <input
+              type="checkbox"
+              checked={cancelRestock}
+              onChange={(e) => setCancelRestock(e.target.checked)}
+              className="h-4 w-4"
+            />
+            Produits revendables : réintégrer le stock
+          </label>
         </div>
       </Drawer>
     </PageTransition>

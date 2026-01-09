@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { ChefHat, ClipboardList, Bell, Sparkles, Timer } from "lucide-react";
@@ -7,6 +7,7 @@ import Card from "../../ui/Card";
 import Button from "../../ui/Button";
 import { useAuth } from "../../app/AuthProvider";
 import kdsLogo from "../../assets/kds-logo.png";
+import { trackPublicVisit } from "../../lib/trackVisit";
 
 const KdsLogo = () => {
   const [failed, setFailed] = useState(false);
@@ -73,6 +74,10 @@ export default function KdsLanding() {
   const next = encodeURIComponent("/kds/app");
   const primaryHref = isAuthed ? "/kds/app" : `/login?next=${next}`;
   const secondaryHref = `/register?next=${next}`;
+
+  useEffect(() => {
+    trackPublicVisit("kds");
+  }, []);
 
   return (
     <div className="public-shell min-h-screen">

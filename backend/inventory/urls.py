@@ -95,6 +95,7 @@ urlpatterns = [
 
     path("api/pos/", include("pos.urls")),
     path("api/kds/", include("kds.urls")),
+    path("api/admin/", include("admin_dashboard.urls")),
 
     path("api/", include(router.urls)),
 ]

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { ReceiptText, CreditCard, BarChart3, ShieldCheck, Sparkles } from "lucide-react";
@@ -7,6 +7,7 @@ import Card from "../../ui/Card";
 import Button from "../../ui/Button";
 import { useAuth } from "../../app/AuthProvider";
 import posLogo from "../../assets/pos-logo.png";
+import { trackPublicVisit } from "../../lib/trackVisit";
 
 const PosLogo = () => {
   const [failed, setFailed] = useState(false);
@@ -43,6 +44,10 @@ const POS_FAQ = [
   {
     q: "Puis-je suivre mes ventes ?",
     a: "Oui. Des rapports simples sont disponibles pour suivre votre activité.",
+  },
+  {
+    q: "La caisse est-elle certifiée fiscalement ?",
+    a: "Non. StockScan POS n’est pas une caisse certifiée fiscale. Elle convient aux besoins simples et gratuits.",
   },
 ];
 
@@ -81,6 +86,10 @@ export default function PosLanding() {
   const next = encodeURIComponent("/pos/app");
   const primaryHref = isAuthed ? "/pos/app" : `/login?next=${next}`;
   const secondaryHref = `/register?next=${next}`;
+
+  useEffect(() => {
+    trackPublicVisit("pos");
+  }, []);
 
   return (
     <div className="public-shell min-h-screen">
@@ -150,12 +159,15 @@ export default function PosLanding() {
               </div>
               <div className="flex items-start gap-3">
                 <BarChart3 className="h-5 w-5 text-blue-300" />
-                <span>Rapports lisibles, exportables pour votre compta.</span>
+                <span>Rapports simples et lisibles pour suivre vos ventes.</span>
               </div>
               <div className="flex items-start gap-3">
                 <ShieldCheck className="h-5 w-5 text-blue-300" />
                 <span>Stock synchronisé quand vous activez StockScan.</span>
               </div>
+            </div>
+            <div className="text-xs text-slate-400">
+              Non certifié fiscalement. Idéal pour les usages simples et gratuits.
             </div>
           </Card>
         </section>
@@ -251,7 +263,7 @@ export default function PosLanding() {
       <footer className="mx-auto w-full max-w-6xl px-4 pb-10 text-xs text-white/60">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <span>Outil gratuit propulsé par la technologie StockScan.</span>
-          <span>POS gratuit — sans abonnement — sans carte bancaire — sans limite cachée.</span>
+          <span>POS gratuit — sans abonnement — sans carte bancaire — non certifié fiscalement.</span>
         </div>
       </footer>
     </div>

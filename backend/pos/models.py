@@ -6,6 +6,48 @@ from accounts.models import Tenant, Service
 from products.models import Product
 
 
+class PosCashSession(models.Model):
+    STATUS_CHOICES = [
+        ("OPEN", "Ouverte"),
+        ("CLOSED", "Clôturée"),
+    ]
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="pos_sessions")
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="pos_sessions")
+    opened_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pos_sessions_opened",
+    )
+    opened_at = models.DateTimeField(default=timezone.now)
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pos_sessions_closed",
+    )
+    closed_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="OPEN")
+
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    total_tickets = models.PositiveIntegerField(default=0)
+    totals_by_method = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["tenant", "service", "status"]),
+            models.Index(fields=["tenant", "service", "opened_at"]),
+        ]
+
+    def __str__(self):
+        return f"POS Session #{self.id} ({self.tenant_id})"
+
+
 class PosTicket(models.Model):
     STATUS_CHOICES = [
         ("PAID", "Payé"),
@@ -14,6 +56,13 @@ class PosTicket(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="pos_tickets")
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="pos_tickets")
+    session = models.ForeignKey(
+        PosCashSession,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tickets",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="pos_tickets"
     )
@@ -35,6 +84,35 @@ class PosTicket(models.Model):
 
     def __str__(self):
         return f"POS Ticket #{self.id} ({self.tenant_id})"
+
+
+class PosTicketEvent(models.Model):
+    EVENT_CHOICES = [
+        ("CANCEL", "Annulation"),
+    ]
+
+    ticket = models.ForeignKey(PosTicket, on_delete=models.CASCADE, related_name="events")
+    event_type = models.CharField(max_length=20, choices=EVENT_CHOICES)
+    reason_code = models.CharField(max_length=30, blank=True, default="")
+    reason_text = models.TextField(blank=True, default="")
+    restock = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pos_ticket_events",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["ticket", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} #{self.ticket_id}"
 
 
 class PosTicketLine(models.Model):
