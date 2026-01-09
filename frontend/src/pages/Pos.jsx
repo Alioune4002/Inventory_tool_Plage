@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+// src/pages/Pos.jsx
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import {
@@ -11,6 +12,8 @@ import {
   ReceiptText,
   Printer,
   RotateCcw,
+  Sparkles,
+  Check,
 } from "lucide-react";
 
 import PageTransition from "../components/PageTransition";
@@ -68,6 +71,8 @@ const parseNumber = (value) => {
   const n = Number(raw);
   return Number.isFinite(n) ? n : 0;
 };
+
+const clamp2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const PosLogo = () => {
   const [failed, setFailed] = useState(false);
@@ -162,12 +167,15 @@ export default function Pos() {
     }
   });
 
+  const searchInputRef = useRef(null);
+
   const isKdsMode = Boolean(kdsCheckout);
   const serviceLabel = serviceProfile?.name || "";
   const hasCoreAccess = Boolean(tenant && (serviceProfile || services?.length));
   const coreCta = hasCoreAccess
     ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
     : { label: "Activer StockScan", href: "/app/settings" };
+
   const handleLogout = () => {
     logout();
     window.location.href = "/login?next=/pos/app";
@@ -222,6 +230,24 @@ export default function Pos() {
     [payments]
   );
 
+  const remaining = useMemo(() => clamp2(totals.total - paymentTotal), [totals.total, paymentTotal]);
+  const isPaidExact = Math.abs(remaining) <= 0.01;
+  const isOverpaid = remaining < -0.01;
+
+  const remainingLabel = useMemo(() => {
+    if (isPaidExact) return "OK";
+    if (isOverpaid) return `Rendu : ${formatMoney(Math.abs(remaining))} €`;
+    return `Restant : ${formatMoney(remaining)} €`;
+  }, [isPaidExact, isOverpaid, remaining]);
+
+  const focusSearch = () => {
+    try {
+      searchInputRef.current?.focus?.();
+    } catch {
+      // noop
+    }
+  };
+
   const fetchProducts = useCallback(
     async (value) => {
       const q = String(value || "").trim();
@@ -234,7 +260,7 @@ export default function Pos() {
         const res = await api.get(`/api/pos/products/search/?q=${encodeURIComponent(q)}`);
         setProducts(res.data || []);
         return res.data || [];
-      } catch (error) {
+      } catch {
         pushToast?.({ message: "Impossible de charger les produits.", type: "error" });
         return [];
       } finally {
@@ -254,7 +280,7 @@ export default function Pos() {
       const from = fromDate.toISOString().slice(0, 10);
       const res = await api.get(`/api/pos/reports/summary/?from=${from}&to=${to}`);
       setReport(res.data || null);
-    } catch (error) {
+    } catch {
       setReport(null);
     } finally {
       setReportLoading(false);
@@ -282,12 +308,9 @@ export default function Pos() {
     try {
       const res = await api.get("/api/pos/tickets/?limit=20");
       setTickets(res.data?.tickets || []);
-    } catch (error) {
+    } catch {
       setTickets([]);
-      pushToast?.({
-        message: "Impossible de charger l’historique des tickets.",
-        type: "error",
-      });
+      pushToast?.({ message: "Impossible de charger l’historique des tickets.", type: "error" });
     } finally {
       setTicketsLoading(false);
     }
@@ -315,7 +338,7 @@ export default function Pos() {
     try {
       const res = await api.get("/api/pos/session/active/");
       setCashSession(res.data || { active: false });
-    } catch (error) {
+    } catch {
       setCashSession({ active: false });
     } finally {
       setCashSessionLoading(false);
@@ -454,6 +477,7 @@ export default function Pos() {
     setNote("");
     setQuery("");
     setProducts([]);
+    focusSearch();
   };
 
   const startKdsCheckout = async (orderId) => {
@@ -474,6 +498,7 @@ export default function Pos() {
       ]);
       setQuery("");
       setProducts([]);
+      focusSearch();
     } catch (error) {
       pushToast?.({
         message: error?.response?.data?.detail || "Impossible de charger la commande.",
@@ -515,9 +540,7 @@ export default function Pos() {
     setCartItems((prev) => {
       const existing = prev.find((p) => p.id === product.id);
       if (existing) {
-        return prev.map((p) =>
-          p.id === product.id ? { ...p, qty: parseNumber(p.qty) + 1 } : p
-        );
+        return prev.map((p) => (p.id === product.id ? { ...p, qty: parseNumber(p.qty) + 1 } : p));
       }
       return [
         ...prev,
@@ -555,6 +578,7 @@ export default function Pos() {
       addToCart(results[0]);
       setQuery("");
       setProducts([]);
+      focusSearch();
     }
   };
 
@@ -584,13 +608,18 @@ export default function Pos() {
     try {
       const res = await api.post("/api/pos/tickets/checkout/", payload);
       pushToast?.({ message: "Paiement enregistré.", type: "success" });
+
       setCartItems([]);
       setPayments([{ method: "cash", amount: "" }]);
       setGlobalDiscount({ value: "", type: "amount" });
       setNote("");
+      setQuery("");
+      setProducts([]);
+
       fetchReport();
       fetchTickets();
       fetchCashSession();
+      focusSearch();
       return res.data;
     } finally {
       setCheckoutLoading(false);
@@ -621,11 +650,8 @@ export default function Pos() {
 
   const handleCheckout = async () => {
     if (isKdsMode) {
-      if (Math.abs(paymentTotal - totals.total) > 0.01) {
-        pushToast?.({
-          message: "Le total des paiements doit correspondre au total net.",
-          type: "error",
-        });
+      if (!isPaidExact) {
+        pushToast?.({ message: "Le total des paiements doit correspondre au total net.", type: "error" });
         return;
       }
       try {
@@ -636,10 +662,7 @@ export default function Pos() {
           pushToast?.({ message: data?.detail || "Paiements incomplets.", type: "error" });
           return;
         }
-        pushToast?.({
-          message: data?.detail || "Impossible d’encaisser la commande.",
-          type: "error",
-        });
+        pushToast?.({ message: data?.detail || "Impossible d’encaisser la commande.", type: "error" });
       }
       return;
     }
@@ -648,11 +671,9 @@ export default function Pos() {
       pushToast?.({ message: "Ajoutez au moins un produit.", type: "warn" });
       return;
     }
-    if (Math.abs(paymentTotal - totals.total) > 0.01) {
-      pushToast?.({
-        message: "Le total des paiements doit correspondre au total net.",
-        type: "error",
-      });
+
+    if (!isPaidExact) {
+      pushToast?.({ message: "Le total des paiements doit correspondre au total net.", type: "error" });
       return;
     }
 
@@ -671,10 +692,7 @@ export default function Pos() {
         pushToast?.({ message: data?.detail || "Stock insuffisant.", type: "error" });
         return;
       }
-      pushToast?.({
-        message: data?.detail || "Impossible de valider le paiement.",
-        type: "error",
-      });
+      pushToast?.({ message: data?.detail || "Impossible de valider le paiement.", type: "error" });
     }
   };
 
@@ -696,9 +714,7 @@ export default function Pos() {
 
     try {
       await Promise.all(updates.map((u) => api.patch(`/api/products/${u.id}/`, { selling_price: u.price })));
-      updates.forEach((u) => {
-        updateCartItem(u.id, { unit_price: u.price, selling_price: u.price });
-      });
+      updates.forEach((u) => updateCartItem(u.id, { unit_price: u.price, selling_price: u.price }));
       setPriceModalOpen(false);
       if (pendingPayload) {
         await submitCheckout(pendingPayload);
@@ -711,6 +727,44 @@ export default function Pos() {
     }
   };
 
+  // --- UX Paiements ---
+  const setPaymentAtIndex = (idx, patch) => {
+    setPayments((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  };
+
+  const fillRemainingInto = (idx) => {
+    const rest = clamp2(totals.total - payments.reduce((acc, p, i) => acc + (i === idx ? 0 : parseNumber(p.amount)), 0));
+    const safe = Math.max(rest, 0);
+    setPaymentAtIndex(idx, { amount: safe ? formatMoney(safe) : "0.00" });
+  };
+
+  const fillRemainingIntoLast = () => {
+    const idx = Math.max(payments.length - 1, 0);
+    fillRemainingInto(idx);
+  };
+
+  const ensureAtLeastOnePayment = () => {
+    setPayments((prev) => (prev?.length ? prev : [{ method: "cash", amount: "" }]));
+  };
+
+  const addPaymentLine = () => {
+    setPayments((prev) => [...prev, { method: "cash", amount: "" }]);
+  };
+
+  const removePaymentLine = (idx) => {
+    setPayments((prev) => {
+      const next = prev.filter((_, i) => i !== idx);
+      return next.length ? next : [{ method: "cash", amount: "" }];
+    });
+  };
+
+  useEffect(() => {
+    ensureAtLeastOnePayment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const glassCard = "bg-[var(--surface)]/65 backdrop-blur-xl border border-[var(--border)]/70";
+
   return (
     <PageTransition>
       <Helmet>
@@ -719,23 +773,23 @@ export default function Pos() {
       </Helmet>
 
       <div className="space-y-4">
-        <Card className="p-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <Card className={`p-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between ${glassCard}`}>
           <div className="flex items-center gap-3">
             <PosLogo />
             <div>
               <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
                 Caisse enregistreuse gratuite en ligne
               </div>
-              <h1 className="text-2xl font-black text-[var(--text)]">StockScan POS</h1>
+              <h1 className="text-2xl font-black text-[var(--text)] flex items-center gap-2">
+                StockScan POS <Sparkles className="h-5 w-5 text-[var(--muted)]" />
+              </h1>
               <p className="text-sm text-[var(--muted)]">
-                Encaissez en quelques clics sur tablette, mobile ou ordinateur, sans configuration lourde.
+                Encaissez sur tablette, mobile ou ordinateur — rapide, clair, sans friction.
               </p>
             </div>
           </div>
           <div className="flex flex-col items-start lg:items-end gap-2">
-            {serviceLabel ? (
-              <div className="text-xs text-[var(--muted)]">Service actif : {serviceLabel}</div>
-            ) : null}
+            {serviceLabel ? <div className="text-xs text-[var(--muted)]">Service actif : {serviceLabel}</div> : null}
             <div className="flex flex-wrap items-center gap-2">
               <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
                 {coreCta.label}
@@ -752,20 +806,18 @@ export default function Pos() {
         </Card>
 
         {showGuide ? (
-          <Card className="p-5 space-y-3">
+          <Card className={`p-5 space-y-3 ${glassCard}`}>
             <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-[var(--text)]">
-                Guide express — bien démarrer la caisse
-              </div>
+              <div className="text-sm font-semibold text-[var(--text)]">Guide express — bien démarrer la caisse</div>
               <Button size="sm" variant="ghost" onClick={dismissGuide}>
                 Fermer
               </Button>
             </div>
             <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
-              <li>Sélectionnez un service si vous en avez plusieurs.</li>
               <li>Recherchez ou scannez un produit pour l’ajouter au panier.</li>
-              <li>Ajustez les quantités et les remises si besoin.</li>
-              <li>Encaissez : le stock se met à jour à la validation.</li>
+              <li>Réglez en 1 paiement… ou multi-paiements si besoin.</li>
+              <li>Utilisez “Remplir le reste” pour aller vite.</li>
+              <li>Encaissez : stock + stats se mettent à jour à la validation.</li>
             </ol>
           </Card>
         ) : (
@@ -781,13 +833,11 @@ export default function Pos() {
         )}
 
         {isKdsAvailable ? (
-          <Card className="p-5 space-y-3">
+          <Card className={`p-5 space-y-3 ${glassCard}`}>
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold text-[var(--text)]">Tables ouvertes</div>
-                <div className="text-xs text-[var(--muted)]">
-                  Encaissez une commande envoyée en cuisine en un clic.
-                </div>
+                <div className="text-xs text-[var(--muted)]">Encaissez une commande KDS en un clic.</div>
               </div>
               <Button variant="secondary" size="sm" onClick={fetchKdsOpenTables} disabled={kdsLoading}>
                 Actualiser
@@ -801,21 +851,13 @@ export default function Pos() {
             ) : (
               <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {kdsOpenTables.map((row) => (
-                  <Card key={row.order_id} className="p-4 space-y-2">
+                  <Card key={row.order_id} className={`p-4 space-y-2 ${glassCard}`}>
                     <div className="flex items-center justify-between">
                       <div className="font-semibold text-[var(--text)]">{row.table_name}</div>
-                      <Badge variant="info">
-                        {KDS_STATUS_LABELS[row.status] || row.status}
-                      </Badge>
+                      <Badge variant="info">{KDS_STATUS_LABELS[row.status] || row.status}</Badge>
                     </div>
-                    <div className="text-sm text-[var(--muted)]">
-                      Total : {formatMoney(row.total)} €
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => startKdsCheckout(row.order_id)}
-                      loading={kdsCheckoutLoading}
-                    >
+                    <div className="text-sm text-[var(--muted)]">Total : {formatMoney(row.total)} €</div>
+                    <Button size="sm" onClick={() => startKdsCheckout(row.order_id)} loading={kdsCheckoutLoading}>
                       Encaisser
                     </Button>
                   </Card>
@@ -825,26 +867,34 @@ export default function Pos() {
           </Card>
         ) : null}
 
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_380px] gap-4">
+          {/* LEFT */}
           <div className="space-y-4">
-            <Card className="p-5 space-y-4">
-              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-                <Search className="h-4 w-4" />
-                Recherche rapide
+            <Card className={`p-5 space-y-4 ${glassCard}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                  <Search className="h-4 w-4" />
+                  Recherche rapide
+                </div>
+                {!isKdsMode ? (
+                  <div className="text-xs text-[var(--muted)]">Entrée = ajout auto si 1 résultat</div>
+                ) : null}
               </div>
+
               <div className="flex flex-col gap-2">
                 {isKdsMode ? (
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
-                    Encaissement KDS en cours. Terminez ou annulez pour reprendre la caisse classique.
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur px-3 py-2.5 text-sm text-[var(--muted)]">
+                    Encaissement KDS en cours. Terminez ou quittez pour reprendre la caisse classique.
                   </div>
                 ) : (
                   <>
-                    <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">
+                    <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur px-3 py-2.5">
                       <input
+                        ref={searchInputRef}
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         onKeyDown={handleSearchEnter}
-                        placeholder="Nom, code‑barres ou SKU"
+                        placeholder="Nom, code-barres ou SKU"
                         className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
                         autoFocus
                       />
@@ -856,41 +906,49 @@ export default function Pos() {
                         Scanner
                       </button>
                     </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      Astuce : scannez un produit puis validez avec Entrée pour l’ajouter au panier.
-                    </div>
+                    {products.length > 0 ? (
+                      <div className="text-xs text-[var(--muted)]">
+                        {searchLoading ? "Recherche…" : `${products.length} résultat(s)`}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-[var(--muted)]">Tapez un nom, scannez, puis validez.</div>
+                    )}
                   </>
                 )}
               </div>
             </Card>
 
-            <Card className="p-5 space-y-3">
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
               <div className="text-sm font-semibold text-[var(--text)]">Produits</div>
               {isKdsMode ? (
-                <div className="text-sm text-[var(--muted)]">
-                  Encaissement KDS en cours. Le catalogue POS est temporairement désactivé.
-                </div>
+                <div className="text-sm text-[var(--muted)]">Le catalogue POS est désactivé pendant l’encaissement KDS.</div>
               ) : searchLoading ? (
                 <div className="text-sm text-[var(--muted)]">Recherche en cours…</div>
               ) : products.length === 0 ? (
-                <div className="text-sm text-[var(--muted)]">
-                  Tapez un nom ou scannez un code‑barres pour afficher des produits.
-                </div>
+                <div className="text-sm text-[var(--muted)]">Recherchez un produit pour l’ajouter au panier.</div>
               ) : (
                 <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">
                   {products.map((product) => (
-                    <Card key={product.id} className="p-4 space-y-2">
+                    <Card key={product.id} className={`p-4 space-y-2 ${glassCard}`}>
                       <div className="font-semibold text-[var(--text)]">{product.name}</div>
-                      <div className="text-xs text-[var(--muted)]">
-                        {product.category || "Sans catégorie"}
-                      </div>
+                      <div className="text-xs text-[var(--muted)]">{product.category || "Sans catégorie"}</div>
                       <div className="text-sm font-semibold text-[var(--text)]">
                         {product.selling_price ? `${formatMoney(product.selling_price)} €` : "Prix manquant"}
                       </div>
                       <div className="text-xs text-[var(--muted)]">
                         Stock: {product.quantity} {product.unit}
                       </div>
-                      <Button size="sm" className="w-full" onClick={() => addToCart(product)}>
+                      <Button
+                        size="sm"
+                        className="w-full"
+                        onClick={() => {
+                          addToCart(product);
+                          // micro boost: garder le focus et permettre de scanner en boucle
+                          setQuery("");
+                          setProducts([]);
+                          focusSearch();
+                        }}
+                      >
                         Ajouter
                       </Button>
                     </Card>
@@ -900,30 +958,38 @@ export default function Pos() {
             </Card>
           </div>
 
+          {/* RIGHT */}
           <div className="space-y-4">
-            <Card className="p-5 space-y-3">
-              <div className="text-sm font-semibold text-[var(--text)]">Panier</div>
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-[var(--text)]">Panier</div>
+                {isKdsMode ? (
+                  <Badge variant="info">KDS</Badge>
+                ) : cartItems.length ? (
+                  <Badge variant="success">{cartItems.length}</Badge>
+                ) : (
+                  <Badge variant="info">—</Badge>
+                )}
+              </div>
+
               {isKdsMode ? (
                 <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-xs text-[var(--muted)]">
-                      Encaissement {kdsCheckout?.table || "commande"}
-                    </div>
+                    <div className="text-xs text-[var(--muted)]">Encaissement {kdsCheckout?.table || "commande"}</div>
                     <Button variant="ghost" size="sm" onClick={resetKdsCheckout}>
                       Quitter
                     </Button>
                   </div>
                   <div className="space-y-3">
                     {(kdsCheckout?.lines || []).map((line, idx) => (
-                      <div key={`${line.menu_item_name}-${idx}`} className="rounded-2xl border border-[var(--border)] p-3 space-y-2">
+                      <div
+                        key={`${line.menu_item_name}-${idx}`}
+                        className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur p-3 space-y-2"
+                      >
                         <div className="font-semibold text-[var(--text)]">{line.menu_item_name}</div>
-                        {line.notes ? (
-                          <div className="text-xs text-[var(--muted)]">Note : {line.notes}</div>
-                        ) : null}
+                        {line.notes ? <div className="text-xs text-[var(--muted)]">Note : {line.notes}</div> : null}
                         <div className="flex justify-between text-sm text-[var(--text)]">
-                          <span>
-                            Qté {line.qty}
-                          </span>
+                          <span>Qté {line.qty}</span>
                           <span>{formatMoney(line.line_total)} €</span>
                         </div>
                       </div>
@@ -937,7 +1003,10 @@ export default function Pos() {
                   {cartItems.map((item) => {
                     const line = computeLineTotals(item);
                     return (
-                      <div key={item.id} className="rounded-2xl border border-[var(--border)] p-3 space-y-2">
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur p-3 space-y-2"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <div>
                             <div className="font-semibold text-[var(--text)]">{item.name}</div>
@@ -966,7 +1035,7 @@ export default function Pos() {
                             value={item.qty}
                             min="1"
                             onChange={(e) => updateCartItem(item.id, { qty: e.target.value })}
-                            className="w-16 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)]"
+                            className="w-16 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/60 backdrop-blur px-2 py-1 text-sm text-[var(--text)]"
                           />
                           <button
                             type="button"
@@ -1011,7 +1080,7 @@ export default function Pos() {
             </Card>
 
             {!isKdsMode ? (
-              <Card className="p-5 space-y-3">
+              <Card className={`p-5 space-y-3 ${glassCard}`}>
                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
                   <BadgePercent className="h-4 w-4" />
                   Remise globale
@@ -1032,51 +1101,103 @@ export default function Pos() {
               </Card>
             ) : null}
 
-            <Card className="p-5 space-y-3">
-              <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-                <CreditCard className="h-4 w-4" />
-                Paiements
+            {/* Paiements - avec "Montant restant" + "Remplir le reste" */}
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                  <CreditCard className="h-4 w-4" />
+                  Paiements
+                </div>
+
+                <div
+                  className={`rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold ${
+                    isPaidExact
+                      ? "text-[var(--text)] bg-[var(--accent)]/12"
+                      : isOverpaid
+                      ? "text-[var(--text)] bg-[var(--danger)]/10"
+                      : "text-[var(--text)] bg-[var(--surface)]/60"
+                  }`}
+                  title="Montant restant / rendu"
+                >
+                  {isPaidExact ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Check className="h-3.5 w-3.5" /> OK
+                    </span>
+                  ) : (
+                    remainingLabel
+                  )}
+                </div>
               </div>
+
               {isKdsMode ? (
-                <div className="text-xs text-[var(--muted)]">
-                  Encaissement d’une commande KDS (aucune remise supplémentaire).
+                <div className="text-xs text-[var(--muted)]">Encaissement KDS (pas de remise supplémentaire).</div>
+              ) : null}
+
+              {!isPaidExact && remaining > 0.01 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="secondary" size="sm" onClick={fillRemainingIntoLast}>
+                    <Sparkles className="h-4 w-4" />
+                    Remplir le reste
+                  </Button>
+                  <div className="text-xs text-[var(--muted)]">
+                    Met le montant restant sur la dernière ligne de paiement.
+                  </div>
                 </div>
               ) : null}
+
               <div className="space-y-2">
                 {payments.map((payment, idx) => (
-                  <div key={idx} className="grid grid-cols-[1fr_120px] gap-2 items-end">
-                    <Select
-                      value={payment.method}
-                      onChange={(value) =>
-                        setPayments((prev) =>
-                          prev.map((p, i) => (i === idx ? { ...p, method: value } : p))
-                        )
-                      }
-                      options={METHODS}
-                    />
-                    <Input
-                      label="Montant"
-                      value={payment.amount}
-                      onChange={(e) =>
-                        setPayments((prev) =>
-                          prev.map((p, i) => (i === idx ? { ...p, amount: e.target.value } : p))
-                        )
-                      }
-                      inputMode="decimal"
-                    />
+                  <div key={idx} className="space-y-2">
+                    <div className="grid grid-cols-[1fr_140px] gap-2 items-end">
+                      <Select
+                        value={payment.method}
+                        onChange={(value) => setPaymentAtIndex(idx, { method: value })}
+                        options={METHODS}
+                      />
+                      <Input
+                        label="Montant"
+                        value={payment.amount}
+                        onChange={(e) => setPaymentAtIndex(idx, { amount: e.target.value })}
+                        inputMode="decimal"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-[var(--text)] underline underline-offset-4"
+                        onClick={() => fillRemainingInto(idx)}
+                        disabled={isPaidExact}
+                        title="Remplir ce paiement avec le montant restant"
+                      >
+                        Remplir le reste ici
+                      </button>
+
+                      {payments.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => removePaymentLine(idx)}
+                          className="text-xs font-semibold text-[var(--muted)] hover:text-[var(--text)]"
+                          title="Supprimer cette ligne"
+                        >
+                          Supprimer
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {idx !== payments.length - 1 ? (
+                      <div className="h-px bg-[var(--border)]/60" />
+                    ) : null}
                   </div>
                 ))}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPayments((prev) => [...prev, { method: "cash", amount: "" }])}
-                >
+
+                <Button variant="secondary" size="sm" onClick={addPaymentLine}>
                   Ajouter un paiement
                 </Button>
               </div>
             </Card>
 
-            <Card className="p-5 space-y-3">
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
               <div className="text-sm font-semibold text-[var(--text)]">Résumé POS (30 jours)</div>
               {reportLoading ? (
                 <div className="text-sm text-[var(--muted)]">Chargement…</div>
@@ -1108,13 +1229,11 @@ export default function Pos() {
               )}
             </Card>
 
-            <Card className="p-5 space-y-3">
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold text-[var(--text)]">Session de caisse</div>
-                  <div className="text-xs text-[var(--muted)]">
-                    Résumé automatique des encaissements en cours.
-                  </div>
+                  <div className="text-xs text-[var(--muted)]">Résumé automatique des encaissements en cours.</div>
                 </div>
                 <Button
                   size="sm"
@@ -1126,6 +1245,7 @@ export default function Pos() {
                   Clôturer
                 </Button>
               </div>
+
               {cashSessionLoading ? (
                 <div className="text-sm text-[var(--muted)]">Chargement…</div>
               ) : cashSession?.active && cashSession.summary ? (
@@ -1158,13 +1278,14 @@ export default function Pos() {
               )}
             </Card>
 
-            <Card className="p-5 space-y-3">
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[var(--text)]">Historique des tickets</div>
                 <Button size="sm" variant="ghost" onClick={fetchTickets}>
                   Rafraîchir
                 </Button>
               </div>
+
               {ticketsLoading ? (
                 <div className="text-sm text-[var(--muted)]">Chargement…</div>
               ) : tickets.length === 0 ? (
@@ -1174,18 +1295,14 @@ export default function Pos() {
                   {tickets.map((ticket) => (
                     <div
                       key={ticket.id}
-                      className="flex items-center justify-between gap-2 rounded-2xl border border-[var(--border)] px-3 py-2"
+                      className="flex items-center justify-between gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur px-3 py-2"
                     >
                       <div>
                         <div className="text-sm font-semibold text-[var(--text)]">{ticket.reference}</div>
-                        <div className="text-xs text-[var(--muted)]">
-                          {new Date(ticket.created_at).toLocaleString("fr-FR")}
-                        </div>
+                        <div className="text-xs text-[var(--muted)]">{new Date(ticket.created_at).toLocaleString("fr-FR")}</div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-[var(--text)]">
-                          {formatMoney(ticket.total_amount)} €
-                        </div>
+                        <div className="text-sm font-semibold text-[var(--text)]">{formatMoney(ticket.total_amount)} €</div>
                         <div className="text-xs text-[var(--muted)]">{ticket.status === "PAID" ? "Payé" : "Annulé"}</div>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => fetchTicketDetail(ticket.id)}>
@@ -1197,33 +1314,55 @@ export default function Pos() {
               )}
             </Card>
 
-            <Card className="p-5 space-y-3">
+            {/* Totaux + CTA encaissement */}
+            <Card className={`p-5 space-y-3 ${glassCard}`}>
               <div className="text-xs text-[var(--muted)]">Totaux</div>
+
               <div className="flex justify-between text-sm text-[var(--text)]">
                 <span>Total brut</span>
                 <span>{formatMoney(totals.subtotal)} €</span>
               </div>
+
               <div className="flex justify-between text-sm text-[var(--text)]">
                 <span>Remises</span>
                 <span>-{formatMoney(totals.lineDiscount + totals.globalDiscount)} €</span>
               </div>
+
               <div className="flex justify-between text-base font-semibold text-[var(--text)]">
                 <span>Total net</span>
                 <span>{formatMoney(totals.total)} €</span>
               </div>
-              <div className="text-xs text-[var(--muted)]">
-                Paiements saisis : {formatMoney(paymentTotal)} €
+
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur px-3 py-2 text-xs text-[var(--muted)] flex items-center justify-between">
+                <span>Paiements saisis</span>
+                <span className="font-semibold text-[var(--text)]">{formatMoney(paymentTotal)} €</span>
               </div>
+
               {!isKdsMode ? (
-                <Input
-                  label="Note (optionnel)"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                />
+                <Input label="Note (optionnel)" value={note} onChange={(e) => setNote(e.target.value)} />
               ) : null}
-              <Button onClick={handleCheckout} loading={checkoutLoading} className="w-full">
+
+              {!isPaidExact && remaining > 0.01 ? (
+                <Button variant="secondary" onClick={fillRemainingIntoLast} className="w-full">
+                  <Sparkles className="h-4 w-4" />
+                  Remplir le reste
+                </Button>
+              ) : null}
+
+              <Button
+                onClick={handleCheckout}
+                loading={checkoutLoading}
+                className="w-full"
+                disabled={!isPaidExact || checkoutLoading}
+              >
                 Confirmer paiement
               </Button>
+
+              {!isPaidExact ? (
+                <div className="text-xs text-[var(--muted)]">
+                  {isOverpaid ? "Trop-perçu : ajustez les paiements." : "Il reste un montant à saisir."}
+                </div>
+              ) : null}
             </Card>
           </div>
         </div>
@@ -1235,6 +1374,7 @@ export default function Pos() {
         onDetected={(code) => {
           setQuery(code);
           setScanOpen(false);
+          focusSearch();
         }}
       />
 
@@ -1299,9 +1439,7 @@ export default function Pos() {
           <div className="space-y-4">
             <div>
               <div className="text-sm font-semibold text-[var(--text)]">{ticketDetail.reference}</div>
-              <div className="text-xs text-[var(--muted)]">
-                {new Date(ticketDetail.created_at).toLocaleString("fr-FR")}
-              </div>
+              <div className="text-xs text-[var(--muted)]">{new Date(ticketDetail.created_at).toLocaleString("fr-FR")}</div>
               <div className="text-xs text-[var(--muted)]">
                 Statut : {ticketDetail.status === "PAID" ? "Payé" : "Annulé"}
               </div>
@@ -1309,11 +1447,12 @@ export default function Pos() {
 
             <div className="space-y-2">
               {(ticketDetail.lines || []).map((line) => (
-                <div key={line.id} className="rounded-2xl border border-[var(--border)] p-3 space-y-1">
+                <div
+                  key={line.id}
+                  className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/50 backdrop-blur p-3 space-y-1"
+                >
                   <div className="font-semibold text-[var(--text)]">{line.product_name}</div>
-                  <div className="text-xs text-[var(--muted)]">
-                    {line.internal_sku || line.barcode || ""}
-                  </div>
+                  <div className="text-xs text-[var(--muted)]">{line.internal_sku || line.barcode || ""}</div>
                   <div className="flex justify-between text-sm text-[var(--text)]">
                     <span>Qté {line.qty}</span>
                     <span>{formatMoney(line.line_total)} €</span>
@@ -1371,12 +1510,7 @@ export default function Pos() {
           <div className="text-sm text-[var(--muted)]">
             Indiquez la raison et choisissez si le stock peut être réintégré.
           </div>
-          <Select
-            label="Raison"
-            value={cancelReason}
-            onChange={setCancelReason}
-            options={CANCEL_REASONS}
-          />
+          <Select label="Raison" value={cancelReason} onChange={setCancelReason} options={CANCEL_REASONS} />
           {cancelReason === "other" ? (
             <Input
               label="Précision"
