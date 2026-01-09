@@ -2640,6 +2640,22 @@ RECEIPT_DATE_PATTERNS = (
     r"\\b\\d{4}-\\d{2}-\\d{2}\\b",
     r"\\b\\d{1,2}[\\-/]\\d{1,2}[\\-/]\\d{2,4}\\b",
 )
+RECEIPT_HEADER_TOKENS = {
+    "designation",
+    "désignation",
+    "libelle",
+    "libellé",
+    "article",
+    "produit",
+    "quantite",
+    "quantité",
+    "qte",
+    "prix",
+    "total",
+    "ttc",
+    "ht",
+    "montant",
+}
 
 
 def _normalize_invoice_number(value):
@@ -3036,6 +3052,38 @@ def _normalize_receipt_row(row):
     }
 
 
+def _parse_receipt_number(value):
+    if value in ("", None):
+        return None
+    try:
+        raw = str(value).strip().replace(" ", "").replace(",", ".")
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_receipt_row_plausible(row):
+    name = (row.get("name") or "").strip()
+    if not name:
+        return False
+    lower = name.lower().strip()
+    if lower in RECEIPT_NAME_BLACKLIST:
+        return False
+    if any(token in lower for token in ("siret", "iban", "adresse", "client", "facture", "invoice")):
+        return False
+    words = re.findall(r"[a-zA-ZÀ-ÿ]+", lower)
+    if not words:
+        return False
+    if set(words).issubset(RECEIPT_HEADER_TOKENS):
+        return False
+    if sum(len(w) for w in words) < 3:
+        return False
+    has_qty = _parse_receipt_number(row.get("quantity")) is not None
+    has_price = _parse_receipt_number(row.get("purchase_price")) is not None
+    has_barcode = bool(re.fullmatch(r"\\d{8,14}", (row.get("barcode") or "").strip()))
+    return has_qty or has_price or has_barcode
+
+
 def _compute_receipt_hash(rows, supplier_name, invoice_number, invoice_date, received_at):
     if not rows:
         return ""
@@ -3133,9 +3181,14 @@ def import_receipt(request):
             )
 
     cleaned_rows = []
+    skipped = 0
     for row in rows:
         cleaned = _normalize_receipt_row(row)
         if not cleaned["name"]:
+            skipped += 1
+            continue
+        if not _is_receipt_row_plausible(cleaned):
+            skipped += 1
             continue
         cleaned_rows.append(cleaned)
 
@@ -3195,7 +3248,6 @@ def import_receipt(request):
 
     month = timezone.now().strftime("%Y-%m")
     lines_payload = []
-    skipped = max(0, raw_rows_count - len(cleaned_rows))
     for idx, cleaned in enumerate(cleaned_rows, start=1):
         try:
             qty = float(cleaned["quantity"]) if cleaned["quantity"] not in ("", None) else 1
@@ -3284,11 +3336,56 @@ def apply_receipt(request, receipt_id):
 
     decisions = request.data.get("decisions") or []
     decisions_map = {str(d.get("line_id")): d for d in decisions if d.get("line_id")}
+    line_overrides_raw = request.data.get("line_overrides") or {}
+    if isinstance(line_overrides_raw, str):
+        try:
+            line_overrides_raw = json.loads(line_overrides_raw)
+        except json.JSONDecodeError:
+            line_overrides_raw = {}
+    line_overrides = line_overrides_raw if isinstance(line_overrides_raw, dict) else {}
     month = timezone.now().strftime("%Y-%m")
 
     applied = 0
     with transaction.atomic():
         for line in receipt.lines.select_for_update():
+            line_override = line_overrides.get(str(line.id)) or line_overrides.get(line.id)
+            if isinstance(line_override, dict) and line_override:
+                updates = []
+                name_override = (line_override.get("name") or "").strip()
+                if name_override:
+                    line.raw_name = name_override
+                    updates.append("raw_name")
+                qty_override = _parse_receipt_number(line_override.get("quantity"))
+                if qty_override is not None and qty_override > 0:
+                    line.quantity = qty_override
+                    updates.append("quantity")
+                unit_override = (line_override.get("unit") or "").strip()
+                if unit_override:
+                    line.unit = unit_override
+                    updates.append("unit")
+                price_override = _parse_receipt_number(line_override.get("purchase_price"))
+                if price_override is not None:
+                    line.purchase_price = price_override
+                    updates.append("purchase_price")
+                tva_override = _parse_receipt_number(line_override.get("tva"))
+                if tva_override is not None:
+                    line.tva = tva_override
+                    updates.append("tva")
+                barcode_override = (line_override.get("barcode") or "").strip()
+                if barcode_override:
+                    line.barcode = barcode_override
+                    updates.append("barcode")
+                sku_override = (line_override.get("internal_sku") or "").strip()
+                if sku_override:
+                    line.internal_sku = sku_override
+                    updates.append("internal_sku")
+                category_override = (line_override.get("category") or "").strip()
+                if category_override:
+                    line.category = category_override
+                    updates.append("category")
+                if updates:
+                    line.save(update_fields=updates)
+
             decision = decisions_map.get(str(line.id), {}) if decisions_map else {}
             action = decision.get("action") or ("match" if line.matched_product else "create")
 

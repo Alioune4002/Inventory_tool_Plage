@@ -8,7 +8,6 @@ import {
   HelpCircle,
   MinusCircle,
   Copy,
-  ListChecks,
   FileUp,
   QrCode,
 } from "lucide-react";
@@ -21,7 +20,6 @@ export const navItems = [
   { to: "/app/losses", label: "Pertes", icon: MinusCircle, tour: "tour-losses" },
   { to: "/app/exports", label: "Exports", icon: Download, tour: "tour-exports" },
   { to: "/app/duplicates", label: "Doublons", icon: Copy },
-  { to: "/app/rituals", label: "Rituels", icon: ListChecks },
   { to: "/app/receipts", label: "Réceptions", icon: FileUp },
   { to: "/app/labels", label: "Étiquettes", icon: QrCode },
   { to: "/app/settings", label: "Settings", icon: Settings, tour: "tour-settings" },

@@ -57,11 +57,15 @@ export default function Receipts() {
   const [receivedAt, setReceivedAt] = useState(new Date().toISOString().slice(0, 10));
   const [file, setFile] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [lines, setLines] = useState([]);
   const [receiptId, setReceiptId] = useState(null);
   const [skippedLines, setSkippedLines] = useState(0);
   const [decisions, setDecisions] = useState({});
+  const [lineDefaults, setLineDefaults] = useState({});
+  const [lineEdits, setLineEdits] = useState({});
+  const [selectedLineIds, setSelectedLineIds] = useState([]);
   const [lineOptions, setLineOptions] = useState({});
   const [loadingLine, setLoadingLine] = useState({});
   const [applyLoading, setApplyLoading] = useState(false);
@@ -96,6 +100,28 @@ export default function Receipts() {
     }
   }, [historyService, serviceId]);
 
+  const resetImport = () => {
+    setSupplierName("");
+    setReceivedAt(new Date().toISOString().slice(0, 10));
+    setFile(null);
+    setLines([]);
+    setReceiptId(null);
+    setSkippedLines(0);
+    setDecisions({});
+    setLineDefaults({});
+    setLineEdits({});
+    setSelectedLineIds([]);
+    setReceiptMeta(null);
+    setStep(1);
+  };
+
+  const openImportDrawer = () => {
+    if (!receiptId) {
+      resetImport();
+    }
+    setDrawerOpen(true);
+  };
+
   const onImport = async (e) => {
     e.preventDefault();
 
@@ -121,8 +147,8 @@ export default function Receipts() {
     formData.append("received_at", receivedAt);
 
     setLoading(true);
-    setReceiptId(null);
     setLines([]);
+    setReceiptId(null);
     setReceiptMeta(null);
 
     try {
@@ -138,20 +164,24 @@ export default function Receipts() {
         received_at: res.data?.received_at || "",
         supplier: res.data?.supplier || "",
       });
-      setDrawerOpen(false);
 
       const initial = {};
+      const defaults = {};
       newLines.forEach((line) => {
-        initial[line.id] = {
-          action: line.matched_product_id ? "match" : "create",
-          product_id: line.matched_product_id || "",
-        };
+        const action = line.matched_product_id ? "match" : "create";
+        const decision = { action, product_id: line.matched_product_id || "" };
+        initial[line.id] = decision;
+        defaults[line.id] = decision;
       });
       setDecisions(initial);
+      setLineDefaults(defaults);
+      setSelectedLineIds(newLines.map((line) => String(line.id)));
+      setLineEdits({});
+      setStep(newLines.length ? 2 : 1);
+      setDrawerOpen(true);
 
       if (newLines.length) {
-        pushToast?.({ message: "Fichier importé. Vérifiez les correspondances ci-dessous.", type: "success" });
-        window.setTimeout(() => matchesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+        pushToast?.({ message: "Analyse terminée. Vérifiez les lignes détectées.", type: "success" });
       } else {
         pushToast?.({ message: "Aucune ligne exploitable détectée.", type: "warn" });
       }
@@ -189,6 +219,29 @@ export default function Receipts() {
     }));
   };
 
+  const updateLineEdit = (lineId, field, value) => {
+    setLineEdits((prev) => ({
+      ...prev,
+      [lineId]: { ...(prev[lineId] || {}), [field]: value },
+    }));
+  };
+
+  const toggleLineSelection = (lineId) => {
+    const id = String(lineId);
+    setSelectedLineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        updateDecision(lineId, { action: "ignore" });
+      } else {
+        next.add(id);
+        const fallback = lineDefaults[lineId] || { action: "create", product_id: "" };
+        updateDecision(lineId, fallback);
+      }
+      return Array.from(next);
+    });
+  };
+
   const applyReceipt = async () => {
     if (!receiptId) return;
     setApplyLoading(true);
@@ -199,12 +252,15 @@ export default function Receipts() {
           action: value.action,
           product_id: value.product_id || null,
         })),
+        line_overrides: lineEdits,
       };
       const res = await api.post(`/api/receipts/${receiptId}/apply/`, payload);
       pushToast?.({ message: res?.data?.detail || "Réception appliquée.", type: "success" });
       setLines([]);
       setReceiptId(null);
       setReceiptMeta(null);
+      setDrawerOpen(false);
+      setStep(1);
     } catch {
       pushToast?.({ message: "Impossible d’appliquer la réception.", type: "error" });
     } finally {

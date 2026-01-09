@@ -2,6 +2,7 @@
 // Deployed backend: https://inventory-tool-plage.onrender.com
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
 import Badge from "../ui/Badge";
@@ -637,6 +638,20 @@ export default function Dashboard() {
             )}
           </Card>
         </div>
+
+        <Card className="p-5 min-w-0" hover data-tour="dashboard-rituals">
+          <div className="flex items-start justify-between gap-3 min-w-0">
+            <div className="min-w-0">
+              <div className="text-sm font-semibold text-[var(--text)]">Rituels</div>
+              <div className="text-xs text-[var(--muted)] mt-1">
+                Automatisez vos routines métier (inventaire, réception, contrôle DLC). Simple, clair, actionnable.
+              </div>
+            </div>
+            <Button as={Link} to="/app/rituals" variant="secondary">
+              Ouvrir
+            </Button>
+          </div>
+        </Card>
 
         <div className="grid lg:grid-cols-2 gap-4 min-w-0">
           {/* Categories */}

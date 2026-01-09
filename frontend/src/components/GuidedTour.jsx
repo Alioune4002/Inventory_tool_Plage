@@ -172,8 +172,8 @@ export default function GuidedTour({ userId, onRequestMobileNav }) {
         title: "Rituels",
         body:
           "Des checklists simples pour standardiser votre routine : inventaire, réception, contrôle DLC, etc. Vous gagnez en régularité et en fiabilité.",
-        targets: ['[data-tour="nav-rituals"]', 'a[href$="/rituals"]', 'a[href*="/rituals"]'],
-        wantNavOpen: true,
+        targets: ['[data-tour="dashboard-rituals"]', 'a[href$="/rituals"]', 'a[href*="/rituals"]'],
+        wantNavOpen: false,
       },
       {
         id: "receipts",

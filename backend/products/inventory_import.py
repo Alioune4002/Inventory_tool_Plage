@@ -20,6 +20,8 @@ from .models import Product
 INVENTORY_IMPORT_MAX_ROWS = 500
 INVENTORY_IMPORT_CACHE_TTL = 60 * 60  # 1h
 INVENTORY_IMPORT_MAX_FILE_MB = 10
+INVENTORY_IMPORT_MODES = {"inventory", "products"}
+INVENTORY_IMPORT_UPDATE_STRATEGIES = {"create_only", "update_existing"}
 
 FIELD_ALIASES = {
     "name": ["designation", "désignation", "nom", "libelle", "libellé", "produit", "article", "item", "product"],
@@ -71,9 +73,14 @@ def _parse_decimal(value):
     if value in ("", None):
         return None
     try:
-        raw = str(value).strip().replace(" ", "")
-        raw = raw.replace(",", ".")
-        return Decimal(raw)
+        raw = str(value).strip()
+        if not raw:
+            return None
+        raw = raw.replace(" ", "").replace(",", ".")
+        match = re.search(r"-?\d+(?:\.\d+)?", raw)
+        if not match:
+            return None
+        return Decimal(match.group(0))
     except (InvalidOperation, ValueError):
         return None
 
@@ -163,6 +170,10 @@ def inventory_import_preview(request):
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
 
+    mode = (request.query_params.get("mode") or request.data.get("mode") or "inventory").lower()
+    if mode not in INVENTORY_IMPORT_MODES:
+        return Response({"detail": "Mode d’import invalide."}, status=400)
+
     file_obj = request.FILES.get("file")
     if not file_obj:
         return Response({"detail": "Fichier requis."}, status=400)
@@ -189,6 +200,7 @@ def inventory_import_preview(request):
     normalized_rows = []
     invalid = 0
     missing_required = 0
+    invalid_quantity = 0
     month = timezone.now().strftime("%Y-%m")
     for idx, row in enumerate(rows, start=1):
         normalized = {}
@@ -197,9 +209,18 @@ def inventory_import_preview(request):
             normalized[field] = row.get(col) if col else ""
         normalized["name"] = (normalized.get("name") or "").strip()
         warnings = []
+        row_invalid = False
         if not normalized["name"]:
             warnings.append("designation_manquante")
             missing_required += 1
+            row_invalid = True
+        if mapping.get("quantity"):
+            qty_value = normalized.get("quantity")
+            if qty_value not in ("", None) and _parse_decimal(qty_value) is None:
+                warnings.append("quantite_invalide")
+                invalid_quantity += 1
+                row_invalid = True
+        if row_invalid:
             invalid += 1
         match, match_kind = _match_existing_product(tenant, service, month, normalized)
         candidate_duplicate = bool(match and match_kind == "name" and not normalized.get("barcode") and not normalized.get("internal_sku"))
@@ -238,6 +259,7 @@ def inventory_import_preview(request):
                 "valid": max(0, len(rows) - invalid),
                 "invalid": invalid,
                 "missing_required": missing_required,
+                "invalid_quantity": invalid_quantity,
             },
             "field_labels": FIELD_LABELS,
         }
@@ -250,6 +272,10 @@ def inventory_import_commit(request):
     tenant = get_tenant_for_request(request)
     service = get_service_from_request(request)
 
+    mode = (request.query_params.get("mode") or request.data.get("mode") or "inventory").lower()
+    if mode not in INVENTORY_IMPORT_MODES:
+        return Response({"detail": "Mode d’import invalide."}, status=400)
+
     preview_id = request.data.get("preview_id")
     if not preview_id:
         return Response({"detail": "preview_id requis."}, status=400)
@@ -260,6 +286,11 @@ def inventory_import_commit(request):
 
     rows = payload.get("rows") or []
     qty_mode = (request.data.get("qty_mode") or "zero").lower()
+    update_strategy = (request.data.get("update_strategy") or "create_only").lower()
+    if mode == "inventory":
+        update_strategy = "update_existing"
+    if update_strategy not in INVENTORY_IMPORT_UPDATE_STRATEGIES:
+        return Response({"detail": "Stratégie de mise à jour invalide."}, status=400)
     keep_qty_raw = request.data.get("keep_qty_row_ids") or []
     if isinstance(keep_qty_raw, str):
         try:
@@ -279,6 +310,7 @@ def inventory_import_commit(request):
 
     created = 0
     updated = 0
+    skipped = 0
     duplicate_candidates = 0
 
     for row in rows:
@@ -312,6 +344,9 @@ def inventory_import_commit(request):
             final_qty = Decimal("0")
 
         if match:
+            if update_strategy == "create_only":
+                skipped += 1
+                continue
             updates = []
             if row.get("barcode") and not match.barcode:
                 match.barcode = str(row.get("barcode")).strip()
@@ -337,8 +372,10 @@ def inventory_import_commit(request):
             if row.get("category"):
                 match.category = str(row.get("category")).strip()
                 updates.append("category")
-            match.quantity = final_qty
-            updates.append("quantity")
+            should_update_qty = mode == "inventory" or qty_mode in ("set", "selective")
+            if should_update_qty:
+                match.quantity = final_qty
+                updates.append("quantity")
             if updates:
                 match.save(update_fields=sorted(set(updates)))
             updated += 1
@@ -349,7 +386,7 @@ def inventory_import_commit(request):
             service=service,
             name=name,
             inventory_month=month,
-            quantity=final_qty,
+            quantity=final_qty if (mode == "inventory" or qty_mode in ("set", "selective")) else Decimal("0"),
             unit=(row.get("unit") or "pcs").strip() if row.get("unit") is not None else "pcs",
             purchase_price=_parse_decimal(row.get("purchase_price")),
             selling_price=_parse_decimal(row.get("selling_price")),
@@ -364,6 +401,7 @@ def inventory_import_commit(request):
         {
             "created_count": created,
             "updated_count": updated,
+            "skipped_count": skipped,
             "duplicates_candidates_count": duplicate_candidates,
         }
     )
