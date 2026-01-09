@@ -22,6 +22,8 @@ export default defineConfig({
         "orders-icon-512.png",
         "kds-icon-192.png",
         "kds-icon-512.png",
+        "pos-icon-192.png",
+        "pos-icon-512.png",
       ],
       manifest: {
         name: "StockScan",

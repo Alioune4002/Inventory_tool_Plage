@@ -80,11 +80,13 @@ export default function AppShell() {
   const [theme, setTheme] = useState(getInitialTheme);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  const isAppSection =
-    location.pathname.startsWith("/app") ||
-    location.pathname.startsWith("/pos") ||
-    location.pathname.startsWith("/orders") ||
-    location.pathname.startsWith("/kds");
+  const isCoreApp = location.pathname.startsWith("/app");
+  const isStandaloneApp =
+    location.pathname.startsWith("/pos/app") ||
+    location.pathname.startsWith("/kds/app") ||
+    location.pathname.startsWith("/orders");
+  const showTopbar = isCoreApp || isStandaloneApp;
+  const showSidebar = isCoreApp;
 
   const onLogout = () => {
     logout();
@@ -111,7 +113,7 @@ export default function AppShell() {
       <NetworkStatusToaster />
 
       <div className="min-h-screen" style={{ background: "var(--bg)", color: "var(--text)" }}>
-        {isAppSection && isAuthed && (
+        {showTopbar && isAuthed && (
           <Suspense fallback={null}>
             <Topbar
               onLogout={onLogout}
@@ -124,7 +126,7 @@ export default function AppShell() {
         )}
 
         <div className="h-full flex">
-          {isAppSection && isAuthed && (
+          {showSidebar && isAuthed && (
             <Suspense fallback={null}>
               <Sidebar />
             </Suspense>
@@ -132,7 +134,7 @@ export default function AppShell() {
 
           <div className="flex-1 min-w-0">
             <main className="mx-auto max-w-6xl px-4 py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
-              {isAppSection && isAuthed && (
+              {showSidebar && isAuthed && (
                 <Suspense fallback={null}>
                   <BillingBanners entitlements={entitlements} />
                 </Suspense>
@@ -146,7 +148,7 @@ export default function AppShell() {
         </div>
 
         {/* ✅ Guided tour: userId + ability to open mobile nav */}
-        {isAppSection && isAuthed ? (
+        {showSidebar && isAuthed ? (
           <Suspense fallback={null}>
             <GuidedTour userId={userId} onRequestMobileNav={setMobileNavOpen} />
           </Suspense>
@@ -158,13 +160,15 @@ export default function AppShell() {
 
         <PwaUpdateBanner />
 
-        <Suspense fallback={null}>
-          <MobileNav
-            open={mobileNavOpen}
-            onClose={() => setMobileNavOpen(false)}
-            onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
-          />
-        </Suspense>
+        {showSidebar ? (
+          <Suspense fallback={null}>
+            <MobileNav
+              open={mobileNavOpen}
+              onClose={() => setMobileNavOpen(false)}
+              onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+            />
+          </Suspense>
+        ) : null}
       </div>
     </ToastProvider>
   );

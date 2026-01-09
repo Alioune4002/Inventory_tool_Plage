@@ -1,6 +1,6 @@
 // frontend/src/pages/Register.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../app/AuthProvider";
 import Card from "../ui/Card";
@@ -21,6 +21,15 @@ const SERVICE_TYPE_OPTIONS = [
   { value: "pharmacy_parapharmacy", label: "Pharmacie / Parapharmacie" },
   { value: "other", label: "Autre" },
 ];
+
+function safeNextFromSearch(search) {
+  const params = new URLSearchParams(search || "");
+  const next = params.get("next");
+  if (!next) return "";
+  if (!next.startsWith("/")) return "";
+  if (next.startsWith("//")) return "";
+  return next;
+}
 
 const DOMAIN_BY_FAMILY = {
   retail: "food",
@@ -128,6 +137,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export default function Register() {
   const { register, refreshServices } = useAuth();
   const nav = useNavigate();
+  const loc = useLocation();
+  const nextFromQuery = useMemo(() => safeNextFromSearch(loc.search), [loc.search]);
+  const loginLink = nextFromQuery ? `/login?next=${encodeURIComponent(nextFromQuery)}` : "/login";
 
   const [form, setForm] = useState({ storeName: "", email: "", password: "", passwordConfirm: "" });
   const [familyId, setFamilyId] = useState(FAMILLES[0].id);
@@ -342,7 +354,7 @@ export default function Register() {
 
       await applyModuleDefaults();
       await refreshServices();
-      nav("/app/dashboard");
+      nav(nextFromQuery || "/app/dashboard");
     } catch (err) {
       setError(formatApiError(err, { context: "register" }));
     } finally {
@@ -653,7 +665,7 @@ export default function Register() {
               <div className="text-xs text-[var(--muted)] opacity-80">Modifiable ensuite dans Settings → Modules.</div>
             </div>
 
-            <Link to="/login" className="text-sm underline text-[var(--text)]">
+            <Link to={loginLink} className="text-sm underline text-[var(--text)]">
               Déjà un compte ? Se connecter →
             </Link>
           </Card>

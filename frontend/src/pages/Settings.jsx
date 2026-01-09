@@ -2,6 +2,7 @@
 // Deployed backend: https://inventory-tool-plage.onrender.com
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
 import Card from "../ui/Card";
 import Input from "../ui/Input";
 import Button from "../ui/Button";
@@ -24,6 +25,9 @@ import { formatPlanLabel } from "../lib/planLabels";
 import { getTourKey, getTourPendingKey } from "../lib/tour";
 import { currencyLabel, getCurrencyOptions } from "../lib/currency";
 import PwaInstallCard from "../components/PwaInstallCard";
+import { isKdsEligible, isKdsEnabled } from "../lib/kdsAccess";
+import posLogo from "../assets/pos-logo.png";
+import kdsLogo from "../assets/kds-logo.png";
 
 const safeArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -64,6 +68,25 @@ const FeatureToggle = ({ label, description, helper, checked, onChange, disabled
     </div>
   </label>
 );
+
+const ModuleLogo = ({ src, label }) => {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div className="h-10 w-10 rounded-2xl bg-[var(--accent)]/20 text-[var(--text)] flex items-center justify-center font-black">
+        {label}
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={label}
+      className="h-10 w-10 rounded-2xl object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+};
 
 const copyToClipboard = async (text) => {
   try {
@@ -107,6 +130,13 @@ export default function Settings() {
   const currentEmail = me?.email || "";
   const userRole = (me?.role || me?.profile?.role || "operator").toLowerCase();
   const canEditTenant = userRole === "owner" || userRole === "manager";
+  const isAllServicesView = String(serviceId || "") === "all";
+  const selectedService = useMemo(() => {
+    if (!services?.length || !serviceId || isAllServicesView) return null;
+    return services.find((svc) => String(svc.id) === String(serviceId)) || null;
+  }, [services, serviceId, isAllServicesView]);
+  const kdsEligible = Boolean(selectedService && isKdsEligible(selectedService.service_type));
+  const kdsEnabled = Boolean(selectedService && isKdsEnabled(selectedService));
 
   const [newService, setNewService] = useState("");
   const [newServiceType, setNewServiceType] = useState("other"); // ✅ NEW
@@ -855,6 +885,90 @@ export default function Settings() {
         </Card>
 
         <PwaInstallCard />
+
+        <Card className="p-6 space-y-4">
+          <div>
+            <div className="text-sm font-semibold text-[var(--text)]">Modules externes</div>
+            <div className="text-sm text-[var(--muted)]">
+              Ouvrez le POS ou la cuisine sur des écrans dédiés, sans alourdir StockScan.
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <ModuleLogo src={posLogo} label="POS" />
+                <div>
+                  <div className="text-sm font-semibold text-[var(--text)]">POS — Caisse</div>
+                  <div className="text-xs text-[var(--muted)]">Encaissement rapide, rapports clairs.</div>
+                </div>
+              </div>
+              {selectedService ? (
+                <div className="text-xs text-[var(--muted)]">Service actif : {selectedService.name}</div>
+              ) : (
+                <div className="text-xs text-[var(--muted)]">
+                  Sélectionnez un service pour ouvrir le POS.
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  as={Link}
+                  to="/pos/app"
+                  size="sm"
+                  disabled={!selectedService || loading}
+                >
+                  Ouvrir le POS
+                </Button>
+                <Button as={Link} to="/pos" size="sm" variant="secondary">
+                  Page publique
+                </Button>
+              </div>
+            </Card>
+
+            <Card className="p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <ModuleLogo src={kdsLogo} label="KDS" />
+                <div>
+                  <div className="text-sm font-semibold text-[var(--text)]">KDS — Cuisine</div>
+                  <div className="text-xs text-[var(--muted)]">
+                    Commandes salle → cuisine, statuts clairs.
+                  </div>
+                </div>
+              </div>
+              {selectedService ? (
+                <div className="text-xs text-[var(--muted)]">
+                  {kdsEligible ? "Compatible avec ce service." : "Disponible pour les services à table."}
+                </div>
+              ) : (
+                <div className="text-xs text-[var(--muted)]">
+                  Sélectionnez un service pour vérifier la compatibilité.
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {kdsEnabled ? (
+                  <Button as={Link} to="/kds/app" size="sm" disabled={!selectedService || loading}>
+                    Ouvrir le KDS
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    disabled={!selectedService || !kdsEligible || loading}
+                    onClick={() => {
+                      if (selectedService && kdsEligible) {
+                        toggleFeature(selectedService, "kds", true);
+                      }
+                    }}
+                  >
+                    Activer le module
+                  </Button>
+                )}
+                <Button as={Link} to="/kds" size="sm" variant="secondary">
+                  Page publique
+                </Button>
+              </div>
+            </Card>
+          </div>
+        </Card>
 
         {/* Préférences */}
         <Card className="p-6 space-y-4">

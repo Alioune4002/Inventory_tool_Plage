@@ -30,9 +30,11 @@ const Exports = React.lazy(() => import("../pages/Exports.jsx"));
 const Losses = React.lazy(() => import("../pages/Losses.jsx"));
 const Settings = React.lazy(() => import("../pages/Settings.jsx"));
 const Support = React.lazy(() => import("../pages/Support.jsx"));
-const Pos = React.lazy(() => import("../pages/Pos.jsx"));
+const PosLanding = React.lazy(() => import("../pages/pos/PosLanding.jsx"));
+const PosApp = React.lazy(() => import("../pages/pos/PosApp.jsx"));
 const Orders = React.lazy(() => import("../pages/Orders.jsx"));
-const Kds = React.lazy(() => import("../pages/Kds.jsx"));
+const KdsLanding = React.lazy(() => import("../pages/kds/KdsLanding.jsx"));
+const KdsApp = React.lazy(() => import("../pages/kds/KdsApp.jsx"));
 const Duplicates = React.lazy(() => import("../pages/Duplicates.jsx"));
 const Rituals = React.lazy(() => import("../pages/Rituals.jsx"));
 const Receipts = React.lazy(() => import("../pages/Receipts.jsx"));
@@ -100,7 +102,7 @@ export default function AppRoutes() {
 
         {/* App (protected) */}
         <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
-        <Route path="/app/pos" element={<Navigate to="/pos" replace />} />
+        <Route path="/app/pos" element={<Navigate to="/pos/app" replace />} />
         <Route
           path="/app/dashboard"
           element={
@@ -141,11 +143,12 @@ export default function AppRoutes() {
             </Protected>
           }
         />
+        <Route path="/pos" element={<PosLanding />} />
         <Route
-          path="/pos"
+          path="/pos/app"
           element={
             <Protected>
-              <Pos />
+              <PosApp />
             </Protected>
           }
         />
@@ -157,11 +160,12 @@ export default function AppRoutes() {
             </Protected>
           }
         />
+        <Route path="/kds" element={<KdsLanding />} />
         <Route
-          path="/kds"
+          path="/kds/app"
           element={
             <Protected>
-              <Kds />
+              <KdsApp />
             </Protected>
           }
         />

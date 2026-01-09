@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { ChefHat, Clock3, CheckCircle2, XCircle } from "lucide-react";
+import { Link } from "react-router-dom";
 
 import PageTransition from "../components/PageTransition";
 import Card from "../ui/Card";
@@ -56,7 +57,7 @@ const KdsLogo = () => {
 };
 
 export default function Kds() {
-  const { serviceId, services, serviceProfile, selectService } = useAuth();
+  const { serviceId, services, serviceProfile, selectService, tenant } = useAuth();
   const pushToast = useToast();
 
   const [orders, setOrders] = useState([]);
@@ -169,6 +170,10 @@ export default function Kds() {
   }, [orders]);
 
   const serviceLabel = serviceProfile?.name || "";
+  const hasCoreAccess = Boolean(tenant && (serviceProfile || services?.length));
+  const coreCta = hasCoreAccess
+    ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
+    : { label: "Activer StockScan", href: "/app/settings" };
 
   return (
     <PageTransition>
@@ -190,9 +195,14 @@ export default function Kds() {
               </div>
             </div>
           </div>
-          {serviceLabel ? (
-            <div className="text-sm text-[var(--muted)]">Service actif : {serviceLabel}</div>
-          ) : null}
+          <div className="flex flex-col items-start lg:items-end gap-2">
+            {serviceLabel ? (
+              <div className="text-sm text-[var(--muted)]">Service actif : {serviceLabel}</div>
+            ) : null}
+            <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
+              {coreCta.label}
+            </Button>
+          </div>
         </Card>
 
         {!isReadyService ? (

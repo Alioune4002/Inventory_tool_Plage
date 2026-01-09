@@ -18,6 +18,15 @@ function safeFromLocation(locState) {
   return "/app/dashboard";
 }
 
+function safeNextFromSearch(search) {
+  const params = new URLSearchParams(search || "");
+  const next = params.get("next");
+  if (!next) return "";
+  if (!next.startsWith("/")) return "";
+  if (next.startsWith("//")) return "";
+  return next;
+}
+
 function isEmailLike(value) {
   return typeof value === "string" && value.includes("@");
 }
@@ -54,7 +63,12 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
 
-  const from = useMemo(() => safeFromLocation(loc.state), [loc.state]);
+  const nextFromQuery = useMemo(() => safeNextFromSearch(loc.search), [loc.search]);
+  const from = useMemo(
+    () => nextFromQuery || safeFromLocation(loc.state),
+    [loc.state, nextFromQuery]
+  );
+  const registerLink = nextFromQuery ? `/register?next=${encodeURIComponent(nextFromQuery)}` : "/register";
 
   // ✅ Forcer dark sur Login (volontairement)
   useEffect(() => {
@@ -217,7 +231,7 @@ export default function Login() {
             <Link to="/" className="underline">
               Retour au site
             </Link>
-            <Link to="/register" className="underline">
+            <Link to={registerLink} className="underline">
               Créer un compte
             </Link>
           </div>

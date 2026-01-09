@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
 import { CreditCard, Search, Plus, Minus, Trash2, BadgePercent, ReceiptText } from "lucide-react";
 
 import PageTransition from "../components/PageTransition";
@@ -89,7 +90,7 @@ function computeLineTotals(item) {
 }
 
 export default function Pos() {
-  const { serviceId, serviceProfile } = useAuth();
+  const { serviceId, serviceProfile, services, tenant } = useAuth();
   const pushToast = useToast();
 
   const kdsActive = isKdsEnabled(serviceProfile);
@@ -121,6 +122,11 @@ export default function Pos() {
   const [pendingPayload, setPendingPayload] = useState(null);
 
   const isKdsMode = Boolean(kdsCheckout);
+  const serviceLabel = serviceProfile?.name || "";
+  const hasCoreAccess = Boolean(tenant && (serviceProfile || services?.length));
+  const coreCta = hasCoreAccess
+    ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
+    : { label: "Activer StockScan", href: "/app/settings" };
 
   const totals = useMemo(() => {
     if (kdsCheckout) {
@@ -472,7 +478,7 @@ export default function Pos() {
       </Helmet>
 
       <div className="space-y-4">
-        <Card className="p-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <Card className="p-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3">
             <PosLogo />
             <div>
@@ -483,9 +489,17 @@ export default function Pos() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-            <ReceiptText className="h-4 w-4" />
-            Transactions sécurisées, stock mis à jour à la validation.
+          <div className="flex flex-col items-start lg:items-end gap-2">
+            {serviceLabel ? (
+              <div className="text-xs text-[var(--muted)]">Service actif : {serviceLabel}</div>
+            ) : null}
+            <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
+              <ReceiptText className="h-4 w-4" />
+              Transactions sécurisées, stock mis à jour à la validation.
+            </div>
+            <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
+              {coreCta.label}
+            </Button>
           </div>
         </Card>
 
