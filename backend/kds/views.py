@@ -1,3 +1,4 @@
+
 from datetime import datetime
 from decimal import Decimal
 
@@ -127,9 +128,7 @@ def kds_menu_item_recipe(request, menu_item_id: int):
     serializer.is_valid(raise_exception=True)
 
     ingredient_ids = [row["ingredient_product_id"] for row in serializer.validated_data]
-    products = list(
-        Product.objects.filter(tenant=tenant, service=service, id__in=ingredient_ids)
-    )
+    products = list(Product.objects.filter(tenant=tenant, service=service, id__in=ingredient_ids))
     product_map = {p.id: p for p in products}
     missing = [pid for pid in ingredient_ids if pid not in product_map]
     if missing:
@@ -317,12 +316,33 @@ def kds_order_cancel(request, order_id: int):
     serializer = OrderCancelSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
+    reason_code = serializer.validated_data["reason_code"]
+    reason_text = serializer.validated_data.get("reason_text") or ""
+
+    # ✅ FIX: restock par défaut dépend de la raison
+    # - si le client ne fournit pas restock:
+    #   breakage => False (enregistre une perte / waste)
+    #   sinon => True
+    restock_provided = isinstance(request.data, dict) and ("restock" in request.data)
+
+    if restock_provided:
+        restock_raw = request.data.get("restock", True)
+        if isinstance(restock_raw, bool):
+            restock = restock_raw
+        elif isinstance(restock_raw, str):
+            restock = restock_raw.strip().lower() not in {"0", "false", "no", "non"}
+        else:
+            restock = True
+    else:
+        restock = False if reason_code == "breakage" else True
+
     try:
         order = cancel_order(
             order,
-            serializer.validated_data["reason_code"],
-            serializer.validated_data.get("reason_text") or "",
+            reason_code,
+            reason_text,
             request.user,
+            restock=restock,
         )
     except Exception:
         return Response({"detail": "Commande non annulable."}, status=status.HTTP_400_BAD_REQUEST)

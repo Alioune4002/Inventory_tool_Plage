@@ -1,3 +1,4 @@
+# backend/kds/services/orders.py
 from decimal import Decimal, ROUND_FLOOR
 
 from django.db import transaction
@@ -110,9 +111,7 @@ def create_order(tenant, service, user, table, lines_payload):
         menu_item = menu_map[line["menu_item_id"]]
         unit_price = menu_item.price or Decimal("0")
         if unit_price <= 0:
-            missing_price.append(
-                {"id": menu_item.id, "name": menu_item.name}
-            )
+            missing_price.append({"id": menu_item.id, "name": menu_item.name})
             continue
 
         qty = line["qty"]
@@ -213,7 +212,9 @@ def send_order_to_kitchen(order: Order, user):
         for pid, needed in requirements.items():
             product = product_map.get(pid)
             if not product:
-                insufficient.append({"id": pid, "name": "Produit introuvable", "needed": str(needed)})
+                insufficient.append(
+                    {"id": pid, "name": "Produit introuvable", "needed": str(needed)}
+                )
                 continue
             if product.quantity < needed:
                 insufficient.append(
@@ -272,61 +273,100 @@ def mark_order_served(order: Order):
     return order
 
 
-def cancel_order(order: Order, reason_code: str, reason_text: str, user):
+def cancel_order(order: Order, reason_code: str, reason_text: str, user, restock: bool = True):
+    """
+    restock=True  -> annulation "propre": on restock les ingrédients si la commande avait été envoyée.
+    restock=False -> annulation "perte": on trace WasteEvent + StockConsumption(reason=WASTE),
+                     sans restocker (le stock a déjà été décrémenté à l'envoi).
+    """
     if order.status == "PAID":
         raise InvalidOrderStateError("Commande déjà payée.")
 
     with transaction.atomic():
-        order = Order.objects.select_for_update().get(id=order.id)
+        order = (
+            Order.objects.select_for_update()
+            .select_related("tenant", "service")
+            .get(id=order.id)
+        )
         if order.status == "PAID":
             raise InvalidOrderStateError("Commande déjà payée.")
 
+        # DRAFT -> annulation simple (aucun impact stock)
         if order.status == "DRAFT":
             order.status = "CANCELLED"
             order.cancelled_at = timezone.now()
             order.save(update_fields=["status", "cancelled_at", "updated_at"])
             return order
 
+        # Commande déjà envoyée (SENT/READY/SERVED)
         requirements = _collect_requirements(order)
-        products = Product.objects.filter(
-            tenant=order.tenant, service=order.service, id__in=requirements.keys()
+        product_ids = list(requirements.keys())
+        products = list(
+            Product.objects.select_for_update().filter(
+                tenant=order.tenant, service=order.service, id__in=product_ids
+            )
         )
         product_map = {p.id: p for p in products}
 
-        consumptions = []
-        waste_events = []
-        for line in order.lines.select_related("menu_item"):
-            waste_events.append(
-                WasteEvent(
-                    tenant=order.tenant,
-                    service=order.service,
-                    related_order=order,
-                    related_order_line=line,
-                    reason_code=reason_code,
-                    reason_text=reason_text or "",
-                    created_by=user,
+        if restock:
+            # ✅ Restock : on remet les quantités
+            consumptions = []
+            for pid, needed in requirements.items():
+                product = product_map.get(pid)
+                if not product:
+                    continue
+                product.quantity += needed
+                product.save(update_fields=["quantity"])
+                # On trace un mouvement inverse (quantité négative consommée = restock)
+                consumptions.append(
+                    StockConsumption(
+                        tenant=order.tenant,
+                        service=order.service,
+                        order=order,
+                        product=product,
+                        qty_consumed=-needed,
+                        reason="CANCEL_RESTOCK",
+                    )
                 )
-            )
+            if consumptions:
+                StockConsumption.objects.bulk_create(consumptions)
+        else:
+            # ✅ Perte : on trace la perte (sans toucher au stock car déjà décrémenté à l'envoi)
+            waste_events = []
+            consumptions = []
 
-        for pid, needed in requirements.items():
-            product = product_map.get(pid)
-            if not product:
-                continue
-            consumptions.append(
-                StockConsumption(
-                    tenant=order.tenant,
-                    service=order.service,
-                    order=order,
-                    product=product,
-                    qty_consumed=needed,
-                    reason="WASTE",
+            for line in order.lines.select_related("menu_item"):
+                waste_events.append(
+                    WasteEvent(
+                        tenant=order.tenant,
+                        service=order.service,
+                        related_order=order,
+                        related_order_line=line,
+                        reason_code=reason_code,
+                        reason_text=reason_text or "",
+                        created_by=user,
+                    )
                 )
-            )
 
-        if waste_events:
-            WasteEvent.objects.bulk_create(waste_events)
-        if consumptions:
-            StockConsumption.objects.bulk_create(consumptions)
+            for pid, needed in requirements.items():
+                product = product_map.get(pid)
+                if not product:
+                    continue
+                consumptions.append(
+                    StockConsumption(
+                        tenant=order.tenant,
+                        service=order.service,
+                        order=order,
+                        product=product,
+                        qty_consumed=needed,
+                        reason="WASTE",
+                    )
+                )
+
+            if waste_events:
+                WasteEvent.objects.bulk_create(waste_events)
+            if consumptions:
+                StockConsumption.objects.bulk_create(consumptions)
 
         order.status = "CANCELLED"
         order.cancelled_at = timezone.now()
