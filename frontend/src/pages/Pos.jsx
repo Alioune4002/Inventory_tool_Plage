@@ -143,6 +143,8 @@ export default function Pos() {
   const [cancelReason, setCancelReason] = useState("error");
   const [cancelReasonText, setCancelReasonText] = useState("");
   const [cancelRestock, setCancelRestock] = useState(true);
+  // ✅ NEW: prevents auto-overwrite when user manually toggles restock
+  const [cancelRestockTouched, setCancelRestockTouched] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
 
   const [cashSession, setCashSession] = useState({ active: false });
@@ -366,8 +368,19 @@ export default function Pos() {
     setCancelReason("error");
     setCancelReasonText("");
     setCancelRestock(true);
+    setCancelRestockTouched(false); // ✅ NEW
     setCancelDrawerOpen(true);
   };
+
+  // ✅ NEW: auto-default restock based on reason (but don’t override user choice)
+  useEffect(() => {
+    if (!cancelDrawerOpen) return;
+    if (cancelRestockTouched) return;
+
+    // default: restock true, except breakage => false
+    if (cancelReason === "breakage") setCancelRestock(false);
+    else setCancelRestock(true);
+  }, [cancelReason, cancelDrawerOpen, cancelRestockTouched]);
 
   const handleCancelTicket = async () => {
     if (!ticketDetail?.id) return;
@@ -733,7 +746,10 @@ export default function Pos() {
   };
 
   const fillRemainingInto = (idx) => {
-    const rest = clamp2(totals.total - payments.reduce((acc, p, i) => acc + (i === idx ? 0 : parseNumber(p.amount)), 0));
+    const rest = clamp2(
+      totals.total -
+        payments.reduce((acc, p, i) => acc + (i === idx ? 0 : parseNumber(p.amount)), 0)
+    );
     const safe = Math.max(rest, 0);
     setPaymentAtIndex(idx, { amount: safe ? formatMoney(safe) : "0.00" });
   };
@@ -943,7 +959,6 @@ export default function Pos() {
                         className="w-full"
                         onClick={() => {
                           addToCart(product);
-                          // micro boost: garder le focus et permettre de scanner en boucle
                           setQuery("");
                           setProducts([]);
                           focusSearch();
@@ -1299,10 +1314,14 @@ export default function Pos() {
                     >
                       <div>
                         <div className="text-sm font-semibold text-[var(--text)]">{ticket.reference}</div>
-                        <div className="text-xs text-[var(--muted)]">{new Date(ticket.created_at).toLocaleString("fr-FR")}</div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {new Date(ticket.created_at).toLocaleString("fr-FR")}
+                        </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-[var(--text)]">{formatMoney(ticket.total_amount)} €</div>
+                        <div className="text-sm font-semibold text-[var(--text)]">
+                          {formatMoney(ticket.total_amount)} €
+                        </div>
                         <div className="text-xs text-[var(--muted)]">{ticket.status === "PAID" ? "Payé" : "Annulé"}</div>
                       </div>
                       <Button size="sm" variant="secondary" onClick={() => fetchTicketDetail(ticket.id)}>
@@ -1510,7 +1529,18 @@ export default function Pos() {
           <div className="text-sm text-[var(--muted)]">
             Indiquez la raison et choisissez si le stock peut être réintégré.
           </div>
-          <Select label="Raison" value={cancelReason} onChange={setCancelReason} options={CANCEL_REASONS} />
+
+          <Select
+            label="Raison"
+            value={cancelReason}
+            onChange={(val) => {
+              setCancelReason(val);
+              // si l'utilisateur change la raison, on laisse l'auto-default agir
+              // tant qu'il n'a pas touché la checkbox manuellement
+            }}
+            options={CANCEL_REASONS}
+          />
+
           {cancelReason === "other" ? (
             <Input
               label="Précision"
@@ -1519,15 +1549,25 @@ export default function Pos() {
               placeholder="Ex. erreur de saisie"
             />
           ) : null}
+
           <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
               type="checkbox"
               checked={cancelRestock}
-              onChange={(e) => setCancelRestock(e.target.checked)}
+              onChange={(e) => {
+                setCancelRestock(e.target.checked);
+                setCancelRestockTouched(true); // ✅ NEW
+              }}
               className="h-4 w-4"
             />
             Produits revendables : réintégrer le stock
           </label>
+
+          {cancelReason === "breakage" ? (
+            <div className="text-xs text-[var(--muted)]">
+              Astuce : en cas de casse, laissez décoché pour enregistrer la perte (stock non réintégré).
+            </div>
+          ) : null}
         </div>
       </Drawer>
     </PageTransition>

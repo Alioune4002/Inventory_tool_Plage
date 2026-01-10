@@ -1,3 +1,4 @@
+// frontend/src/pages/Kds.jsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
@@ -468,6 +469,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
   const [cancelOrder, setCancelOrder] = useState(null);
   const [cancelReason, setCancelReason] = useState("cancelled");
   const [cancelText, setCancelText] = useState("");
+  const [cancelRestock, setCancelRestock] = useState(true); // ✅ NEW
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchKitchenFeed = useCallback(async () => {
@@ -513,6 +515,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
     setCancelOrder(order);
     setCancelReason("cancelled");
     setCancelText("");
+    setCancelRestock(true); // ✅ default: restock
     setCancelOpen(true);
   };
 
@@ -523,6 +526,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
       await api.post(`/api/kds/orders/${cancelOrder.id}/cancel/`, {
         reason_code: cancelReason,
         reason_text: cancelReason === "other" ? cancelText : "",
+        restock: cancelRestock, // ✅ NEW
       });
       pushToast?.({ message: "Commande annulée.", type: "success" });
       setCancelOpen(false);
@@ -644,8 +648,10 @@ export default function KdsHub({ defaultTab = "orders" }) {
             <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
               <li>Dans <b>Salle</b>, créez une commande et envoyez-la en cuisine.</li>
               <li>Dans <b>Cuisine</b>, marquez <b>Prêt</b> puis <b>Servi</b>.</li>
-              <li>Pour encaisser, utilisez la <b>Caisse</b> (tickets, stats, exports).</li>
-              <li>Le stock se met à jour automatiquement à l’encaissement via StockScan.</li>
+              <li>Pour encaisser, utilisez la <b>Caisse</b> (multi-paiements, ticket, exports).</li>
+              <li>
+                Annulation : choisissez <b>Restocker</b> (pas de perte) ou <b>Perte</b> (plat jeté).
+              </li>
             </ol>
           </Card>
         ) : null}
@@ -670,7 +676,12 @@ export default function KdsHub({ defaultTab = "orders" }) {
               Le KDS nécessite un service précis. Choisissez un service dans la barre du haut.
             </div>
             {serviceOptions.length ? (
-              <Select label="Service" value={serviceId} options={serviceOptions} onChange={selectService} />
+              <Select
+                label="Service"
+                value={serviceId}
+                options={serviceOptions}
+                onChange={selectService}
+              />
             ) : null}
           </Card>
         ) : null}
@@ -681,7 +692,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
             <div className="text-sm text-[var(--muted)]">
               Activez “Commandes & Cuisine” dans Paramètres pour ce service.
             </div>
-            <Button onClick={() => (window.location.href = "/app/settings")}>Ouvrir les paramètres</Button>
+            <Button onClick={() => (window.location.href = "/app/settings")}>
+              Ouvrir les paramètres
+            </Button>
           </Card>
         ) : null}
 
@@ -719,7 +732,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                     <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
                       Salle
                     </div>
-                    <div className="text-lg font-semibold text-[var(--text)]">Plats & menus</div>
+                    <div className="text-lg font-semibold text-[var(--text)]">
+                      Plats & menus
+                    </div>
                   </div>
                   <div className="text-xs text-[var(--muted)]">
                     {menuLoading ? "Chargement…" : `${filteredMenu.length} plat(s)`}
@@ -752,7 +767,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           className={[
                             "p-4 h-full transition rounded-3xl",
                             glassCard,
-                            disabled ? "opacity-60 cursor-not-allowed" : "hover:-translate-y-[1px]",
+                            disabled
+                              ? "opacity-60 cursor-not-allowed"
+                              : "hover:-translate-y-[1px]",
                           ].join(" ")}
                           hover={!disabled}
                         >
@@ -771,7 +788,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           </div>
 
                           <div className="mt-3 text-xs text-[var(--muted)]">
-                            {disabled ? "Indisponible (stock ou prix manquant)" : "Ajouter au panier"}
+                            {disabled
+                              ? "Indisponible (stock ou prix manquant)"
+                              : "Ajouter au panier"}
                           </div>
                         </Card>
                       </button>
@@ -841,7 +860,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                                 variant="secondary"
                                 size="sm"
                                 onClick={() =>
-                                  updateCartItem(item.menu_item_id, { qty: Math.max(item.qty - 1, 1) })
+                                  updateCartItem(item.menu_item_id, {
+                                    qty: Math.max(item.qty - 1, 1),
+                                  })
                                 }
                               >
                                 <Minus size={14} />
@@ -852,7 +873,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                               <Button
                                 variant="secondary"
                                 size="sm"
-                                onClick={() => updateCartItem(item.menu_item_id, { qty: item.qty + 1 })}
+                                onClick={() =>
+                                  updateCartItem(item.menu_item_id, { qty: item.qty + 1 })
+                                }
                               >
                                 <Plus size={14} />
                               </Button>
@@ -892,7 +915,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                     onChange={(e) => setOrderNote(e.target.value)}
                   />
 
-                  <div className={`rounded-3xl px-4 py-3 flex items-center justify-between ${glassCard}`}>
+                  <div
+                    className={`rounded-3xl px-4 py-3 flex items-center justify-between ${glassCard}`}
+                  >
                     <div className="text-sm text-[var(--muted)]">Total</div>
                     <div className="text-lg font-semibold text-[var(--text)]">
                       {formatMoney(totalAmount)} €
@@ -930,7 +955,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           onClick={() => handleOpenOrder(order.id)}
                           className="w-full text-left"
                         >
-                          <div className={`rounded-3xl p-3 flex items-center justify-between gap-3 ${glassCard}`}>
+                          <div
+                            className={`rounded-3xl p-3 flex items-center justify-between gap-3 ${glassCard}`}
+                          >
                             <div className="min-w-0">
                               <div className="text-sm font-semibold text-[var(--text)] truncate">
                                 {order.table?.name || "À emporter"}
@@ -1151,14 +1178,17 @@ export default function KdsHub({ defaultTab = "orders" }) {
         >
           <div className="space-y-3">
             <div className="text-sm text-[var(--muted)]">
-              Cette action enregistre une perte si la commande est déjà en cuisine.
+              Choisissez le motif, puis indiquez si on <b>restock</b> (annulation propre) ou si
+              c’est une <b>perte</b> (plat jeté).
             </div>
+
             <Select
               label="Motif"
               value={cancelReason}
               options={CANCEL_REASONS}
               onChange={(value) => setCancelReason(value)}
             />
+
             {cancelReason === "other" ? (
               <Input
                 label="Précision"
@@ -1167,10 +1197,33 @@ export default function KdsHub({ defaultTab = "orders" }) {
                 placeholder="Ex. Problème technique"
               />
             ) : null}
+
+            {/* ✅ NEW: Restock toggle */}
+            <div className={`rounded-3xl p-3 ${glassCard}`}>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={cancelRestock}
+                  onChange={(e) => setCancelRestock(e.target.checked)}
+                />
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-[var(--text)]">
+                    Restocker le stock
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {cancelRestock
+                      ? "Oui : annulation sans perte (stock rétabli si déjà décrémenté)."
+                      : "Non : perte enregistrée (stock non restocké)."}
+                  </div>
+                </div>
+              </label>
+            </div>
+
             {cancelOrder ? (
               <div className={`rounded-3xl p-3 text-xs text-[var(--muted)] ${glassCard}`}>
                 Commande : {cancelOrder.table?.name || "À emporter"} ·{" "}
-                {(STATUS_LABELS[cancelOrder.status] || cancelOrder.status)}
+                {STATUS_LABELS[cancelOrder.status] || cancelOrder.status}
               </div>
             ) : null}
           </div>
