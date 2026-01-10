@@ -15,6 +15,11 @@ import {
   XCircle,
   Store,
   CookingPot,
+  Wrench,
+  LayoutGrid,
+  ScanLine,
+  Check,
+  X,
 } from "lucide-react";
 
 import PageTransition from "../components/PageTransition";
@@ -32,8 +37,11 @@ import { isKdsEnabled } from "../lib/kdsAccess";
 import kdsLogo from "../assets/kds-logo.png";
 
 const POLL_MS = 2500;
-const KDS_GUIDE_STORAGE = "kds_hub_guide_v1";
-const KDS_POS_NUDGE_STORAGE = "kds_pos_nudge_v1";
+const KDS_GUIDE_STORAGE = "kds_hub_guide_v2_cash_ui";
+const KDS_POS_NUDGE_STORAGE = "kds_pos_nudge_v2_cash_ui";
+
+const HEADER_H = 64;
+const DOCK_H = 96;
 
 const STATUS_LABELS = {
   DRAFT: "Brouillon",
@@ -64,6 +72,53 @@ function formatTime(value) {
   return d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function useLandscapeLock(enabled = true) {
+  const [isPortrait, setIsPortrait] = useState(false);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const update = () => {
+      const portrait = window.matchMedia("(orientation: portrait)").matches;
+      setIsPortrait(portrait);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [enabled]);
+
+  const requestLock = async () => {
+    try {
+      if (screen?.orientation?.lock) {
+        await screen.orientation.lock("landscape");
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  return { isPortrait, requestLock };
+}
+
+function LandscapeOverlay({ open, onTry }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-xl flex items-center justify-center p-6">
+      <div className="w-full max-w-sm rounded-3xl border border-white/15 bg-white/10 p-5 text-center shadow-[0_20px_60px_rgba(0,0,0,0.35)]">
+        <div className="text-lg font-black text-white">Mode paysage recommandé</div>
+        <div className="mt-2 text-sm text-white/80">
+          Pour un KDS “poste cuisine”, passe l’écran en paysage.
+        </div>
+        <button
+          onClick={onTry}
+          className="mt-4 w-full rounded-2xl bg-white/20 border border-white/20 px-4 py-3 text-white font-semibold"
+        >
+          Passer en paysage
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const KdsLogo = () => {
   const [failed, setFailed] = useState(false);
 
@@ -85,16 +140,15 @@ const KdsLogo = () => {
   );
 };
 
-/**
- * Apple-like glass helpers (works in light/dark as long as your theme vars are good).
- * We keep it local to avoid touching Card component.
- */
-const glassCard =
-  "border border-[var(--border)]/70 bg-[var(--surface)]/70 backdrop-blur-xl shadow-[0_10px_30px_rgba(0,0,0,0.12)]";
+function GlassPanel({ className = "", children }) {
+  const glass =
+    "border border-[var(--border)]/70 bg-[var(--surface)]/65 backdrop-blur-xl shadow-[0_14px_40px_rgba(0,0,0,0.18)]";
+  return <div className={`${glass} rounded-3xl ${className}`}>{children}</div>;
+}
 
 function Segmented({ value, onChange, items }) {
   return (
-    <div className={`inline-flex items-center rounded-2xl p-1 ${glassCard}`}>
+    <div className="inline-flex items-center rounded-2xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-1">
       {items.map((it) => {
         const active = it.value === value;
         return (
@@ -103,7 +157,7 @@ function Segmented({ value, onChange, items }) {
             type="button"
             onClick={() => onChange(it.value)}
             className={[
-              "px-3 py-2 rounded-xl text-sm font-semibold transition",
+              "px-3 py-2 rounded-xl text-sm font-extrabold transition",
               active
                 ? "bg-[var(--accent)]/20 text-[var(--text)]"
                 : "text-[var(--muted)] hover:bg-[var(--accent)]/10",
@@ -123,13 +177,16 @@ function Segmented({ value, onChange, items }) {
 export default function KdsHub({ defaultTab = "orders" }) {
   const { serviceId, services, serviceProfile, selectService, tenant, logout } = useAuth();
   const pushToast = useToast();
+  const { isPortrait, requestLock } = useLandscapeLock(true);
 
   const isReadyService = Boolean(serviceId && String(serviceId) !== "all");
   const kdsActive = isKdsEnabled(serviceProfile);
 
   const [tab, setTab] = useState(defaultTab); // "orders" | "kitchen"
 
-  // ===== Shared UX / onboarding =====
+  const [toolsOpen, setToolsOpen] = useState(false);
+
+  // ===== Guide / onboarding =====
   const [showGuide, setShowGuide] = useState(() => {
     try {
       return localStorage.getItem(KDS_GUIDE_STORAGE) !== "1";
@@ -156,7 +213,6 @@ export default function KdsHub({ defaultTab = "orders" }) {
     }
   };
 
-  // POS nudge (discret, 1x)
   const [showPosNudge, setShowPosNudge] = useState(() => {
     try {
       return localStorage.getItem(KDS_POS_NUDGE_STORAGE) !== "1";
@@ -174,7 +230,6 @@ export default function KdsHub({ defaultTab = "orders" }) {
     }
   };
 
-  // ===== Service selection =====
   const serviceOptions = useMemo(
     () =>
       (services || []).map((s) => ({
@@ -184,7 +239,6 @@ export default function KdsHub({ defaultTab = "orders" }) {
     [services]
   );
 
-  // ===== Header CTAs =====
   const hasCoreAccess = Boolean(tenant && (serviceProfile || services?.length));
   const coreCta = hasCoreAccess
     ? { label: "Ouvrir StockScan", href: "/app/dashboard" }
@@ -207,7 +261,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
   }, []);
 
   // =========================
-  // ORDERS (Salle) state
+  // ORDERS (Salle)
   // =========================
   const [tables, setTables] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
@@ -228,6 +282,8 @@ export default function KdsHub({ defaultTab = "orders" }) {
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+
+  const menuScrollRef = useRef(null);
 
   const tableOptions = useMemo(() => {
     const list = tables.map((t) => ({ value: t.id, label: t.name }));
@@ -353,17 +409,10 @@ export default function KdsHub({ defaultTab = "orders" }) {
     } catch (error) {
       const data = error?.response?.data;
       if (data?.code === "missing_menu_price") {
-        pushToast?.({
-          message: "Certains plats n’ont pas de prix. Ajoutez-les au menu.",
-          type: "error",
-        });
+        pushToast?.({ message: "Certains plats n’ont pas de prix. Ajoutez-les au menu.", type: "error" });
         return null;
       }
-      if (data?.detail) {
-        pushToast?.({ message: data.detail, type: "error" });
-        return null;
-      }
-      pushToast?.({ message: "Impossible de créer la commande.", type: "error" });
+      pushToast?.({ message: data?.detail || "Impossible de créer la commande.", type: "error" });
       return null;
     }
   };
@@ -390,17 +439,13 @@ export default function KdsHub({ defaultTab = "orders" }) {
       await refreshOpenOrders();
       await refreshMenu();
 
-      // UX: bascule auto en cuisine + suggestion POS (discrète)
       setTab("kitchen");
       setShowPosNudge(true);
       return true;
     } catch (error) {
       const data = error?.response?.data;
       if (data?.code === "missing_recipe") {
-        pushToast?.({
-          message: "Recette manquante pour certains plats. Complétez les ingrédients.",
-          type: "error",
-        });
+        pushToast?.({ message: "Recette manquante pour certains plats. Complétez les ingrédients.", type: "error" });
       } else if (data?.code === "stock_insufficient") {
         pushToast?.({ message: "Stock insuffisant pour certains ingrédients.", type: "error" });
       } else {
@@ -460,7 +505,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
   };
 
   // =========================
-  // KITCHEN (Cuisine) state
+  // KITCHEN (Cuisine)
   // =========================
   const [kitchenOrders, setKitchenOrders] = useState([]);
   const [kitchenLoading, setKitchenLoading] = useState(false);
@@ -469,7 +514,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
   const [cancelOrder, setCancelOrder] = useState(null);
   const [cancelReason, setCancelReason] = useState("cancelled");
   const [cancelText, setCancelText] = useState("");
-  const [cancelRestock, setCancelRestock] = useState(true); // ✅ NEW
+  const [cancelRestock, setCancelRestock] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
   const fetchKitchenFeed = useCallback(async () => {
@@ -515,7 +560,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
     setCancelOrder(order);
     setCancelReason("cancelled");
     setCancelText("");
-    setCancelRestock(true); // ✅ default: restock
+    setCancelRestock(true);
     setCancelOpen(true);
   };
 
@@ -526,13 +571,13 @@ export default function KdsHub({ defaultTab = "orders" }) {
       await api.post(`/api/kds/orders/${cancelOrder.id}/cancel/`, {
         reason_code: cancelReason,
         reason_text: cancelReason === "other" ? cancelText : "",
-        restock: cancelRestock, // ✅ NEW
+        restock: cancelRestock,
       });
       pushToast?.({ message: "Commande annulée.", type: "success" });
       setCancelOpen(false);
       setCancelOrder(null);
       fetchKitchenFeed();
-      refreshOpenOrders(); // garde la cohérence côté salle
+      refreshOpenOrders();
       refreshMenu();
     } catch (error) {
       pushToast?.({
@@ -554,272 +599,127 @@ export default function KdsHub({ defaultTab = "orders" }) {
     return { sent, ready };
   }, [kitchenOrders]);
 
-  // ===== Guard states =====
   const serviceLabel = serviceProfile?.name || "";
+
+  // ===== Layout =====
+  const root = "h-[100dvh] overflow-hidden";
+  const mainH = `h-[calc(100dvh-${HEADER_H}px-${DOCK_H}px)]`;
+  const dock = "fixed left-0 right-0 bottom-0 z-40";
 
   return (
     <PageTransition>
       <Helmet>
         <title>KDS | StockScan</title>
-        <meta
-          name="description"
-          content="Hub KDS StockScan : prise de commande (salle) + cuisine en temps réel."
-        />
+        <meta name="description" content="KDS StockScan : prise de commande (salle) + cuisine en temps réel." />
       </Helmet>
 
-      <div className="space-y-4">
-        {/* HEADER glass */}
-        <Card className={`p-5 ${glassCard}`}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-3">
+      <LandscapeOverlay open={isPortrait} onTry={requestLock} />
+
+      <div className={root}>
+        {/* HEADER FIXE */}
+        <div className="sticky top-0 z-50">
+          <GlassPanel className="h-16 px-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <KdsLogo />
               <div className="min-w-0">
-                <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
-                  Hub Commandes & Cuisine
+                <div className="text-[11px] uppercase tracking-wide text-[var(--muted)] truncate">
+                  Hub Commandes & Cuisine · {serviceLabel ? `Service : ${serviceLabel}` : "Sélectionnez un service"}
                 </div>
-                <div className="text-2xl font-black text-[var(--text)] truncate">StockScan KDS</div>
-                <div className="text-sm text-[var(--muted)]">
-                  De la prise de commande à la préparation, en temps réel.
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="text-lg font-black text-[var(--text)] truncate">StockScan KDS</div>
+                  <Badge variant={tab === "orders" ? "info" : "success"}>
+                    {tab === "orders" ? "Salle" : "Cuisine"}
+                  </Badge>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col items-start lg:items-end gap-2">
-              {serviceLabel ? (
-                <div className="text-xs text-[var(--muted)]">Service actif : {serviceLabel}</div>
-              ) : null}
+            <div className="flex items-center gap-2">
+              <Segmented
+                value={tab}
+                onChange={setTab}
+                items={[
+                  { value: "orders", label: "Salle", icon: <ClipboardList className="h-4 w-4" /> },
+                  { value: "kitchen", label: "Cuisine", icon: <ChefHat className="h-4 w-4" /> },
+                ]}
+              />
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  as={Link}
-                  to="/pos/app"
-                  size="sm"
-                  variant="secondary"
-                  title="Ouvrir la caisse pour encaisser et imprimer les tickets"
-                >
-                  <Store className="h-4 w-4" />
-                  Ouvrir la caisse
-                </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setToolsOpen(true)}
+                title="Commandes ouvertes, guide, raccourcis…"
+              >
+                <Wrench className="h-4 w-4" />
+                Outils
+              </Button>
 
-                <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
-                  {coreCta.label}
-                </Button>
+              <Button as={Link} to="/pos/app" size="sm" variant="secondary" title="Ouvrir la caisse">
+                <Store className="h-4 w-4" />
+                POS
+              </Button>
 
-                <Button size="sm" variant="ghost" onClick={handleLogout}>
-                  Se déconnecter
-                </Button>
-              </div>
-            </div>
-          </div>
+              <Button as={Link} to={coreCta.href} size="sm" variant="secondary">
+                {coreCta.label}
+              </Button>
 
-          {/* Segmented switch */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <Segmented
-              value={tab}
-              onChange={setTab}
-              items={[
-                { value: "orders", label: "Salle", icon: <ClipboardList className="h-4 w-4" /> },
-                { value: "kitchen", label: "Cuisine", icon: <ChefHat className="h-4 w-4" /> },
-              ]}
-            />
-
-            {isReadyService && kdsActive ? (
-              <div className="flex items-center gap-2 text-xs text-[var(--muted)]">
-                <span className="inline-flex items-center gap-2 rounded-2xl px-3 py-2 border border-[var(--border)]/70 bg-[var(--surface)]/60 backdrop-blur">
-                  <CookingPot className="h-4 w-4" />
-                  Flux auto toutes les {Math.round(POLL_MS / 100) / 10}s
-                </span>
-              </div>
-            ) : null}
-          </div>
-        </Card>
-
-        {/* Guide */}
-        {showGuide && isReadyService && kdsActive ? (
-          <Card className={`p-5 space-y-3 ${glassCard}`}>
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-[var(--text)]">
-                Guide express — bien démarrer
-              </div>
-              <Button size="sm" variant="ghost" onClick={dismissGuide}>
-                Fermer
+              <Button size="sm" variant="ghost" onClick={handleLogout}>
+                Se déconnecter
               </Button>
             </div>
-            <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
-              <li>Dans <b>Salle</b>, créez une commande et envoyez-la en cuisine.</li>
-              <li>Dans <b>Cuisine</b>, marquez <b>Prêt</b> puis <b>Servi</b>.</li>
-              <li>Pour encaisser, utilisez la <b>Caisse</b> (multi-paiements, ticket, exports).</li>
-              <li>
-                Annulation : choisissez <b>Restocker</b> (pas de perte) ou <b>Perte</b> (plat jeté).
-              </li>
-            </ol>
-          </Card>
-        ) : null}
+          </GlassPanel>
+        </div>
 
-        {!showGuide && isReadyService && kdsActive ? (
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={reopenGuide}
-              className="text-xs font-semibold text-[var(--text)] underline underline-offset-4"
-            >
-              Relancer le guide
-            </button>
-          </div>
-        ) : null}
-
-        {/* Guards */}
-        {!isReadyService ? (
-          <Card className={`p-6 space-y-2 ${glassCard}`}>
-            <div className="text-lg font-semibold">Sélectionnez un service</div>
-            <div className="text-sm text-[var(--muted)]">
-              Le KDS nécessite un service précis. Choisissez un service dans la barre du haut.
-            </div>
-            {serviceOptions.length ? (
-              <Select
-                label="Service"
-                value={serviceId}
-                options={serviceOptions}
-                onChange={selectService}
-              />
-            ) : null}
-          </Card>
-        ) : null}
-
-        {isReadyService && !kdsActive ? (
-          <Card className={`p-6 space-y-2 ${glassCard}`}>
-            <div className="text-lg font-semibold">Module non activé</div>
-            <div className="text-sm text-[var(--muted)]">
-              Activez “Commandes & Cuisine” dans Paramètres pour ce service.
-            </div>
-            <Button onClick={() => (window.location.href = "/app/settings")}>
-              Ouvrir les paramètres
-            </Button>
-          </Card>
-        ) : null}
-
-        {/* POS nudge (discret, contextuel) */}
-        {isReadyService && kdsActive && showPosNudge ? (
-          <Card className={`p-4 ${glassCard}`}>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="text-sm text-[var(--text)]">
-                <span className="font-semibold">Pour aller encore plus vite :</span>{" "}
-                encaissez dans la caisse (multi-paiements, ticket, stats, exports PDF/Excel).
+        {/* MAIN */}
+        <div className={`${mainH} p-3`}>
+          {/* Guards */}
+          {!isReadyService ? (
+            <GlassPanel className="h-full p-6 flex flex-col justify-center items-center text-center">
+              <div className="text-xl font-black text-[var(--text)]">Sélectionnez un service</div>
+              <div className="mt-2 text-sm text-[var(--muted)]">
+                Le KDS nécessite un service précis.
               </div>
-              <div className="flex items-center gap-2">
-                <Button as={Link} to="/pos/app" size="sm">
-                  <Store className="h-4 w-4" />
-                  Ouvrir la caisse
-                </Button>
-                <Button variant="ghost" size="sm" onClick={dismissPosNudge}>
-                  Ok
+              {serviceOptions.length ? (
+                <div className="mt-4 w-full max-w-sm">
+                  <Select
+                    label="Service"
+                    value={serviceId}
+                    options={serviceOptions}
+                    onChange={selectService}
+                  />
+                </div>
+              ) : null}
+            </GlassPanel>
+          ) : isReadyService && !kdsActive ? (
+            <GlassPanel className="h-full p-6 flex flex-col justify-center items-center text-center">
+              <div className="text-xl font-black text-[var(--text)]">Module non activé</div>
+              <div className="mt-2 text-sm text-[var(--muted)]">
+                Activez “Commandes & Cuisine” dans Paramètres pour ce service.
+              </div>
+              <div className="mt-4">
+                <Button onClick={() => (window.location.href = "/app/settings")}>
+                  Ouvrir les paramètres
                 </Button>
               </div>
-            </div>
-          </Card>
-        ) : null}
-
-        {/* Content */}
-        {isReadyService && kdsActive ? (
-          tab === "orders" ? (
-            // =====================
-            // SALLE (ORDERS)
-            // =====================
-            <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-              <Card className={`p-6 space-y-4 ${glassCard}`}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
-                      Salle
-                    </div>
-                    <div className="text-lg font-semibold text-[var(--text)]">
-                      Plats & menus
-                    </div>
-                  </div>
-                  <div className="text-xs text-[var(--muted)]">
-                    {menuLoading ? "Chargement…" : `${filteredMenu.length} plat(s)`}
-                  </div>
+            </GlassPanel>
+          ) : tab === "orders" ? (
+            // ===== SALLE (fixed layout) =====
+            <div className="h-full grid grid-cols-[420px_minmax(0,1fr)_380px] gap-3">
+              {/* LEFT: panier commande (tableur) */}
+              <GlassPanel className="overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-[var(--border)]/70 flex items-center justify-between gap-2">
+                  <div className="font-extrabold text-[var(--text)]">Commande (Salle)</div>
+                  <Badge variant="info">{cartItems.length} ligne(s)</Badge>
                 </div>
 
-                <Input
-                  label="Recherche rapide"
-                  placeholder="Nom du plat"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  rightSlot={<Search className="h-4 w-4 text-[var(--muted)]" />}
-                />
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {filteredMenu.map((item) => {
-                    const available = Number(item.available_count ?? 0);
-                    const price = Number(item.price || 0);
-                    const disabled = available <= 0 || price <= 0;
-
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => addToCart(item)}
-                        disabled={disabled}
-                        className="text-left"
-                      >
-                        <Card
-                          className={[
-                            "p-4 h-full transition rounded-3xl",
-                            glassCard,
-                            disabled
-                              ? "opacity-60 cursor-not-allowed"
-                              : "hover:-translate-y-[1px]",
-                          ].join(" ")}
-                          hover={!disabled}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">
-                                {item.name}
-                              </div>
-                              <div className="text-xs text-[var(--muted)]">
-                                {price > 0 ? `${formatMoney(price)} €` : "Prix manquant"}
-                              </div>
-                            </div>
-                            <Badge variant={available > 0 ? "success" : "danger"}>
-                              Dispo {available}
-                            </Badge>
-                          </div>
-
-                          <div className="mt-3 text-xs text-[var(--muted)]">
-                            {disabled
-                              ? "Indisponible (stock ou prix manquant)"
-                              : "Ajouter au panier"}
-                          </div>
-                        </Card>
-                      </button>
-                    );
-                  })}
-                </div>
-              </Card>
-
-              <div className="space-y-4">
-                <Card className={`p-6 space-y-4 ${glassCard}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs uppercase tracking-wide text-[var(--muted)]">
-                        Salle
-                      </div>
-                      <div className="text-lg font-semibold">Table & commande</div>
-                    </div>
-                    <Badge variant="info">Prise de commande</Badge>
-                  </div>
-
+                <div className="px-4 py-3 border-b border-[var(--border)]/70">
                   <Select
                     label="Table"
                     value={selectedTableId}
                     options={tableOptions}
                     onChange={(val) => setSelectedTableId(String(val))}
-                    helper="Choisissez une table ou laissez “À emporter”."
                   />
-
-                  <div className="flex gap-2">
+                  <div className="mt-2 flex gap-2">
                     <Input
                       label="Nouvelle table"
                       placeholder="Ex. Terrasse 4"
@@ -837,76 +737,79 @@ export default function KdsHub({ defaultTab = "orders" }) {
                       </Button>
                     </div>
                   </div>
+                </div>
 
-                  <div className="space-y-3">
-                    {cartItems.length ? (
-                      cartItems.map((item) => (
-                        <div
-                          key={item.menu_item_id}
-                          className={`rounded-3xl p-3 flex flex-col gap-2 ${glassCard}`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">
-                                {item.name}
-                              </div>
-                              <div className="text-xs text-[var(--muted)]">
-                                {formatMoney(item.unit_price)} € / unité
-                              </div>
+                <div className="flex-1 overflow-auto p-3 space-y-3">
+                  {cartItems.length ? (
+                    cartItems.map((item) => (
+                      <div
+                        key={item.menu_item_id}
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-extrabold text-[var(--text)] truncate">
+                              {item.name}
                             </div>
-
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() =>
-                                  updateCartItem(item.menu_item_id, {
-                                    qty: Math.max(item.qty - 1, 1),
-                                  })
-                                }
-                              >
-                                <Minus size={14} />
-                              </Button>
-
-                              <div className="text-sm font-semibold">{item.qty}</div>
-
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() =>
-                                  updateCartItem(item.menu_item_id, { qty: item.qty + 1 })
-                                }
-                              >
-                                <Plus size={14} />
-                              </Button>
-
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeCartItem(item.menu_item_id)}
-                                title="Retirer"
-                              >
-                                <XCircle size={14} />
-                              </Button>
+                            <div className="text-xs text-[var(--muted)]">
+                              {formatMoney(item.unit_price)} € / unité
                             </div>
                           </div>
-
-                          <Input
-                            label="Note"
-                            placeholder="Ex. Sans oignons"
-                            value={item.notes}
-                            onChange={(e) =>
-                              updateCartItem(item.menu_item_id, { notes: e.target.value })
-                            }
-                          />
+                          <button
+                            type="button"
+                            onClick={() => removeCartItem(item.menu_item_id)}
+                            className="h-9 w-9 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl inline-flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)]"
+                            title="Retirer"
+                          >
+                            <XCircle size={16} />
+                          </button>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-[var(--muted)]">
-                        Ajoutez des plats pour créer une commande.
+
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() =>
+                                updateCartItem(item.menu_item_id, {
+                                  qty: Math.max(item.qty - 1, 1),
+                                })
+                              }
+                            >
+                              <Minus size={14} />
+                            </Button>
+
+                            <div className="h-9 min-w-[56px] px-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl flex items-center justify-center font-extrabold text-[var(--text)]">
+                              {item.qty}
+                            </div>
+
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => updateCartItem(item.menu_item_id, { qty: item.qty + 1 })}
+                            >
+                              <Plus size={14} />
+                            </Button>
+                          </div>
+
+                          <div className="text-sm font-extrabold text-[var(--text)]">
+                            {formatMoney(item.qty * item.unit_price)} €
+                          </div>
+                        </div>
+
+                        <Input
+                          label="Note"
+                          placeholder="Ex. Sans oignons"
+                          value={item.notes}
+                          onChange={(e) => updateCartItem(item.menu_item_id, { notes: e.target.value })}
+                        />
                       </div>
-                    )}
-                  </div>
+                    ))
+                  ) : (
+                    <div className="text-sm text-[var(--muted)]">
+                      Ajoutez des plats avec les touches au centre.
+                    </div>
+                  )}
 
                   <Input
                     label="Note commande"
@@ -914,35 +817,125 @@ export default function KdsHub({ defaultTab = "orders" }) {
                     value={orderNote}
                     onChange={(e) => setOrderNote(e.target.value)}
                   />
+                </div>
+              </GlassPanel>
 
-                  <div
-                    className={`rounded-3xl px-4 py-3 flex items-center justify-between ${glassCard}`}
-                  >
-                    <div className="text-sm text-[var(--muted)]">Total</div>
-                    <div className="text-lg font-semibold text-[var(--text)]">
-                      {formatMoney(totalAmount)} €
+              {/* CENTER: touches plats (horizontal) */}
+              <GlassPanel className="overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-[var(--border)]/70 flex items-center justify-between gap-2">
+                  <div className="font-extrabold text-[var(--text)]">Touches plats</div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {menuLoading ? "Chargement…" : `${filteredMenu.length} plat(s)`}
+                  </div>
+                </div>
+
+                <div className="px-4 py-3 border-b border-[var(--border)]/70">
+                  <div className="flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl px-3 py-2.5">
+                    <Search className="h-4 w-4 text-[var(--muted)]" />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Recherche live plat"
+                      className="w-full bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setQuery("")}
+                      className="rounded-2xl border border-[var(--border)] px-3 py-2 text-xs font-extrabold text-[var(--text)] hover:bg-[var(--accent)]/10"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-hidden">
+                  <div ref={menuScrollRef} dir="rtl" className="h-full overflow-x-auto overflow-y-hidden">
+                    <div className="h-full flex gap-3 p-3" dir="ltr">
+                      {menuLoading ? (
+                        <div className="h-full w-full grid place-items-center text-sm text-[var(--muted)]">
+                          Chargement…
+                        </div>
+                      ) : filteredMenu.length === 0 ? (
+                        <div className="h-full w-full grid place-items-center text-sm text-[var(--muted)]">
+                          Aucun plat.
+                        </div>
+                      ) : (
+                        filteredMenu.map((item) => {
+                          const available = Number(item.available_count ?? 0);
+                          const price = Number(item.price || 0);
+                          const disabled = available <= 0 || price <= 0;
+
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => addToCart(item)}
+                              disabled={disabled}
+                              className={[
+                                "w-[220px] min-w-[220px] h-full rounded-3xl border border-[var(--border)] bg-[var(--surface)]/60 backdrop-blur-xl p-4 text-left transition active:scale-[0.99]",
+                                disabled ? "opacity-60 cursor-not-allowed" : "hover:-translate-y-[1px]",
+                              ].join(" ")}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="text-sm font-extrabold text-[var(--text)] truncate">
+                                    {item.name}
+                                  </div>
+                                  <div className="mt-1 text-xs text-[var(--muted)]">
+                                    {price > 0 ? `${formatMoney(price)} €` : "Prix manquant"}
+                                  </div>
+                                </div>
+                                <Badge variant={available > 0 ? "success" : "danger"}>
+                                  Dispo {available}
+                                </Badge>
+                              </div>
+
+                              <div className="mt-4">
+                                <div className="inline-flex items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--accent)]/10 px-3 py-2 text-xs font-extrabold text-[var(--text)]">
+                                  <Plus className="h-4 w-4" />
+                                  Ajouter
+                                </div>
+                              </div>
+
+                              <div className="mt-3 text-[11px] text-[var(--muted)]">
+                                {disabled ? "Indisponible" : "Touch-friendly"}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
+                </div>
+              </GlassPanel>
 
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <Button variant="secondary" onClick={handleSaveDraft} loading={savingDraft}>
-                      <ClipboardList size={16} />
-                      Enregistrer
-                    </Button>
-                    <Button onClick={handleSend} loading={sending}>
-                      <Send size={16} />
-                      Envoyer en cuisine
-                    </Button>
-                  </div>
-                </Card>
+              {/* RIGHT: commandes ouvertes + actions */}
+              <GlassPanel className="overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-[var(--border)]/70 flex items-center justify-between gap-2">
+                  <div className="font-extrabold text-[var(--text)]">Commandes ouvertes</div>
+                  <Button variant="secondary" size="sm" onClick={refreshOpenOrders} disabled={ordersLoading}>
+                    Rafraîchir
+                  </Button>
+                </div>
 
-                <Card className={`p-6 space-y-3 ${glassCard}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="text-lg font-semibold">Commandes ouvertes</div>
-                    <Button variant="ghost" size="sm" onClick={refreshOpenOrders}>
-                      Rafraîchir
-                    </Button>
-                  </div>
+                <div className="flex-1 overflow-auto p-3 space-y-3">
+                  {showPosNudge ? (
+                    <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3">
+                      <div className="text-sm text-[var(--text)]">
+                        <span className="font-extrabold">Encaissement :</span>{" "}
+                        passe dans la caisse (POS) pour multi-paiements + tickets + stats.
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <Button as={Link} to="/pos/app" size="sm">
+                          <Store className="h-4 w-4" />
+                          Ouvrir POS
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={dismissPosNudge}>
+                          Ok
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {ordersLoading ? (
                     <div className="text-sm text-[var(--muted)]">Chargement…</div>
@@ -955,18 +948,16 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           onClick={() => handleOpenOrder(order.id)}
                           className="w-full text-left"
                         >
-                          <div
-                            className={`rounded-3xl p-3 flex items-center justify-between gap-3 ${glassCard}`}
-                          >
+                          <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3 flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="text-sm font-semibold text-[var(--text)] truncate">
+                              <div className="text-sm font-extrabold text-[var(--text)] truncate">
                                 {order.table?.name || "À emporter"}
                               </div>
                               <div className="text-xs text-[var(--muted)]">
                                 {STATUS_LABELS[order.status] || order.status}
                               </div>
                             </div>
-                            <div className="text-sm font-semibold">
+                            <div className="text-sm font-extrabold text-[var(--text)]">
                               {formatMoney(order.total_amount)} €
                             </div>
                           </div>
@@ -976,28 +967,26 @@ export default function KdsHub({ defaultTab = "orders" }) {
                   ) : (
                     <div className="text-sm text-[var(--muted)]">Aucune commande ouverte.</div>
                   )}
-                </Card>
-              </div>
+                </div>
+              </GlassPanel>
             </div>
           ) : (
-            // =====================
-            // CUISINE (KITCHEN)
-            // =====================
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card className={`p-6 space-y-3 ${glassCard}`}>
-                <div className="flex items-center justify-between">
-                  <div className="text-lg font-semibold">À préparer</div>
+            // ===== CUISINE (fixed layout) =====
+            <div className="h-full grid grid-cols-2 gap-3">
+              <GlassPanel className="overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-[var(--border)]/70 flex items-center justify-between">
+                  <div className="font-extrabold text-[var(--text)]">À préparer</div>
                   <Badge variant="info">{ordersByStatus.sent.length}</Badge>
                 </div>
 
-                {kitchenLoading ? (
-                  <div className="text-sm text-[var(--muted)]">Chargement…</div>
-                ) : ordersByStatus.sent.length ? (
-                  <div className="space-y-3">
-                    {ordersByStatus.sent.map((order) => (
-                      <div key={order.id} className={`rounded-3xl p-4 space-y-2 ${glassCard}`}>
+                <div className="flex-1 overflow-auto p-3 space-y-3">
+                  {kitchenLoading ? (
+                    <div className="text-sm text-[var(--muted)]">Chargement…</div>
+                  ) : ordersByStatus.sent.length ? (
+                    ordersByStatus.sent.map((order) => (
+                      <div key={order.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-4 space-y-2">
                         <div className="flex items-center justify-between">
-                          <div className="text-sm font-semibold">
+                          <div className="text-sm font-extrabold text-[var(--text)]">
                             {order.table?.name || "À emporter"}
                           </div>
                           <div className="text-xs text-[var(--muted)]">
@@ -1008,9 +997,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
 
                         <div className="space-y-1 text-sm">
                           {order.lines?.map((line) => (
-                            <div key={line.id} className="flex justify-between">
-                              <span>{line.menu_item_name}</span>
-                              <span>x {line.qty}</span>
+                            <div key={line.id} className="flex justify-between text-[var(--text)]">
+                              <span className="truncate">{line.menu_item_name}</span>
+                              <span className="font-extrabold">x {line.qty}</span>
                             </div>
                           ))}
                         </div>
@@ -1019,14 +1008,14 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           <div className="text-xs text-[var(--muted)]">Note : {order.note}</div>
                         ) : null}
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2 pt-2">
                           <Button
                             size="sm"
                             onClick={() => sendKitchenAction("ready", order.id)}
                             loading={actionLoading}
                           >
                             <CheckCircle2 size={16} />
-                            Marquer prêt
+                            Prêt
                           </Button>
                           <Button
                             variant="secondary"
@@ -1039,27 +1028,27 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           </Button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-[var(--muted)]">Aucune commande en attente.</div>
-                )}
-              </Card>
+                    ))
+                  ) : (
+                    <div className="text-sm text-[var(--muted)]">Aucune commande en attente.</div>
+                  )}
+                </div>
+              </GlassPanel>
 
-              <Card className={`p-6 space-y-3 ${glassCard}`}>
-                <div className="flex items-center justify-between">
-                  <div className="text-lg font-semibold">Prêt à servir</div>
+              <GlassPanel className="overflow-hidden flex flex-col">
+                <div className="px-4 py-3 border-b border-[var(--border)]/70 flex items-center justify-between">
+                  <div className="font-extrabold text-[var(--text)]">Prêt à servir</div>
                   <Badge variant="success">{ordersByStatus.ready.length}</Badge>
                 </div>
 
-                {kitchenLoading ? (
-                  <div className="text-sm text-[var(--muted)]">Chargement…</div>
-                ) : ordersByStatus.ready.length ? (
-                  <div className="space-y-3">
-                    {ordersByStatus.ready.map((order) => (
-                      <div key={order.id} className={`rounded-3xl p-4 space-y-2 ${glassCard}`}>
+                <div className="flex-1 overflow-auto p-3 space-y-3">
+                  {kitchenLoading ? (
+                    <div className="text-sm text-[var(--muted)]">Chargement…</div>
+                  ) : ordersByStatus.ready.length ? (
+                    ordersByStatus.ready.map((order) => (
+                      <div key={order.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-4 space-y-2">
                         <div className="flex items-center justify-between">
-                          <div className="text-sm font-semibold">
+                          <div className="text-sm font-extrabold text-[var(--text)]">
                             {order.table?.name || "À emporter"}
                           </div>
                           <div className="text-xs text-[var(--muted)]">
@@ -1069,21 +1058,21 @@ export default function KdsHub({ defaultTab = "orders" }) {
 
                         <div className="space-y-1 text-sm">
                           {order.lines?.map((line) => (
-                            <div key={line.id} className="flex justify-between">
-                              <span>{line.menu_item_name}</span>
-                              <span>x {line.qty}</span>
+                            <div key={line.id} className="flex justify-between text-[var(--text)]">
+                              <span className="truncate">{line.menu_item_name}</span>
+                              <span className="font-extrabold">x {line.qty}</span>
                             </div>
                           ))}
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-2 pt-2">
                           <Button
                             size="sm"
                             onClick={() => sendKitchenAction("served", order.id)}
                             loading={actionLoading}
                           >
                             <CheckCircle2 size={16} />
-                            Marquer servi
+                            Servi
                           </Button>
                           <Button
                             variant="secondary"
@@ -1096,15 +1085,166 @@ export default function KdsHub({ defaultTab = "orders" }) {
                           </Button>
                         </div>
                       </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-[var(--muted)]">Aucun plat prêt pour le service.</div>
-                )}
-              </Card>
+                    ))
+                  ) : (
+                    <div className="text-sm text-[var(--muted)]">Aucun plat prêt.</div>
+                  )}
+                </div>
+              </GlassPanel>
             </div>
-          )
+          )}
+        </div>
+
+        {/* BOTTOM DOCK FIXE */}
+        {isReadyService && kdsActive ? (
+          <div className={dock}>
+            <GlassPanel className="rounded-none border-x-0 border-b-0 px-4 py-3">
+              {tab === "orders" ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Total commande</div>
+                    <div className="text-3xl font-black text-[var(--text)] leading-none">
+                      {formatMoney(totalAmount)} €
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--muted)]">
+                      {cartItems.length ? `${cartItems.length} ligne(s)` : "Aucune ligne"}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" onClick={handleSaveDraft} loading={savingDraft} disabled={!cartItems.length}>
+                      <ClipboardList className="h-4 w-4" />
+                      Enregistrer
+                    </Button>
+                    <Button onClick={handleSend} loading={sending} disabled={!cartItems.length}>
+                      <Send className="h-4 w-4" />
+                      Envoyer cuisine
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Cuisine</div>
+                    <div className="text-lg font-black text-[var(--text)] leading-none">
+                      Flux auto toutes les {Math.round(POLL_MS / 100) / 10}s
+                    </div>
+                    <div className="mt-1 text-xs text-[var(--muted)]">
+                      À préparer : {ordersByStatus.sent.length} · Prêt : {ordersByStatus.ready.length}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button variant="secondary" onClick={fetchKitchenFeed} disabled={kitchenLoading}>
+                      <CookingPot className="h-4 w-4" />
+                      Rafraîchir
+                    </Button>
+                    <Button as={Link} to="/pos/app">
+                      <Store className="h-4 w-4" />
+                      POS
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </GlassPanel>
+          </div>
         ) : null}
+
+        {/* Outils drawer */}
+        <Drawer
+          open={toolsOpen}
+          onClose={() => setToolsOpen(false)}
+          title="Outils KDS"
+          footer={
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={refreshOpenOrders} disabled={ordersLoading}>
+                Rafraîchir commandes
+              </Button>
+              <Button variant="secondary" onClick={fetchKitchenFeed} disabled={kitchenLoading}>
+                Rafraîchir cuisine
+              </Button>
+              <Button variant="ghost" onClick={() => setToolsOpen(false)}>
+                Fermer
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {showGuide ? (
+              <Card className="p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm font-semibold text-[var(--text)]">
+                    Guide express
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={dismissGuide}>
+                    Fermer
+                  </Button>
+                </div>
+                <ol className="list-decimal pl-5 text-sm text-[var(--muted)] space-y-1">
+                  <li><b>Salle</b> : ajoute des plats, sélectionne une table, puis <b>Envoyer cuisine</b>.</li>
+                  <li><b>Cuisine</b> : passe <b>Prêt</b> puis <b>Servi</b>.</li>
+                  <li>Encaissement : utilise le <b>POS</b> (tickets, multi-paiements, stats).</li>
+                  <li>Annulation : choisis <b>Restocker</b> ou <b>Perte</b>.</li>
+                </ol>
+              </Card>
+            ) : (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={reopenGuide}
+                  className="text-xs font-semibold text-[var(--text)] underline underline-offset-4"
+                >
+                  Relancer le guide
+                </button>
+              </div>
+            )}
+
+            <Card className="p-4 space-y-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Raccourci POS</div>
+              <div className="text-sm text-[var(--muted)]">
+                Pour encaisser : multi-paiements + ticket + statistiques.
+              </div>
+              <Button as={Link} to="/pos/app">
+                <Store className="h-4 w-4" />
+                Ouvrir POS
+              </Button>
+            </Card>
+
+            <Card className="p-4 space-y-2">
+              <div className="text-sm font-semibold text-[var(--text)]">Commandes ouvertes</div>
+              {ordersLoading ? (
+                <div className="text-sm text-[var(--muted)]">Chargement…</div>
+              ) : openOrders.length ? (
+                <div className="space-y-2">
+                  {openOrders.map((order) => (
+                    <button
+                      key={order.id}
+                      type="button"
+                      onClick={() => handleOpenOrder(order.id)}
+                      className="w-full text-left"
+                    >
+                      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl px-3 py-2 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-sm font-extrabold text-[var(--text)] truncate">
+                            {order.table?.name || "À emporter"}
+                          </div>
+                          <div className="text-xs text-[var(--muted)]">
+                            {STATUS_LABELS[order.status] || order.status}
+                          </div>
+                        </div>
+                        <div className="text-sm font-extrabold text-[var(--text)]">
+                          {formatMoney(order.total_amount)} €
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-[var(--muted)]">Aucune.</div>
+              )}
+            </Card>
+          </div>
+        </Drawer>
 
         {/* Drawer détail commande (Salle) */}
         <Drawer
@@ -1122,8 +1262,8 @@ export default function KdsHub({ defaultTab = "orders" }) {
         >
           {selectedOrder ? (
             <div className="space-y-4">
-              <div className={`rounded-3xl p-4 space-y-1 ${glassCard}`}>
-                <div className="text-sm font-semibold">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-4 space-y-1">
+                <div className="text-sm font-extrabold text-[var(--text)]">
                   {selectedOrder.table?.name || "À emporter"}
                 </div>
                 <div className="text-xs text-[var(--muted)]">
@@ -1136,10 +1276,10 @@ export default function KdsHub({ defaultTab = "orders" }) {
 
               <div className="space-y-2">
                 {selectedOrder.lines?.map((line) => (
-                  <div key={line.id} className={`rounded-3xl p-3 ${glassCard}`}>
+                  <div key={line.id} className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3">
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold">{line.menu_item_name}</div>
-                      <div className="text-sm">x {line.qty}</div>
+                      <div className="text-sm font-extrabold text-[var(--text)]">{line.menu_item_name}</div>
+                      <div className="text-sm font-extrabold text-[var(--text)]">x {line.qty}</div>
                     </div>
                     {line.notes ? (
                       <div className="text-xs text-[var(--muted)] mt-1">{line.notes}</div>
@@ -1148,9 +1288,9 @@ export default function KdsHub({ defaultTab = "orders" }) {
                 ))}
               </div>
 
-              <div className={`rounded-3xl p-4 flex items-center justify-between ${glassCard}`}>
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-4 flex items-center justify-between">
                 <div className="text-sm text-[var(--muted)]">Total</div>
-                <div className="text-lg font-semibold">
+                <div className="text-lg font-black text-[var(--text)]">
                   {formatMoney(selectedOrder.total_amount)} €
                 </div>
               </div>
@@ -1198,8 +1338,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
               />
             ) : null}
 
-            {/* ✅ NEW: Restock toggle */}
-            <div className={`rounded-3xl p-3 ${glassCard}`}>
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3">
               <label className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1208,12 +1347,10 @@ export default function KdsHub({ defaultTab = "orders" }) {
                   onChange={(e) => setCancelRestock(e.target.checked)}
                 />
                 <div className="space-y-1">
-                  <div className="text-sm font-semibold text-[var(--text)]">
-                    Restocker le stock
-                  </div>
+                  <div className="text-sm font-extrabold text-[var(--text)]">Restocker le stock</div>
                   <div className="text-xs text-[var(--muted)]">
                     {cancelRestock
-                      ? "Oui : annulation sans perte (stock rétabli si déjà décrémenté)."
+                      ? "Oui : annulation sans perte (stock rétabli si décrémenté)."
                       : "Non : perte enregistrée (stock non restocké)."}
                   </div>
                 </div>
@@ -1221,7 +1358,7 @@ export default function KdsHub({ defaultTab = "orders" }) {
             </div>
 
             {cancelOrder ? (
-              <div className={`rounded-3xl p-3 text-xs text-[var(--muted)] ${glassCard}`}>
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)]/55 backdrop-blur-xl p-3 text-xs text-[var(--muted)]">
                 Commande : {cancelOrder.table?.name || "À emporter"} ·{" "}
                 {STATUS_LABELS[cancelOrder.status] || cancelOrder.status}
               </div>
